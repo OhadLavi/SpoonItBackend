@@ -1,0 +1,23 @@
+# Recipe Keeper App Tasks
+
+## UI Improvements
+- [x] Fix grid cards in home screen to make them less tall
+- [ ] Improve recipe detail screen layout
+- [ ] Enhance recipe form for better user experience
+
+## Functionality
+- [ ] Implement recipe extraction from URLs
+- [ ] Implement recipe scanning from images
+- [ ] Fix favorite toggle functionality
+- [ ] Improve recipe search functionality
+
+## Bug Fixes
+- [ ] Fix image loading issues
+- [ ] Resolve form submission problems
+- [ ] Fix navigation issues between screens
+
+## Testing
+- [ ] Test recipe creation flow
+- [ ] Test recipe editing flow
+- [ ] Test recipe deletion flow
+- [ ] Test favorite toggling 

@@ -1,0 +1,366 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:recipe_keeper/utils/helpers.dart';
+import 'package:recipe_keeper/providers/auth_provider.dart';
+import 'package:recipe_keeper/providers/recipe_provider.dart';
+import 'package:recipe_keeper/models/recipe.dart';
+import 'package:recipe_keeper/utils/translations.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:recipe_keeper/services/image_service.dart';
+
+class SearchScreen extends ConsumerStatefulWidget {
+  const SearchScreen({super.key});
+
+  @override
+  ConsumerState<SearchScreen> createState() => _SearchScreenState();
+}
+
+class _SearchScreenState extends ConsumerState<SearchScreen> {
+  final TextEditingController _searchController = TextEditingController();
+  bool _isSearching = false;
+  String _searchQuery = '';
+  List<Recipe> _searchResults = [];
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _performSearch() {
+    final query = _searchController.text.trim();
+    if (query.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _isSearching = true;
+      _searchQuery = query;
+    });
+
+    final userData = ref.read(userDataProvider).value;
+    if (userData != null) {
+      ref
+          .read(recipeStateProvider.notifier)
+          .searchRecipes(userData.id, query)
+          .then((_) {
+            ref.read(recipeStateProvider).whenData((recipes) {
+              setState(() {
+                _searchResults = recipes;
+                _isSearching = false;
+              });
+            });
+          })
+          .catchError((error) {
+            setState(() {
+              _isSearching = false;
+              _searchResults = [];
+            });
+            Helpers.showSnackBar(
+              context,
+              AppTranslations.getText(
+                ref,
+                'error_searching_recipes',
+              ).replaceAll('{error}', error.toString()),
+              isError: true,
+            );
+          });
+    }
+  }
+
+  void _clearSearch() {
+    _searchController.clear();
+    setState(() {
+      _searchQuery = '';
+      _searchResults = [];
+    });
+    ref.read(recipeStateProvider.notifier).clearSearchResults();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final recipesState = ref.watch(recipeStateProvider);
+
+    return Scaffold(
+      appBar: AppBar(title: Text(AppTranslations.getText(ref, 'search'))),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: AppTranslations.getText(ref, 'search_recipe'),
+                prefixIcon: const Icon(Icons.search),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                filled: true,
+                fillColor: AppTheme.backgroundColor,
+              ),
+              onSubmitted: (_) => _performSearch(),
+              textInputAction: TextInputAction.search,
+            ),
+          ),
+          recipesState.when(
+            loading:
+                () => const Expanded(
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+            error:
+                (error, stackTrace) => Expanded(
+                  child: Center(
+                    child: Text(
+                      AppTranslations.getText(
+                        ref,
+                        'error_searching_recipes',
+                      ).replaceAll('{error}', error.toString()),
+                    ),
+                  ),
+                ),
+            data: (recipes) {
+              if (_isSearching) {
+                return const Expanded(
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              } else if (_searchQuery.isNotEmpty && _searchResults.isEmpty) {
+                return Expanded(
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.search_off,
+                          size: 80,
+                          color: AppTheme.secondaryTextColor.withOpacity(0.5),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          AppTranslations.getText(
+                            ref,
+                            'no_results_found',
+                          ).replaceAll('{query}', _searchQuery),
+                          style: const TextStyle(
+                            fontFamily: 'Poppins',
+                            fontSize: 18,
+                            fontWeight: FontWeight.w500,
+                            color: AppTheme.textColor,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          AppTranslations.getText(ref, 'try_different_search'),
+                          style: const TextStyle(
+                            fontFamily: 'Poppins',
+                            fontSize: 16,
+                            color: AppTheme.secondaryTextColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              } else if (_searchQuery.isEmpty) {
+                return Expanded(
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.search,
+                          size: 80,
+                          color: AppTheme.primaryColor.withOpacity(0.3),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          AppTranslations.getText(ref, 'search_for_recipes'),
+                          style: const TextStyle(
+                            fontFamily: 'Poppins',
+                            fontSize: 18,
+                            fontWeight: FontWeight.w500,
+                            color: AppTheme.textColor,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          AppTranslations.getText(ref, 'find_recipes_by'),
+                          style: const TextStyle(
+                            fontFamily: 'Poppins',
+                            fontSize: 16,
+                            color: AppTheme.secondaryTextColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              } else {
+                return Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _searchResults.length,
+                    itemBuilder: (context, index) {
+                      final recipe = _searchResults[index];
+                      return GestureDetector(
+                        onTap: () {
+                          context.push('/recipe/${recipe.id}');
+                        },
+                        child: Card(
+                          margin: const EdgeInsets.only(bottom: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 2,
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Row(
+                              children: [
+                                // Recipe Image
+                                if (recipe.imageUrl.isNotEmpty)
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: SizedBox(
+                                      width: 80,
+                                      height: 80,
+                                      child: CachedNetworkImage(
+                                        imageUrl: ImageService()
+                                            .getCorsProxiedUrl(recipe.imageUrl),
+                                        fit: BoxFit.cover,
+                                        placeholder:
+                                            (context, url) => const Center(
+                                              child: CircularProgressIndicator(
+                                                color: AppTheme.primaryColor,
+                                              ),
+                                            ),
+                                        errorWidget: (context, url, error) {
+                                          return Container(
+                                            color: AppTheme.primaryColor
+                                                .withOpacity(0.1),
+                                            child: const Center(
+                                              child: Icon(
+                                                Icons
+                                                    .image_not_supported_outlined,
+                                                color: AppTheme.primaryColor,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  )
+                                else
+                                  Container(
+                                    width: 80,
+                                    height: 80,
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.primaryColor.withOpacity(
+                                        0.1,
+                                      ),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Center(
+                                      child: Icon(
+                                        Icons.restaurant_menu,
+                                        color: AppTheme.primaryColor,
+                                        size: 32,
+                                      ),
+                                    ),
+                                  ),
+                                const SizedBox(width: 16),
+
+                                // Recipe Details
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        recipe.title,
+                                        style: const TextStyle(
+                                          fontFamily: 'Poppins',
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                          color: AppTheme.textColor,
+                                        ),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        recipe.description,
+                                        style: const TextStyle(
+                                          fontFamily: 'Poppins',
+                                          fontSize: 14,
+                                          color: AppTheme.secondaryTextColor,
+                                        ),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 8),
+                                      if (recipe.tags.isNotEmpty)
+                                        Wrap(
+                                          spacing: 8,
+                                          runSpacing: 4,
+                                          children:
+                                              recipe.tags
+                                                  .take(3)
+                                                  .map(
+                                                    (tag) => Container(
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 8,
+                                                            vertical: 4,
+                                                          ),
+                                                      decoration: BoxDecoration(
+                                                        color: AppTheme
+                                                            .primaryColor
+                                                            .withOpacity(0.1),
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              4,
+                                                            ),
+                                                      ),
+                                                      child: Text(
+                                                        tag,
+                                                        style: const TextStyle(
+                                                          fontFamily: 'Poppins',
+                                                          fontSize: 12,
+                                                          color:
+                                                              AppTheme
+                                                                  .primaryColor,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  )
+                                                  .toList(),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                );
+              }
+            },
+          ),
+        ],
+      ),
+      floatingActionButton:
+          _searchQuery.isNotEmpty
+              ? FloatingActionButton(
+                onPressed: _clearSearch,
+                backgroundColor: AppTheme.primaryColor,
+                mini: true,
+                child: const Icon(Icons.clear),
+              )
+              : null,
+    );
+  }
+}
