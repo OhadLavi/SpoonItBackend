@@ -4,7 +4,7 @@ class AppRoutes {
   static const String register = '/register';
   static const String home = '/home';
   static const String search = '/search';
-  static const String favorites = '/favorites';
+  static const String myRecipes = '/my-recipes';
   static const String profile = '/profile';
   static const String recipeDetail = '/recipe/:id';
   static const String addRecipe = '/add-recipe';
@@ -37,19 +37,6 @@ class AppConstants {
     'Vegan',
     'Gluten-Free',
     'Dairy-Free',
-    'Keto',
-    'Paleo',
-    'Low-Carb',
-    'High-Protein',
-    'Quick & Easy',
-    'Slow Cooker',
-    'Instant Pot',
-    'Grill',
-    'Bake',
-    'Fry',
-    'Roast',
-    'Boil',
-    'Steam',
     'Other',
   ];
 

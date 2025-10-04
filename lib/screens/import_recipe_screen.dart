@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:recipe_keeper/services/recipe_extraction_service.dart';
 import 'package:recipe_keeper/utils/translations.dart';
 import 'package:recipe_keeper/widgets/recipe_form.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:recipe_keeper/widgets/app_header.dart';
+import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
+import 'package:recipe_keeper/models/recipe.dart';
 
 class ImportRecipeScreen extends ConsumerStatefulWidget {
   const ImportRecipeScreen({super.key});
@@ -42,12 +45,11 @@ class _ImportRecipeScreenState extends ConsumerState<ImportRecipeScreen> {
       final recipe = await _recipeExtractionService.extractRecipeFromUrl(url);
       if (!mounted) return;
 
-      // Navigate to the recipe form with the extracted recipe
+      // Navigate to the recipe form with the extracted recipe wrapped in proper screen
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder:
-              (context) => RecipeForm(initialRecipe: recipe, isEditing: false),
+          builder: (context) => _RecipeFormScreen(recipe: recipe),
         ),
       );
     } catch (e) {
@@ -66,143 +68,177 @@ class _ImportRecipeScreenState extends ConsumerState<ImportRecipeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
     return Scaffold(
-      appBar: AppBar(
-        title: Text(AppTranslations.getText(ref, 'import_recipe')),
-      ),
-      body: Center(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                // Icon and title
-                Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryColor.withOpacity(0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.link_rounded,
-                    size: 40,
-                    color: AppTheme.primaryColor,
-                  ),
+      backgroundColor: Colors.white,
+      body: Column(
+        children: [
+          // Header with coral background
+          const AppHeader(title: 'הוספת מתכון'),
+          // Main content area
+          Expanded(
+            child: Container(
+              color: Colors.white,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24.0,
+                  vertical: 32.0,
                 ),
-                const SizedBox(height: 24),
-                Text(
-                  AppTranslations.getText(ref, 'paste_recipe_url'),
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : AppTheme.textColor,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  AppTranslations.getText(ref, 'import_recipe_description'),
-                  style: TextStyle(
-                    fontSize: 16,
-                    color:
-                        isDark ? Colors.white70 : AppTheme.secondaryTextColor,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 32),
-                // URL input field
-                Container(
-                  decoration: BoxDecoration(
-                    color:
-                        isDark ? Colors.white.withOpacity(0.05) : Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      if (!isDark)
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
-                          blurRadius: 10,
-                          offset: const Offset(0, 2),
-                        ),
-                    ],
-                  ),
-                  child: TextField(
-                    controller: _urlController,
-                    decoration: InputDecoration(
-                      hintText: AppTranslations.getText(
-                        ref,
-                        'enter_recipe_url',
+                child: Column(
+                  children: [
+                    // URL input field at the top
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 10,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
                       ),
-                      errorText: _error,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: BorderSide.none,
-                      ),
-                      filled: true,
-                      fillColor: Colors.transparent,
-                      prefixIcon: const Icon(
-                        Icons.link,
-                        color: AppTheme.primaryColor,
-                      ),
-                      hintStyle: TextStyle(
-                        color:
-                            isDark
-                                ? Colors.white38
-                                : AppTheme.secondaryTextColor,
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 16,
-                      ),
-                    ),
-                    style: TextStyle(
-                      color: isDark ? Colors.white : AppTheme.textColor,
-                      fontSize: 16,
-                    ),
-                    onSubmitted: (_) => _importRecipe(),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                // Import button
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _importRecipe,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primaryColor,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      elevation: 0,
-                    ),
-                    child:
-                        _isLoading
-                            ? const SizedBox(
-                              height: 24,
-                              width: 24,
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 2,
-                              ),
-                            )
-                            : Text(
-                              AppTranslations.getText(ref, 'import_recipe'),
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                              ),
+                      child: TextField(
+                        controller: _urlController,
+                        decoration: InputDecoration(
+                          hintText: 'הדבק לינק',
+                          errorText: _error,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                          filled: true,
+                          fillColor: Colors.transparent,
+                          prefixIcon: GestureDetector(
+                            onTap: _importRecipe,
+                            child: const Icon(
+                              Icons.content_paste,
+                              color: Colors.grey,
                             ),
-                  ),
+                          ),
+                          hintStyle: const TextStyle(color: Colors.grey),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 16,
+                          ),
+                        ),
+                        style: const TextStyle(
+                          color: Colors.black,
+                          fontSize: 16,
+                        ),
+                        onSubmitted: (_) => _importRecipe(),
+                      ),
+                    ),
+                    if (_isLoading) ...[
+                      const SizedBox(height: 32),
+                      // Loading state with cooking pot icon
+                      const Text(
+                        'טוען מתכון',
+                        style: TextStyle(
+                          color: Color(0xFF8B4513), // Dark brown/maroon
+                          fontSize: 18,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      // Cooking pot icon
+                      Container(
+                        width: 60,
+                        height: 60,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF8B4513),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.restaurant,
+                          color: Colors.white,
+                          size: 30,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
+          // Bottom navigation bar
+          const AppBottomNav(currentIndex: -1),
+        ],
+      ),
+    );
+  }
+}
+
+// Wrapper screen for RecipeForm to include header and footer
+class _RecipeFormScreen extends ConsumerStatefulWidget {
+  final Recipe recipe;
+
+  const _RecipeFormScreen({required this.recipe});
+
+  @override
+  ConsumerState<_RecipeFormScreen> createState() => _RecipeFormScreenState();
+}
+
+class _RecipeFormScreenState extends ConsumerState<_RecipeFormScreen> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Simple header bar
+            Container(
+              height: 60,
+              decoration: const BoxDecoration(color: Color(0xFFFF7E6B)),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_forward, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  Expanded(
+                    child: Text(
+                      'הוספת מתכון',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'Heebo',
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  const SizedBox(width: 48), // Balance the back button
+                ],
+              ),
+            ),
+            // Recipe form
+            Expanded(
+              child: RecipeForm(
+                initialRecipe: widget.recipe,
+                isEditing: false,
+                onSubmit: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'המתכון נשמר בהצלחה!',
+                        style: TextStyle(
+                          fontFamily: 'Heebo',
+                          color: Colors.white,
+                        ),
+                      ),
+                      backgroundColor: Color(0xFFFF7E6B),
+                    ),
+                  );
+                  Navigator.pop(context);
+                  context.go('/my-recipes');
+                },
+              ),
+            ),
+            // Bottom navigation
+            const AppBottomNav(currentIndex: -1),
+          ],
         ),
       ),
     );

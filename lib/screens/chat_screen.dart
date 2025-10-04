@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:recipe_keeper/services/chat_service.dart';
 import 'package:recipe_keeper/providers/settings_provider.dart';
 import 'package:recipe_keeper/utils/translations.dart';
+import 'package:recipe_keeper/widgets/app_header.dart';
+import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({super.key});
@@ -66,19 +68,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     return Directionality(
       textDirection: isHebrew ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
-        appBar: AppBar(
-          title: Text(AppTranslations.getText(ref, 'chat_title')),
-          actions: [
-            IconButton(
-              icon: Icon(isHebrew ? Icons.language : Icons.translate),
-              onPressed: () {
-                ref.read(settingsProvider.notifier).toggleLanguage();
-              },
-            ),
-          ],
-        ),
         body: Column(
           children: [
+            const AppHeader(title: 'צ\'אט'),
             Expanded(
               child:
                   _messages.isEmpty
@@ -106,7 +98,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const CircularProgressIndicator(),
+                    const CircularProgressIndicator(color: Color(0xFFFF7E6B)),
                     const SizedBox(width: 8),
                     Text(AppTranslations.getText(ref, 'loading')),
                   ],
@@ -151,6 +143,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 ],
               ),
             ),
+            const AppBottomNav(currentIndex: -1),
           ],
         ),
       ),

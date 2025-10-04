@@ -4,6 +4,8 @@ import 'package:recipe_keeper/utils/app_theme.dart';
 import 'package:recipe_keeper/utils/translations.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:recipe_keeper/widgets/app_header.dart';
+import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
 
 class CustomRecipeScreen extends ConsumerStatefulWidget {
   const CustomRecipeScreen({super.key});
@@ -59,64 +61,77 @@ class _CustomRecipeScreenState extends ConsumerState<CustomRecipeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(AppTranslations.getText(ref, 'custom_recipe')),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              AppTranslations.getText(ref, 'enter_your_groceries'),
-              style: AppTheme.headingStyle,
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _groceriesController,
-              decoration: InputDecoration(
-                hintText: AppTranslations.getText(ref, 'groceries_hint'),
-                border: const OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              AppTranslations.getText(ref, 'what_do_you_want'),
-              style: AppTheme.headingStyle,
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _descriptionController,
-              decoration: InputDecoration(
-                hintText: AppTranslations.getText(
-                  ref,
-                  'recipe_description_hint',
-                ),
-                border: const OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Center(
-              child: ElevatedButton(
-                onPressed: _loading ? null : _generateRecipe,
-                child:
-                    _loading
-                        ? const CircularProgressIndicator()
-                        : Text(AppTranslations.getText(ref, 'generate_recipe')),
-              ),
-            ),
-            const SizedBox(height: 24),
-            if (_generatedRecipe.isNotEmpty)
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Text(
-                    _generatedRecipe,
-                    style: const TextStyle(fontFamily: 'Poppins', fontSize: 14),
+      backgroundColor: Colors.white,
+      body: Column(
+        children: [
+          const AppHeader(title: 'מתכון מותאם'),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    AppTranslations.getText(ref, 'enter_your_groceries'),
+                    style: AppTheme.headingStyle,
                   ),
-                ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _groceriesController,
+                    decoration: InputDecoration(
+                      hintText: AppTranslations.getText(ref, 'groceries_hint'),
+                      border: const OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    AppTranslations.getText(ref, 'what_do_you_want'),
+                    style: AppTheme.headingStyle,
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _descriptionController,
+                    decoration: InputDecoration(
+                      hintText: AppTranslations.getText(
+                        ref,
+                        'recipe_description_hint',
+                      ),
+                      border: const OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Center(
+                    child: ElevatedButton(
+                      onPressed: _loading ? null : _generateRecipe,
+                      child:
+                          _loading
+                              ? const CircularProgressIndicator(
+                                color: Color(0xFFFF7E6B),
+                              )
+                              : Text(
+                                AppTranslations.getText(ref, 'generate_recipe'),
+                              ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  if (_generatedRecipe.isNotEmpty)
+                    Expanded(
+                      child: SingleChildScrollView(
+                        child: Text(
+                          _generatedRecipe,
+                          style: const TextStyle(
+                            fontFamily: 'Poppins',
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
-          ],
-        ),
+            ),
+          ),
+          const AppBottomNav(currentIndex: -1),
+        ],
       ),
     );
   }

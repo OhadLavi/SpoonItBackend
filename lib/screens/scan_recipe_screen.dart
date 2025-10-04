@@ -6,6 +6,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:recipe_keeper/utils/translations.dart';
 import 'package:recipe_keeper/models/recipe.dart';
 import 'package:recipe_keeper/widgets/recipe_form.dart';
+import 'package:recipe_keeper/widgets/app_header.dart';
+import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
+import 'package:go_router/go_router.dart';
 
 class ScanRecipeScreen extends ConsumerStatefulWidget {
   const ScanRecipeScreen({super.key});
@@ -129,14 +132,12 @@ class _ScanRecipeScreenState extends ConsumerState<ScanRecipeScreen> {
         tags: ['sample', 'placeholder'],
       );
 
-      // Navigate to the recipe form
+      // Navigate to the recipe form wrapped in proper screen
       if (mounted) {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder:
-                (context) =>
-                    RecipeForm(initialRecipe: recipe, isEditing: false),
+            builder: (context) => _RecipeFormScreen(recipe: recipe),
           ),
         );
       }
@@ -159,81 +160,96 @@ class _ScanRecipeScreenState extends ConsumerState<ScanRecipeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(AppTranslations.getText(ref, 'scan_recipe'))),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Image preview area
-            InkWell(
-              onTap: _isProcessing ? null : _pickImage,
-              child: Container(
-                width: 300,
-                height: 400,
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child:
-                    _hasImage
-                        ? _buildImagePreview()
-                        : Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.cloud_upload,
-                              size: 60,
-                              color: Colors.grey[600],
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              AppTranslations.getText(ref, 'drop_image_here'),
-                              style: TextStyle(color: Colors.grey[600]),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
-              ),
-            ),
-            const SizedBox(height: 24),
-            Text(_statusMessage, style: const TextStyle(fontSize: 18)),
-            const SizedBox(height: 16),
-            if (_isProcessing)
-              const CircularProgressIndicator()
-            else if (!_hasImage)
-              ElevatedButton.icon(
-                onPressed: _pickImage,
-                icon: const Icon(Icons.add_photo_alternate),
-                label: Text(AppTranslations.getText(ref, 'select_image')),
-              )
-            else
-              Row(
+      backgroundColor: Colors.white,
+      body: Column(
+        children: [
+          const AppHeader(title: 'סריקת מתכון'),
+          Expanded(
+            child: Center(
+              child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  TextButton.icon(
-                    onPressed: _pickImage,
-                    icon: const Icon(Icons.refresh),
-                    label: Text(AppTranslations.getText(ref, 'change_image')),
+                  // Image preview area
+                  InkWell(
+                    onTap: _isProcessing ? null : _pickImage,
+                    child: Container(
+                      width: 300,
+                      height: 400,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child:
+                          _hasImage
+                              ? _buildImagePreview()
+                              : Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.cloud_upload,
+                                    size: 60,
+                                    color: Colors.grey[600],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    AppTranslations.getText(
+                                      ref,
+                                      'drop_image_here',
+                                    ),
+                                    style: TextStyle(color: Colors.grey[600]),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ],
+                              ),
+                    ),
                   ),
-                  const SizedBox(width: 16),
-                  ElevatedButton.icon(
-                    onPressed: _scanRecipe,
-                    icon: const Icon(Icons.document_scanner),
-                    label: Text(AppTranslations.getText(ref, 'scan_image')),
+                  const SizedBox(height: 24),
+                  Text(_statusMessage, style: const TextStyle(fontSize: 18)),
+                  const SizedBox(height: 16),
+                  if (_isProcessing)
+                    const CircularProgressIndicator(color: Color(0xFFFF7E6B))
+                  else if (!_hasImage)
+                    ElevatedButton.icon(
+                      onPressed: _pickImage,
+                      icon: const Icon(Icons.add_photo_alternate),
+                      label: Text(AppTranslations.getText(ref, 'select_image')),
+                    )
+                  else
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        TextButton.icon(
+                          onPressed: _pickImage,
+                          icon: const Icon(Icons.refresh),
+                          label: Text(
+                            AppTranslations.getText(ref, 'change_image'),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        ElevatedButton.icon(
+                          onPressed: _scanRecipe,
+                          icon: const Icon(Icons.document_scanner),
+                          label: Text(
+                            AppTranslations.getText(ref, 'scan_image'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  const SizedBox(height: 16),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: Text(
+                      AppTranslations.getText(ref, 'scan_recipe_instructions'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.grey),
+                    ),
                   ),
                 ],
               ),
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Text(
-                AppTranslations.getText(ref, 'scan_recipe_instructions'),
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.grey),
-              ),
             ),
-          ],
-        ),
+          ),
+          const AppBottomNav(currentIndex: -1),
+        ],
       ),
     );
   }
@@ -261,5 +277,81 @@ class _ScanRecipeScreenState extends ConsumerState<ScanRecipeScreen> {
       );
     }
     return Container();
+  }
+}
+
+// Wrapper screen for RecipeForm to include header and footer
+class _RecipeFormScreen extends ConsumerStatefulWidget {
+  final Recipe recipe;
+
+  const _RecipeFormScreen({required this.recipe});
+
+  @override
+  ConsumerState<_RecipeFormScreen> createState() => _RecipeFormScreenState();
+}
+
+class _RecipeFormScreenState extends ConsumerState<_RecipeFormScreen> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Simple header bar
+            Container(
+              height: 60,
+              decoration: const BoxDecoration(color: Color(0xFFFF7E6B)),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_forward, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  Expanded(
+                    child: Text(
+                      'הוספת מתכון',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'Heebo',
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  const SizedBox(width: 48), // Balance the back button
+                ],
+              ),
+            ),
+            // Recipe form
+            Expanded(
+              child: RecipeForm(
+                initialRecipe: widget.recipe,
+                isEditing: false,
+                onSubmit: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'המתכון נשמר בהצלחה!',
+                        style: TextStyle(
+                          fontFamily: 'Heebo',
+                          color: Colors.white,
+                        ),
+                      ),
+                      backgroundColor: Color(0xFFFF7E6B),
+                    ),
+                  );
+                  Navigator.pop(context);
+                  context.go('/my-recipes');
+                },
+              ),
+            ),
+            // Bottom navigation
+            const AppBottomNav(currentIndex: -1),
+          ],
+        ),
+      ),
+    );
   }
 }

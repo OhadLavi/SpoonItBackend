@@ -105,11 +105,6 @@
       
       // Apply width constraints after Flutter loads
       window.addEventListener('flutter-first-frame', function() {
-        // Remove loading indicator
-        if (loading) {
-          document.body.removeChild(loading);
-        }
-        
         // Apply width constraints
         setTimeout(function() {
           const glassPane = document.querySelector('flt-glass-pane');

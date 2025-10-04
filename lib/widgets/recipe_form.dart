@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:recipe_keeper/services/image_service.dart';
+import 'package:recipe_keeper/utils/app_theme.dart';
 
 class RecipeForm extends ConsumerStatefulWidget {
   final Recipe? initialRecipe;
@@ -419,198 +420,218 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
       AppTranslations.getText(ref, 'notes'),
     ];
 
-    return DefaultTabController(
-      length: tabTitles.length,
-      child: Builder(
-        builder: (context) {
-          final TabController tabController = DefaultTabController.of(context);
+    return Material(
+      color: Colors.transparent,
+      child: DefaultTabController(
+        length: tabTitles.length,
+        child: Builder(
+          builder: (context) {
+            final TabController tabController = DefaultTabController.of(
+              context,
+            );
 
-          // Function to validate all tabs and navigate to the first tab with errors
-          void validateAllTabs() {
-            if (!_formKey.currentState!.validate()) {
-              // Check which tab has errors and navigate to it
-              if (_titleController.text.isEmpty) {
-                // Error in basic info tab
-                tabController.animateTo(0);
-              } else if (_ingredientControllers.isEmpty ||
-                  _ingredientControllers.every((c) => c.text.trim().isEmpty)) {
-                // Error in ingredients tab
-                tabController.animateTo(2);
-              } else if (_instructionControllers.isEmpty ||
-                  _instructionControllers.every((c) => c.text.trim().isEmpty)) {
-                // Error in instructions tab
-                tabController.animateTo(3);
+            // Function to validate all tabs and navigate to the first tab with errors
+            void validateAllTabs() {
+              if (!_formKey.currentState!.validate()) {
+                // Check which tab has errors and navigate to it
+                if (_titleController.text.isEmpty) {
+                  // Error in basic info tab
+                  tabController.animateTo(0);
+                } else if (_ingredientControllers.isEmpty ||
+                    _ingredientControllers.every(
+                      (c) => c.text.trim().isEmpty,
+                    )) {
+                  // Error in ingredients tab
+                  tabController.animateTo(2);
+                } else if (_instructionControllers.isEmpty ||
+                    _instructionControllers.every(
+                      (c) => c.text.trim().isEmpty,
+                    )) {
+                  // Error in instructions tab
+                  tabController.animateTo(3);
+                }
               }
             }
-          }
 
-          return Form(
-            key: _formKey,
-            autovalidateMode: AutovalidateMode.onUserInteraction,
-            onChanged: validateAllTabs,
-            child: Column(
-              children: [
-                // Tab Bar on top
-                Material(
-                  color: Theme.of(context).primaryColor,
-                  child: TabBar(
-                    isScrollable: true,
-                    tabs: tabTitles.map((title) => Tab(text: title)).toList(),
-                    labelColor: Colors.white,
-                    unselectedLabelColor: Colors.white70,
-                    indicatorColor: Colors.white,
-                    controller: tabController,
-                  ),
-                ),
-
-                // Main content area with tabs and navigation arrows
-                Expanded(
-                  child: Stack(
-                    children: [
-                      // Tab content
-                      Material(
-                        child: TabBarView(
-                          controller: tabController,
-                          children: [
-                            // Tab 1: Basic Information
-                            _buildBasicInfoTab(context),
-
-                            // Tab 2: Cooking Details
-                            _buildCookingDetailsTab(context),
-
-                            // Tab 3: Ingredients
-                            _buildIngredientsTab(context),
-
-                            // Tab 4: Instructions
-                            _buildInstructionsTab(context),
-
-                            // Tab 5: Notes
-                            _buildNotesTab(context),
-                          ],
-                        ),
-                      ),
-
-                      // Left navigation arrow
-                      Positioned(
-                        left: 0,
-                        top: 0,
-                        bottom: 0,
-                        child: Center(
-                          child: GestureDetector(
-                            onTap: () {
-                              if (tabController.index > 0) {
-                                tabController.animateTo(
-                                  tabController.index - 1,
-                                );
-                              }
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: Theme.of(
-                                  context,
-                                ).primaryColor.withOpacity(0.6),
-                                borderRadius: const BorderRadius.only(
-                                  topRight: Radius.circular(30),
-                                  bottomRight: Radius.circular(30),
+            return Form(
+              key: _formKey,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              onChanged: validateAllTabs,
+              child: Column(
+                children: [
+                  // Tab Bar on top
+                  Material(
+                    color: const Color(0xFFFF7E6B),
+                    child: TabBar(
+                      isScrollable: true,
+                      tabs:
+                          tabTitles
+                              .map(
+                                (title) => Tab(
+                                  child: Text(
+                                    title,
+                                    style: const TextStyle(
+                                      fontFamily: 'Poppins',
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
                                 ),
-                              ),
-                              child: const Icon(
-                                Icons.arrow_back_ios,
-                                color: Colors.white,
-                                size: 24,
-                              ),
-                            ),
+                              )
+                              .toList(),
+                      labelColor: Colors.white,
+                      unselectedLabelColor: Colors.white70,
+                      indicatorColor: Colors.white,
+                      controller: tabController,
+                    ),
+                  ),
+
+                  // Main content area with tabs and navigation arrows
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        // Tab content
+                        Material(
+                          child: TabBarView(
+                            controller: tabController,
+                            children: [
+                              // Tab 1: Basic Information
+                              _buildBasicInfoTab(context),
+
+                              // Tab 2: Cooking Details
+                              _buildCookingDetailsTab(context),
+
+                              // Tab 3: Ingredients
+                              _buildIngredientsTab(context),
+
+                              // Tab 4: Instructions
+                              _buildInstructionsTab(context),
+
+                              // Tab 5: Notes
+                              _buildNotesTab(context),
+                            ],
                           ),
                         ),
-                      ),
 
-                      // Right navigation arrow
-                      Positioned(
-                        right: 0,
-                        top: 0,
-                        bottom: 0,
-                        child: Center(
-                          child: GestureDetector(
-                            onTap: () {
-                              if (tabController.index <
-                                  tabController.length - 1) {
-                                tabController.animateTo(
-                                  tabController.index + 1,
-                                );
-                              }
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: Theme.of(
-                                  context,
-                                ).primaryColor.withOpacity(0.6),
-                                borderRadius: const BorderRadius.only(
-                                  topLeft: Radius.circular(30),
-                                  bottomLeft: Radius.circular(30),
-                                ),
-                              ),
-                              child: const Icon(
-                                Icons.arrow_forward_ios,
-                                color: Colors.white,
-                                size: 24,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Save button at the bottom
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  width: double.infinity,
-                  // Use theme-aware color
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  child: SizedBox(
-                    height: 56,
-                    child: ElevatedButton(
-                      onPressed:
-                          _isLoading
-                              ? null
-                              : () {
-                                if (_formKey.currentState!.validate()) {
-                                  submitForm();
+                        // Left navigation arrow
+                        Positioned(
+                          left: 0,
+                          top: 0,
+                          bottom: 0,
+                          child: Center(
+                            child: GestureDetector(
+                              onTap: () {
+                                if (tabController.index > 0) {
+                                  tabController.animateTo(
+                                    tabController.index - 1,
+                                  );
                                 }
                               },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: const Color(
+                                    0xFFFF7E6B,
+                                  ).withOpacity(0.8),
+                                  borderRadius: const BorderRadius.only(
+                                    topRight: Radius.circular(30),
+                                    bottomRight: Radius.circular(30),
+                                  ),
+                                ),
+                                child: const Icon(
+                                  Icons.arrow_back_ios,
+                                  color: Colors.white,
+                                  size: 24,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        // Right navigation arrow
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          bottom: 0,
+                          child: Center(
+                            child: GestureDetector(
+                              onTap: () {
+                                if (tabController.index <
+                                    tabController.length - 1) {
+                                  tabController.animateTo(
+                                    tabController.index + 1,
+                                  );
+                                }
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: const Color(
+                                    0xFFFF7E6B,
+                                  ).withOpacity(0.8),
+                                  borderRadius: const BorderRadius.only(
+                                    topLeft: Radius.circular(30),
+                                    bottomLeft: Radius.circular(30),
+                                  ),
+                                ),
+                                child: const Icon(
+                                  Icons.arrow_forward_ios,
+                                  color: Colors.white,
+                                  size: 24,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Save button at the bottom
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    width: double.infinity,
+                    color: Colors.grey[50],
+                    child: SizedBox(
+                      height: 56,
+                      child: ElevatedButton(
+                        onPressed:
+                            _isLoading
+                                ? null
+                                : () {
+                                  if (_formKey.currentState!.validate()) {
+                                    submitForm();
+                                  }
+                                },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFFF7E6B),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 2,
+                        ),
+                        child: Text(
+                          widget.isEditing
+                              ? AppTranslations.getText(ref, 'update_recipe')
+                              : AppTranslations.getText(ref, 'save_recipe'),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontFamily: 'Poppins',
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                          ),
                         ),
                       ),
-                      child: Text(
-                        widget.isEditing
-                            ? AppTranslations.getText(ref, 'update_recipe')
-                            : AppTranslations.getText(ref, 'save_recipe'),
-                        style: const TextStyle(color: Colors.white),
-                      ),
                     ),
                   ),
-                ),
 
-                // Loading overlay
-                if (_isLoading)
-                  Positioned.fill(
-                    child: Container(
-                      color: Colors.black.withOpacity(0.3),
-                      child: const Center(child: CircularProgressIndicator()),
-                    ),
-                  ),
-              ],
-            ),
-          );
-        },
+                  // Loading overlay (renders above all content)
+                ],
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -625,7 +646,31 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
             controller: _titleController,
             decoration: InputDecoration(
               labelText: AppTranslations.getText(ref, 'recipe_title'),
-              border: const OutlineInputBorder(),
+              labelStyle: const TextStyle(
+                fontFamily: 'Poppins',
+                color: AppTheme.textColor,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppTheme.dividerColor),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppTheme.dividerColor),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(
+                  color: Color(0xFFFF7E6B),
+                  width: 2,
+                ),
+              ),
+              filled: true,
+              fillColor: Colors.white,
+            ),
+            style: const TextStyle(
+              fontFamily: 'Poppins',
+              color: AppTheme.textColor,
             ),
             validator: (value) {
               if (value == null || value.isEmpty) {
@@ -643,13 +688,11 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
               height: 180,
               width: double.infinity,
               decoration: BoxDecoration(
-                color:
-                    Theme.of(context).brightness == Brightness.dark
-                        ? Colors.grey[800]
-                        : Colors.grey[200],
+                color: Colors.grey[100],
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: Theme.of(context).primaryColor.withOpacity(0.5),
+                  color: const Color(0xFFFF7E6B).withOpacity(0.3),
+                  width: 2,
                 ),
               ),
               child:
@@ -698,11 +741,17 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                             Icon(
                               Icons.add_photo_alternate,
                               size: 50,
-                              color: Theme.of(context).primaryColor,
+                              color: const Color(0xFFFF7E6B),
                             ),
                             const SizedBox(height: 8),
                             Text(
                               AppTranslations.getText(ref, 'add_image'),
+                              style: const TextStyle(
+                                fontFamily: 'Poppins',
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                                color: AppTheme.textColor,
+                              ),
                               textAlign: TextAlign.center,
                             ),
                           ],
@@ -718,11 +767,39 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
             decoration: InputDecoration(
               labelText: AppTranslations.getText(ref, 'image_url'),
               hintText: AppTranslations.getText(ref, 'enter_image_url'),
-              border: const OutlineInputBorder(),
+              labelStyle: const TextStyle(
+                fontFamily: 'Poppins',
+                color: AppTheme.textColor,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppTheme.dividerColor),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppTheme.dividerColor),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(
+                  color: Color(0xFFFF7E6B),
+                  width: 2,
+                ),
+              ),
+              filled: true,
+              fillColor: Colors.white,
               helperText: AppTranslations.getText(
                 ref,
                 'image_url_will_be_used',
               ),
+              helperStyle: const TextStyle(
+                fontFamily: 'Poppins',
+                color: AppTheme.secondaryTextColor,
+              ),
+            ),
+            style: const TextStyle(
+              fontFamily: 'Poppins',
+              color: AppTheme.textColor,
             ),
             onChanged: (value) {
               // Trigger UI update when URL changes
@@ -738,16 +815,35 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                 ref,
                 'enter_recipe_description',
               ),
-              border: const OutlineInputBorder(),
+              labelStyle: const TextStyle(
+                fontFamily: 'Poppins',
+                color: AppTheme.textColor,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppTheme.dividerColor),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppTheme.dividerColor),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(
+                  color: Color(0xFFFF7E6B),
+                  width: 2,
+                ),
+              ),
               filled: true,
-              fillColor:
-                  Theme.of(context).brightness == Brightness.dark
-                      ? Colors.black12
-                      : Colors.grey[50],
+              fillColor: Colors.white,
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 16,
                 vertical: 16,
               ),
+            ),
+            style: const TextStyle(
+              fontFamily: 'Poppins',
+              color: AppTheme.textColor,
             ),
             maxLines: 3,
             textCapitalization: TextCapitalization.sentences,
@@ -813,12 +909,12 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
   }
 
   Widget _buildIngredientsTab(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
@@ -841,20 +937,24 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
               ),
             ],
           ),
-          const SizedBox(height: 20),
-          _buildIngredientsList(),
-        ],
-      ),
+        ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24.0),
+            child: _buildIngredientsList(),
+          ),
+        ),
+      ],
     );
   }
 
   Widget _buildInstructionsTab(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
@@ -877,10 +977,14 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
               ),
             ],
           ),
-          const SizedBox(height: 20),
-          _buildInstructionsList(),
-        ],
-      ),
+        ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24.0),
+            child: _buildInstructionsList(),
+          ),
+        ),
+      ],
     );
   }
 
@@ -922,8 +1026,6 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
     }
 
     return ReorderableListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
       itemCount: _ingredientControllers.length,
       buildDefaultDragHandles: false,
       itemBuilder: (context, index) {
@@ -988,8 +1090,6 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
     }
 
     return ReorderableListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
       itemCount: _instructionControllers.length,
       buildDefaultDragHandles: false,
       itemBuilder: (context, index) {
@@ -1005,7 +1105,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                     width: 32,
                     height: 32,
                     decoration: BoxDecoration(
-                      color: Theme.of(context).primaryColor,
+                      color: const Color(0xFFFF7E6B),
                       shape: BoxShape.circle,
                     ),
                     child: Center(

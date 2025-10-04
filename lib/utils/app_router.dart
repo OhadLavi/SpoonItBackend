@@ -15,15 +15,18 @@ import 'package:recipe_keeper/screens/scan_recipe_screen.dart';
 import 'package:recipe_keeper/screens/chat_screen.dart';
 import 'package:recipe_keeper/screens/edit_profile_screen.dart';
 import 'package:recipe_keeper/screens/custom_recipe_screen.dart';
-import 'package:recipe_keeper/screens/welcome_screen.dart';
+import 'package:recipe_keeper/screens/search_screen.dart';
+import 'package:recipe_keeper/screens/shopping_list_screen.dart';
+import 'package:recipe_keeper/screens/support_screen.dart';
+import 'package:recipe_keeper/screens/terms_privacy_screen.dart';
+import 'package:recipe_keeper/screens/category_recipes_screen.dart';
 
 class AppRouter {
   static final _rootNavigatorKey = GlobalKey<NavigatorState>();
-  static final _shellNavigatorKey = GlobalKey<NavigatorState>();
 
   static final GoRouter router = GoRouter(
     navigatorKey: _rootNavigatorKey,
-    initialLocation: '/', // <-- ensure this is set to '/'
+    initialLocation: '/login', // <-- redirect to login directly
     debugLogDiagnostics: true,
     redirect: (context, state) {
       final bool isLoggedIn = FirebaseAuth.instance.currentUser != null;
@@ -31,16 +34,13 @@ class AppRouter {
           state.matchedLocation == '/login' ||
           state.matchedLocation == '/register';
 
-      // If not logged in and not going to login/register or welcome, redirect to welcome
-      if (!isLoggedIn &&
-          !isGoingToLogin &&
-          state.matchedLocation != '/' &&
-          state.matchedLocation != '/welcome') {
-        return '/';
+      // If not logged in and not going to login/register, redirect to login
+      if (!isLoggedIn && !isGoingToLogin) {
+        return '/login';
       }
 
-      // If logged in and going to login/register/welcome, redirect to home
-      if (isLoggedIn && (isGoingToLogin || state.matchedLocation == '/')) {
+      // If logged in and going to login/register, redirect to home
+      if (isLoggedIn && isGoingToLogin) {
         return '/home';
       }
 
@@ -48,9 +48,6 @@ class AppRouter {
       return null;
     },
     routes: [
-      // Welcome screen as the initial route
-      GoRoute(path: '/', builder: (context, state) => const WelcomeScreen()),
-
       // Authentication routes
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
       GoRoute(
@@ -58,29 +55,19 @@ class AppRouter {
         builder: (context, state) => const RegisterScreen(),
       ),
 
-      // Main app shell with bottom navigation
-      ShellRoute(
-        navigatorKey: _shellNavigatorKey,
-        builder: (context, state, child) => HomeScreen(child: child),
-        routes: [
-          // Home tab
-          GoRoute(
-            path: '/home',
-            builder: (context, state) => const HomeContent(),
-          ),
-
-          // Favorites tab
-          GoRoute(
-            path: '/favorites',
-            builder: (context, state) => const FavoritesScreen(),
-          ),
-
-          // Profile tab
-          GoRoute(
-            path: '/profile',
-            builder: (context, state) => const ProfileScreen(),
-          ),
-        ],
+      // Top-level app routes
+      GoRoute(path: '/home', builder: (context, state) => const HomeScreen()),
+      GoRoute(
+        path: '/my-recipes',
+        builder: (context, state) => const FavoritesScreen(),
+      ),
+      GoRoute(
+        path: '/profile',
+        builder: (context, state) => const ProfileScreen(),
+      ),
+      GoRoute(
+        path: '/shopping-list',
+        builder: (context, state) => const ShoppingListScreen(),
       ),
 
       // Recipe detail screen
@@ -120,6 +107,19 @@ class AppRouter {
       // Chat screen
       GoRoute(path: '/chat', builder: (context, state) => const ChatScreen()),
 
+      // Search screen
+      GoRoute(
+        path: '/search',
+        builder: (context, state) => const SearchScreen(),
+      ),
+
+      // Category recipes screen
+      GoRoute(
+        path: '/category/:name',
+        builder: (context, state) =>
+            CategoryRecipesScreen(categoryName: state.pathParameters['name']!),
+      ),
+
       // Edit Profile Screen (Outside the ShellRoute)
       GoRoute(
         path: '/profile/edit',
@@ -146,6 +146,19 @@ class AppRouter {
         path: '/custom_recipe',
         builder: (context, state) => const CustomRecipeScreen(),
       ),
+
+      // Support screen
+      GoRoute(
+        path: '/support',
+        builder: (context, state) => const SupportScreen(),
+      ),
+
+      // Terms and privacy screen
+      GoRoute(
+        path: '/terms-privacy',
+        builder: (context, state) => const TermsPrivacyScreen(),
+      ),
+
     ],
   );
 }

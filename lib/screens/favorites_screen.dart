@@ -6,7 +6,8 @@ import 'package:recipe_keeper/providers/auth_provider.dart';
 import 'package:recipe_keeper/providers/recipe_provider.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
 import 'package:recipe_keeper/widgets/recipe_card.dart';
-import 'package:recipe_keeper/utils/translations.dart';
+import 'package:recipe_keeper/widgets/app_header.dart';
+import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
 
 class FavoritesScreen extends ConsumerWidget {
   const FavoritesScreen({super.key});
@@ -17,56 +18,80 @@ class FavoritesScreen extends ConsumerWidget {
 
     return userDataAsync.when(
       data: (userData) {
-        if (userData == null || userData.favoriteRecipes.isEmpty) {
+        if (userData == null) {
           return Scaffold(
-            appBar: AppBar(
-              title: Text(AppTranslations.getText(ref, 'favorites')),
+            backgroundColor: Colors.white,
+            body: Column(
+              children: [
+                const AppHeader(title: 'המתכונים שלי'),
+                Expanded(child: _buildEmptyState(context, ref)),
+                const AppBottomNav(currentIndex: -1),
+              ],
             ),
-            body: _buildEmptyState(context, ref),
           );
         }
 
-        final favoriteRecipesAsync = ref.watch(
-          favoriteRecipesProvider(userData.favoriteRecipes),
-        );
+        // Use userRecipesProvider to get all user recipes instead of favorites
+        final userRecipesAsync = ref.watch(userRecipesProvider(userData.id));
 
         return Scaffold(
-          appBar: AppBar(
-            title: Text(AppTranslations.getText(ref, 'favorites')),
-          ),
-          body: favoriteRecipesAsync.when(
-            data: (recipes) {
-              if (recipes.isEmpty) {
-                return _buildEmptyState(context, ref);
-              }
-              return _buildRecipeList(context, recipes);
-            },
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error:
-                (error, stack) => Center(
-                  child: Text(
-                    AppTranslations.getText(
-                      ref,
-                      'error_loading_favorites',
-                    ).replaceAll('{error}', error.toString()),
-                  ),
+          backgroundColor: Colors.white,
+          body: Column(
+            children: [
+              const AppHeader(title: 'המתכונים שלי'),
+              Expanded(
+                child: userRecipesAsync.when(
+                  data: (recipes) {
+                    if (recipes.isEmpty) {
+                      return _buildEmptyState(context, ref);
+                    }
+                    return _buildRecipeList(context, recipes);
+                  },
+                  loading:
+                      () => const Center(
+                        child: CircularProgressIndicator(
+                          color: Color(0xFFFF7E6B),
+                        ),
+                      ),
+                  error:
+                      (error, stack) => Center(
+                        child: Text(
+                          'שגיאה בטעינת המתכונים: ${error.toString()}',
+                        ),
+                      ),
                 ),
+              ),
+              const AppBottomNav(currentIndex: -1),
+            ],
           ),
         );
       },
       loading:
           () => Scaffold(
-            appBar: AppBar(
-              title: Text(AppTranslations.getText(ref, 'favorites')),
+            body: Column(
+              children: [
+                const AppHeader(title: 'המתכונים שלי'),
+                const Expanded(
+                  child: Center(
+                    child: CircularProgressIndicator(color: Color(0xFFFF7E6B)),
+                  ),
+                ),
+                const AppBottomNav(currentIndex: -1),
+              ],
             ),
-            body: const Center(child: CircularProgressIndicator()),
           ),
       error:
           (error, stack) => Scaffold(
-            appBar: AppBar(
-              title: Text(AppTranslations.getText(ref, 'favorites')),
+            body: Column(
+              children: [
+                AppHeader(
+                  title: 'המתכונים שלי',
+                  onProfileTap: () => context.go('/profile'),
+                ),
+                Expanded(child: Center(child: Text(error.toString()))),
+                const AppBottomNav(currentIndex: -1),
+              ],
             ),
-            body: Center(child: Text(error.toString())),
           ),
     );
   }
@@ -76,23 +101,20 @@ class FavoritesScreen extends ConsumerWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.favorite_border, size: 80, color: Colors.grey[400]),
+          Icon(Icons.restaurant_menu, size: 80, color: Colors.grey[400]),
           const SizedBox(height: 16),
-          Text(
-            AppTranslations.getText(ref, 'no_favorites'),
-            style: AppTheme.headingStyle,
-          ),
+          Text('אין לך מתכונים עדיין', style: AppTheme.headingStyle),
           const SizedBox(height: 8),
           Text(
-            AppTranslations.getText(ref, 'favorites_description'),
+            'צור את המתכון הראשון שלך',
             style: AppTheme.captionStyle,
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 24),
           ElevatedButton.icon(
-            onPressed: () => context.go('/home'),
-            icon: const Icon(Icons.search),
-            label: Text(AppTranslations.getText(ref, 'find_recipes')),
+            onPressed: () => context.go('/add-recipe'),
+            icon: const Icon(Icons.add),
+            label: const Text('צור מתכון חדש'),
             style: ElevatedButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
             ),

@@ -6,6 +6,8 @@ import 'package:recipe_keeper/providers/recipe_provider.dart';
 import 'package:recipe_keeper/providers/auth_provider.dart';
 import 'package:recipe_keeper/utils/translations.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:recipe_keeper/widgets/app_header.dart';
+import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
 
 class CreateRecipeScreen extends ConsumerStatefulWidget {
   const CreateRecipeScreen({super.key});
@@ -65,187 +67,252 @@ class _CreateRecipeScreenState extends ConsumerState<CreateRecipeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(AppTranslations.getText(ref, 'create_recipe')),
-        actions: [
-          TextButton.icon(
-            onPressed: _isLoading ? null : _saveRecipe,
-            icon:
-                _isLoading
-                    ? Container(
-                      width: 24,
-                      height: 24,
-                      padding: const EdgeInsets.all(2.0),
-                      child: const CircularProgressIndicator(strokeWidth: 3),
-                    )
-                    : const Icon(Icons.save),
-            label: Text(
-              _isLoading
-                  ? AppTranslations.getText(ref, 'saving')
-                  : AppTranslations.getText(ref, 'save'),
+      backgroundColor: Colors.white,
+      body: Column(
+        children: [
+          AppHeader(
+            title: AppTranslations.getText(ref, 'create_recipe'),
+            showBackButton: true,
+            onBackPressed: () => context.pop(),
+            customContent: Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Center(
+                      child: Text(
+                        AppTranslations.getText(ref, 'create_recipe'),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                          fontFamily: 'Heebo',
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Container(
+                  height: 40,
+                  width: 40,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: IconButton(
+                    icon:
+                        _isLoading
+                            ? Container(
+                              width: 20,
+                              height: 20,
+                              padding: const EdgeInsets.all(2.0),
+                              child: const CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                            : const Icon(
+                              Icons.save,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                    onPressed: _isLoading ? null : _saveRecipe,
+                  ),
+                ),
+              ],
             ),
           ),
-        ],
-      ),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            // Basic Info Section
-            _buildSectionTitle(
-              AppTranslations.getText(ref, 'basic_information'),
-            ),
-            _buildTextField(
-              controller: _titleController,
-              label: AppTranslations.getText(ref, 'recipe_title'),
-              hint: AppTranslations.getText(ref, 'enter_recipe_title'),
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return AppTranslations.getText(ref, 'title_required');
-                }
-                return null;
-              },
-            ),
-            const SizedBox(height: 16),
-            _buildTextField(
-              controller: _descriptionController,
-              label: AppTranslations.getText(ref, 'description'),
-              hint: AppTranslations.getText(ref, 'enter_description'),
-              maxLines: 3,
-            ),
-            const SizedBox(height: 16),
-            _buildTextField(
-              controller: _imageUrlController,
-              label: AppTranslations.getText(ref, 'image_url_optional'),
-              hint: AppTranslations.getText(ref, 'enter_image_url'),
-            ),
+          Expanded(
+            child: Container(
+              color: const Color(0xFFF8F8F8),
+              child: Form(
+                key: _formKey,
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    // Basic Info Section
+                    _buildSectionTitle(
+                      AppTranslations.getText(ref, 'basic_information'),
+                    ),
+                    _buildTextField(
+                      controller: _titleController,
+                      label: AppTranslations.getText(ref, 'recipe_title'),
+                      hint: AppTranslations.getText(ref, 'enter_recipe_title'),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return AppTranslations.getText(ref, 'title_required');
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    _buildTextField(
+                      controller: _descriptionController,
+                      label: AppTranslations.getText(ref, 'description'),
+                      hint: AppTranslations.getText(ref, 'enter_description'),
+                      maxLines: 3,
+                    ),
+                    const SizedBox(height: 16),
+                    _buildTextField(
+                      controller: _imageUrlController,
+                      label: AppTranslations.getText(ref, 'image_url_optional'),
+                      hint: AppTranslations.getText(ref, 'enter_image_url'),
+                    ),
 
-            const SizedBox(height: 24),
+                    const SizedBox(height: 24),
 
-            // Cooking Details Section
-            _buildSectionTitle(AppTranslations.getText(ref, 'cooking_details')),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildTextField(
-                    controller: _prepTimeController,
-                    label: AppTranslations.getText(ref, 'prep_time_mins'),
-                    hint: '0',
-                    keyboardType: TextInputType.number,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: _buildTextField(
-                    controller: _cookTimeController,
-                    label: AppTranslations.getText(ref, 'cook_time_mins'),
-                    hint: '0',
-                    keyboardType: TextInputType.number,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: _buildTextField(
-                    controller: _servingsController,
-                    label: AppTranslations.getText(ref, 'servings'),
-                    hint: '1',
-                    keyboardType: TextInputType.number,
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 24),
-
-            // Ingredients Section
-            _buildSectionTitle(AppTranslations.getText(ref, 'ingredients')),
-            _buildReorderableList(_buildIngredientFields(), (
-              oldIndex,
-              newIndex,
-            ) {
-              setState(() {
-                if (newIndex > oldIndex) {
-                  newIndex -= 1;
-                }
-                final item = _ingredientControllers.removeAt(oldIndex);
-                _ingredientControllers.insert(newIndex, item);
-              });
-            }),
-            TextButton.icon(
-              onPressed: _addIngredient,
-              icon: const Icon(Icons.add),
-              label: Text(AppTranslations.getText(ref, 'add_ingredient')),
-            ),
-
-            const SizedBox(height: 24),
-
-            // Instructions Section
-            _buildSectionTitle(AppTranslations.getText(ref, 'instructions')),
-            _buildReorderableList(_buildInstructionFields(), (
-              oldIndex,
-              newIndex,
-            ) {
-              setState(() {
-                if (newIndex > oldIndex) {
-                  newIndex -= 1;
-                }
-                final item = _instructionControllers.removeAt(oldIndex);
-                _instructionControllers.insert(newIndex, item);
-              });
-            }),
-            TextButton.icon(
-              onPressed: _addInstruction,
-              icon: const Icon(Icons.add),
-              label: Text(AppTranslations.getText(ref, 'add_step')),
-            ),
-
-            const SizedBox(height: 24),
-
-            // Tags Section
-            _buildSectionTitle(AppTranslations.getText(ref, 'tags')),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildTextField(
-                    controller: _tagController,
-                    label: AppTranslations.getText(ref, 'add_tag'),
-                    hint: AppTranslations.getText(ref, 'enter_tag'),
-                    onSubmitted: (_) => _addTag(),
-                  ),
-                ),
-                IconButton(icon: const Icon(Icons.add), onPressed: _addTag),
-              ],
-            ),
-            Wrap(
-              spacing: 8,
-              children:
-                  _tags
-                      .map(
-                        (tag) => Chip(
-                          label: Text(tag),
-                          onDeleted: () {
-                            setState(() {
-                              _tags.remove(tag);
-                            });
-                          },
+                    // Cooking Details Section
+                    _buildSectionTitle(
+                      AppTranslations.getText(ref, 'cooking_details'),
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildTextField(
+                            controller: _prepTimeController,
+                            label: AppTranslations.getText(
+                              ref,
+                              'prep_time_mins',
+                            ),
+                            hint: '0',
+                            keyboardType: TextInputType.number,
+                          ),
                         ),
-                      )
-                      .toList(),
-            ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: _buildTextField(
+                            controller: _cookTimeController,
+                            label: AppTranslations.getText(
+                              ref,
+                              'cook_time_mins',
+                            ),
+                            hint: '0',
+                            keyboardType: TextInputType.number,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: _buildTextField(
+                            controller: _servingsController,
+                            label: AppTranslations.getText(ref, 'servings'),
+                            hint: '1',
+                            keyboardType: TextInputType.number,
+                          ),
+                        ),
+                      ],
+                    ),
 
-            const SizedBox(height: 24),
+                    const SizedBox(height: 24),
 
-            // Notes Section
-            _buildSectionTitle(AppTranslations.getText(ref, 'notes')),
-            _buildTextField(
-              controller: _notesController,
-              label: AppTranslations.getText(ref, 'recipe_notes'),
-              hint: AppTranslations.getText(ref, 'enter_notes'),
-              maxLines: 3,
+                    // Ingredients Section
+                    _buildSectionTitle(
+                      AppTranslations.getText(ref, 'ingredients'),
+                    ),
+                    _buildReorderableList(_buildIngredientFields(), (
+                      oldIndex,
+                      newIndex,
+                    ) {
+                      setState(() {
+                        if (newIndex > oldIndex) {
+                          newIndex -= 1;
+                        }
+                        final item = _ingredientControllers.removeAt(oldIndex);
+                        _ingredientControllers.insert(newIndex, item);
+                      });
+                    }),
+                    TextButton.icon(
+                      onPressed: _addIngredient,
+                      icon: const Icon(Icons.add),
+                      label: Text(
+                        AppTranslations.getText(ref, 'add_ingredient'),
+                      ),
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // Instructions Section
+                    _buildSectionTitle(
+                      AppTranslations.getText(ref, 'instructions'),
+                    ),
+                    _buildReorderableList(_buildInstructionFields(), (
+                      oldIndex,
+                      newIndex,
+                    ) {
+                      setState(() {
+                        if (newIndex > oldIndex) {
+                          newIndex -= 1;
+                        }
+                        final item = _instructionControllers.removeAt(oldIndex);
+                        _instructionControllers.insert(newIndex, item);
+                      });
+                    }),
+                    TextButton.icon(
+                      onPressed: _addInstruction,
+                      icon: const Icon(Icons.add),
+                      label: Text(AppTranslations.getText(ref, 'add_step')),
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // Tags Section
+                    _buildSectionTitle(AppTranslations.getText(ref, 'tags')),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildTextField(
+                            controller: _tagController,
+                            label: AppTranslations.getText(ref, 'add_tag'),
+                            hint: AppTranslations.getText(ref, 'enter_tag'),
+                            onSubmitted: (_) => _addTag(),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.add),
+                          onPressed: _addTag,
+                        ),
+                      ],
+                    ),
+                    Wrap(
+                      spacing: 8,
+                      children:
+                          _tags
+                              .map(
+                                (tag) => Chip(
+                                  label: Text(tag),
+                                  onDeleted: () {
+                                    setState(() {
+                                      _tags.remove(tag);
+                                    });
+                                  },
+                                ),
+                              )
+                              .toList(),
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // Notes Section
+                    _buildSectionTitle(AppTranslations.getText(ref, 'notes')),
+                    _buildTextField(
+                      controller: _notesController,
+                      label: AppTranslations.getText(ref, 'recipe_notes'),
+                      hint: AppTranslations.getText(ref, 'enter_notes'),
+                      maxLines: 3,
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ],
-        ),
+          ),
+          const AppBottomNav(currentIndex: -1),
+        ],
       ),
     );
   }
@@ -255,13 +322,11 @@ class _CreateRecipeScreenState extends ConsumerState<CreateRecipeScreen> {
       padding: const EdgeInsets.only(bottom: 16),
       child: Text(
         title,
-        style: TextStyle(
+        style: const TextStyle(
           fontSize: 18,
           fontWeight: FontWeight.bold,
-          color:
-              Theme.of(context).brightness == Brightness.dark
-                  ? Colors.white
-                  : AppTheme.textColor,
+          color: AppTheme.textColor,
+          fontFamily: 'Heebo',
         ),
       ),
     );
@@ -282,25 +347,16 @@ class _CreateRecipeScreenState extends ConsumerState<CreateRecipeScreen> {
         labelText: label,
         hintText: hint,
         border: const OutlineInputBorder(),
-        labelStyle: TextStyle(
-          color:
-              Theme.of(context).brightness == Brightness.dark
-                  ? Colors.white70
-                  : AppTheme.textColor,
+        labelStyle: const TextStyle(
+          color: AppTheme.textColor,
+          fontFamily: 'Heebo',
         ),
-        hintStyle: TextStyle(
-          color:
-              Theme.of(context).brightness == Brightness.dark
-                  ? Colors.grey[500]
-                  : AppTheme.secondaryTextColor,
+        hintStyle: const TextStyle(
+          color: AppTheme.secondaryTextColor,
+          fontFamily: 'Heebo',
         ),
       ),
-      style: TextStyle(
-        color:
-            Theme.of(context).brightness == Brightness.dark
-                ? Colors.white
-                : AppTheme.textColor,
-      ),
+      style: const TextStyle(color: AppTheme.textColor, fontFamily: 'Heebo'),
       maxLines: maxLines ?? 1,
       keyboardType: keyboardType,
       validator: validator,
@@ -331,18 +387,18 @@ class _CreateRecipeScreenState extends ConsumerState<CreateRecipeScreen> {
                       '${AppTranslations.getText(ref, 'ingredient')} ${index + 1}',
                   hintText: AppTranslations.getText(ref, 'enter_ingredient'),
                   border: const OutlineInputBorder(),
-                  labelStyle: TextStyle(
-                    color:
-                        Theme.of(context).brightness == Brightness.dark
-                            ? Colors.white70
-                            : AppTheme.textColor,
+                  labelStyle: const TextStyle(
+                    color: AppTheme.textColor,
+                    fontFamily: 'Heebo',
                   ),
-                  hintStyle: TextStyle(
-                    color:
-                        Theme.of(context).brightness == Brightness.dark
-                            ? Colors.grey[500]
-                            : AppTheme.secondaryTextColor,
+                  hintStyle: const TextStyle(
+                    color: AppTheme.secondaryTextColor,
+                    fontFamily: 'Heebo',
                   ),
+                ),
+                style: const TextStyle(
+                  color: AppTheme.textColor,
+                  fontFamily: 'Heebo',
                 ),
               ),
             ),
@@ -381,25 +437,19 @@ class _CreateRecipeScreenState extends ConsumerState<CreateRecipeScreen> {
                       '${AppTranslations.getText(ref, 'step')} ${index + 1}',
                   hintText: AppTranslations.getText(ref, 'enter_instruction'),
                   border: const OutlineInputBorder(),
-                  labelStyle: TextStyle(
-                    color:
-                        Theme.of(context).brightness == Brightness.dark
-                            ? Colors.white70
-                            : AppTheme.textColor,
+                  labelStyle: const TextStyle(
+                    color: AppTheme.textColor,
+                    fontFamily: 'Heebo',
                   ),
-                  hintStyle: TextStyle(
-                    color:
-                        Theme.of(context).brightness == Brightness.dark
-                            ? Colors.grey[500]
-                            : AppTheme.secondaryTextColor,
+                  hintStyle: const TextStyle(
+                    color: AppTheme.secondaryTextColor,
+                    fontFamily: 'Heebo',
                   ),
                 ),
                 maxLines: 2,
-                style: TextStyle(
-                  color:
-                      Theme.of(context).brightness == Brightness.dark
-                          ? Colors.white
-                          : AppTheme.textColor,
+                style: const TextStyle(
+                  color: AppTheme.textColor,
+                  fontFamily: 'Heebo',
                 ),
               ),
             ),

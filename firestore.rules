@@ -36,6 +36,14 @@ service cloud.firestore {
       allow update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
     
+    // Allow users to read and write their own categories
+    match /categories/{categoryId} {
+      allow read, write: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || 
+        request.resource.data.userId == request.auth.uid
+      );
+    }
+    
     // Default deny all other access
     match /{document=**} {
       allow read, write: if false;

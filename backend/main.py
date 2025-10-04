@@ -1,124 +1,167 @@
+# main.py
+from __future__ import annotations
+
+import asyncio
+import base64
+import io
+import json
+import logging
+import re
+from typing import Optional, Dict, Any, List, Iterable, Tuple
+
+import httpx
+import uvicorn
+from bs4 import BeautifulSoup, NavigableString, Tag
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel
-import uvicorn
-import json
-import re
-import logging
-from typing import Optional, Dict, Any, List
-from bs4 import BeautifulSoup
-import io
-import base64
-import pytesseract
-from PIL import Image
+from PIL import Image, ImageOps, ImageFilter
+from pydantic import BaseModel, Field
 from playwright.async_api import async_playwright
+import pytesseract
 
-# --- Logging configuration ---
+# =============================================================================
+# Logging
+# =============================================================================
 logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('recipe_keeper.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ],
-    encoding='utf-8'
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    handlers=[logging.FileHandler("recipe_keeper.log", encoding="utf-8"), logging.StreamHandler()],
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("recipe-keeper")
 
-# --- Custom error class ---
+# =============================================================================
+# Config (kept from your app: same endpoints usage + model name)
+# =============================================================================
+OLLAMA_API_URL = "http://127.0.0.1:11434/api/generate"
+MODEL_NAME = "gemma3:4b"  # <-- your model name retained
+HTTP_TIMEOUT = 30.0
+PLAYWRIGHT_TIMEOUT_MS = 35000
+FETCH_MAX_BYTES = 2_500_000  # ~2.5MB safety cap
+
+# =============================================================================
+# Errors
+# =============================================================================
 class APIError(Exception):
     def __init__(self, message: str, status_code: int = 500, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message)
         self.message = message
         self.status_code = status_code
         self.details = details or {}
-        super().__init__(self.message)
 
-# --- Request schemas ---
+# =============================================================================
+# Schemas
+# =============================================================================
 class ChatRequest(BaseModel):
     message: str
-    language: str = "en"  # Default to English
+    language: str = "en"
 
 class RecipeExtractionRequest(BaseModel):
     url: str
 
 class ImageExtractionRequest(BaseModel):
-    image_data: str  # Base64 encoded image data
+    image_data: str  # base64 (with or without data URI prefix)
 
-# Add new request schema for custom recipe generation
 class CustomRecipeRequest(BaseModel):
     groceries: str
     description: str
 
-# --- Ollama configuration ---
-OLLAMA_API_URL = "http://127.0.0.1:11434/api/generate"
-MODEL_NAME = "gemma3:4b"
+class RecipeModel(BaseModel):
+    title: str = ""
+    description: str = ""
+    ingredients: List[str] = Field(default_factory=list, min_length=0)
+    instructions: List[str] = Field(default_factory=list, min_length=0)
+    prepTime: int = 0
+    cookTime: int = 0
+    servings: int = 1
+    tags: List[str] = Field(default_factory=list, min_length=0)
+    notes: str = ""
+    source: str = ""
+    imageUrl: str = ""
 
-# --- Helper functions ---
+# =============================================================================
+# Utils
+# =============================================================================
 HEBREW_NUMBERS = {
-    'אחד': 1, 'אחת': 1,
-    'שתיים': 2, 'שניים': 2, 'שתים': 2,
-    'שלוש': 3, 'שלושה': 3,
-    'ארבע': 4, 'ארבעה': 4,
-    'חמש': 5, 'חמישה': 5,
-    'שש': 6, 'שישה': 6,
-    'שבע': 7, 'שבעה': 7,
-    'שמונה': 8,
-    'תשע': 9,
-    'עשר': 10
+    "אחד": 1, "אחת": 1, "שתיים": 2, "שניים": 2, "שתים": 2, "שלוש": 3, "שלושה": 3,
+    "ארבע": 4, "ארבעה": 4, "חמש": 5, "חמישה": 5, "שש": 6, "שישה": 6, "שבע": 7, "שבעה": 7,
+    "שמונה": 8, "תשע": 9, "עשר": 10,
 }
 
-def safe_strip(value: Any) -> str:
-    """
-    Convert value to string (if not None) and strip whitespace.
-    If value is None, return "".
-    """
-    if value is None:
-        return ""
-    return str(value).strip()
+def safe_strip(v: Any) -> str:
+    return "" if v is None else str(v).strip()
 
 def clean_html(text: Any) -> str:
-    """
-    Convert text (which may be None or a string) to a stripped string with HTML removed.
-    """
     s = safe_strip(text)
     if not s:
         return ""
-    return BeautifulSoup(s, 'html.parser').get_text(separator=' ', strip=True)
+    return BeautifulSoup(s, "html.parser").get_text(separator=" ", strip=True)
 
 def convert_to_int(num_str: Any) -> int:
     s = safe_strip(num_str)
     if not s:
         return 0
+    # handle simple ranges like "35-40"
+    m = re.search(r"(\d+)\s*-\s*(\d+)", s)
+    if m:
+        return max(int(m.group(1)), int(m.group(2)))
     try:
         return int(s)
     except ValueError:
-        pass
-    for word, val in HEBREW_NUMBERS.items():
-        if word in s:
-            return val
+        for word, val in HEBREW_NUMBERS.items():
+            if word in s:
+                return val
     return 0
 
 def parse_time_value(time_str: Any) -> int:
+    """
+    Returns minutes; handles:
+      - "35-40 דקות" (takes upper bound)
+      - "שעה ו-10 דקות", "1 שעה 20 דקות"
+      - hr/hour/min variations + Hebrew (דקה/דקות/שעה/שעות/אפייה)
+    """
     s = clean_html(time_str).lower()
     if not s:
         return 0
-    total_minutes = 0
-    hour_match = re.search(r'(\d+|\w+)\s*(?:שעה(?:ות)?|hr)', s)
-    if hour_match:
-        total_minutes += convert_to_int(hour_match.group(1)) * 60
-    minute_match = re.search(r'(\d+|\w+)\s*(?:דקה(?:ות)?|min)', s)
-    if minute_match:
-        total_minutes += convert_to_int(minute_match.group(1))
-    return total_minutes
+
+    # range in minutes: "35-40 דקות"
+    m = re.search(r"(\d+)\s*-\s*(\d+)\s*(?:דק(?:ה|ות)?|min|minutes?)", s)
+    if m:
+        return max(int(m.group(1)), int(m.group(2)))
+
+    # explicit hour count
+    mh = re.search(r"(\d+)\s*(?:שעה(?:ות)?|hr|hour|hours)", s)
+    add_minutes = 0
+    if mh:
+        add_minutes += int(mh.group(1)) * 60
+    elif "שעה" in s and not mh:
+        add_minutes += 60
+
+    mm = re.findall(r"(\d+)\s*(?:דק(?:ה|ות)?|min|minutes?)", s)
+    if mm:
+        add_minutes += sum(int(x) for x in mm[:1])  # take first numeric minute amount
+
+    if add_minutes:
+        return add_minutes
+
+    # plain numbers with minutes word somewhere
+    m2 = re.search(r"(\d+)\s*(?:דק(?:ה|ות)?|min|minutes?)", s)
+    if m2:
+        return int(m2.group(1))
+
+    # fallback: just digits
+    m3 = re.search(r"(\d+)", s)
+    if m3:
+        return int(m3.group(1))
+    return 0
 
 def parse_servings(servings_str: Any) -> int:
     s = clean_html(servings_str).lower()
     if not s:
         return 1
-    digit_match = re.search(r'(\d+)', s)
-    if digit_match:
-        return int(digit_match.group(1))
+    m = re.search(r"(\d+)", s)
+    if m:
+        return int(m.group(1))
     for word, val in HEBREW_NUMBERS.items():
         if word in s:
             return val
@@ -129,637 +172,880 @@ def ensure_list(value: Any) -> list:
         return value
     if isinstance(value, dict):
         return list(value.values())
-    return []
+    return [value] if value else []
 
-def extract_unique_lines(lines: list) -> list:
+def extract_unique_lines(lines: Iterable[str]) -> List[str]:
     seen = set()
-    unique = []
+    out: List[str] = []
     for line in lines:
+        line = line.strip()
+        if not line:
+            continue
         key = line.lower()
         if key not in seen:
             seen.add(key)
-            unique.append(line)
-    return unique
+            out.append(line)
+    return out
 
 def remove_exact_duplicates(seq: List[str]) -> List[str]:
-    """
-    Remove repeated lines exactly, preserving order.
-    Keeps the first occurrence, removes subsequent identical lines.
-    """
     seen = set()
-    output = []
+    out: List[str] = []
     for item in seq:
         if item not in seen:
             seen.add(item)
-            output.append(item)
-    return output
+            out.append(item)
+    return out
 
 def normalize_ingredient(item: Any) -> str:
-    """
-    Convert an ingredient item to a single consistent string,
-    calling safe_strip on subfields to avoid NoneType errors.
-    """
     if item is None:
         return ""
     if isinstance(item, str):
         return clean_html(item)
-
     if isinstance(item, dict):
-        name = clean_html(item.get('name') or item.get('item'))
-        quantity = clean_html(item.get('quantity'))
-        unit = clean_html(item.get('unit'))
-        notes = clean_html(item.get('notes'))
-
-        parts = []
-        if name:
-            parts.append(name)
-        if quantity:
-            parts.append(quantity)
-        if unit:
-            parts.append(unit)
+        name = clean_html(item.get("name") or item.get("item"))
+        quantity = clean_html(item.get("quantity"))
+        unit = clean_html(item.get("unit"))
+        notes = clean_html(item.get("notes"))
+        parts = [p for p in [name, quantity, unit] if p]
         if notes:
             parts.append(f"({notes})")
-
         return " ".join(parts).strip()
-
     return clean_html(item)
 
+def _limit_size(s: str, max_bytes: int = FETCH_MAX_BYTES) -> str:
+    b = s.encode("utf-8", errors="ignore")
+    if len(b) <= max_bytes:
+        return s
+    logger.info("[FETCH] truncated HTML from %d KB to %d KB", len(b)//1024, max_bytes//1024)
+    return b[:max_bytes].decode("utf-8", errors="ignore")
+
+# =============================================================================
+# HTML/Text Extraction
+# =============================================================================
 def extract_recipe_content(html_content: str) -> str:
-    """
-    Return the entire text, including scripts, so the LLM sees all instructions.
-    """
-    soup = BeautifulSoup(html_content, 'html.parser')
-    text = soup.get_text(separator='\n', strip=True)
-    if len(text) > 10000:
-        text = text[:10000] + "\n... [content truncated]"
-    logger.debug(f"Extracted recipe content length: {len(text)} characters")
+    soup = BeautifulSoup(html_content, "html.parser")
+    text = soup.get_text(separator="\n", strip=True)
+    text = _limit_size(text, 120_000)  # keep prompt size manageable
+    logger.debug("[EXTRACT] Text length = %d", len(text))
     return text
 
-def create_recipe_extraction_prompt(clean_text: str) -> str:
-    """
-    Prompt instructing the LLM to preserve every single instruction exactly as it appears (no merging or skipping),
-    and absolutely NO made-up content or modifications.
-    """
-    prompt = (
-        "You are a recipe extraction expert. You have ONE and ONLY ONE requirement: "
-        "Return the recipe details exactly as they appear in the text, with NO invented or modified content. "
-        "Do not add or remove anything from the ingredients or instructions.\n\n"
-        "Extract EVERY SINGLE INSTRUCTION EXACTLY as it appears in the text (keeping the numbering if present), "
-        "and return them without skipping or merging lines.\n\n"
-        "Format your output as a strict JSON object:\n"
-        "{\n"
-        "  \"title\": \"Recipe title\",\n"
-        "  \"description\": \"Brief description\",\n"
-        "  \"ingredients\": [\"ingredient 1\", \"ingredient 2\", ...],\n"
-        "  \"instructions\": [\"step 1\", \"step 2\", ...],\n"
-        "  \"prepTime\": numberOfMinutes,\n"
-        "  \"cookTime\": numberOfMinutes,\n"
-        "  \"servings\": numberOfServings,\n"
-        "  \"tags\": [\"tag1\", \"tag2\", ...]\n"
-        "}\n\n"
-        "IMPORTANT:\n"
-        "1. DO NOT invent or alter any data. If an item is missing, leave it empty. "
-        "2. DO NOT skip or merge lines. If the text says \"14. בסיר בינוני...\", you must include that step.\n"
-        "3. Return ONLY this JSON object, nothing else.\n\n"
-        "Here is the text:\n\n"
-        f"{clean_text}\n\n"
-        "Now return the JSON with the full recipe, EXACTLY matching the text for ingredients and instructions."
-    )
-    return prompt
+# Keep your schema.org JSON-LD parser (no new deps)
 
-async def fetch_page_with_playwright(url: str) -> str:
+def parse_schema_org_recipe(html: str) -> Optional[RecipeModel]:
     """
-    Use Playwright Async API to fetch the webpage.
-    """
-    logger.debug("Using Async Playwright to fetch the webpage.")
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
-        await page.goto(url, wait_until="load", timeout=30000)
-        content = await page.content()
-        await browser.close()
-    return content
-
-def extract_text_from_image(image_bytes: bytes) -> str:
-    """
-    Extract text from an image using Tesseract OCR
+    Parse JSON-LD (schema.org/Recipe). If found and valid, return RecipeModel.
     """
     try:
-        image = Image.open(io.BytesIO(image_bytes))
-        # Perform OCR
-        text = pytesseract.image_to_string(image, lang='eng+heb')
-        logger.debug(f"Extracted text from image: {len(text)} characters")
-        return text
+        soup = BeautifulSoup(html, "html.parser")
+        scripts = soup.find_all("script", type="application/ld+json")
+        logger.info("[SCHEMA] found %d ld+json scripts", len(scripts))
+        for sc in scripts:
+            raw = sc.string or sc.get_text() or ""
+            if not raw.strip():
+                continue
+            try:
+                data = json.loads(raw)
+            except Exception:
+                continue
+            candidates = data if isinstance(data, list) else [data]
+            flat: List[dict] = []
+            for obj in candidates:
+                if isinstance(obj, dict) and "@graph" in obj:
+                    flat.extend([x for x in obj.get("@graph", []) if isinstance(x, dict)])
+                if isinstance(obj, dict):
+                    flat.append(obj)
+            for obj in flat:
+                typ = obj.get("@type") or obj.get("type")
+                is_recipe = False
+                if isinstance(typ, list):
+                    is_recipe = any(isinstance(t, str) and t.lower() == "recipe" for t in typ)
+                elif isinstance(typ, str):
+                    is_recipe = typ.lower() == "recipe"
+                if not is_recipe:
+                    continue
+
+                title = clean_html(obj.get("name"))
+                description = clean_html(obj.get("description"))
+
+                image_url = ""
+                img = obj.get("image")
+                if isinstance(img, str):
+                    image_url = img
+                elif isinstance(img, list) and img and isinstance(img[0], str):
+                    image_url = img[0]
+                elif isinstance(img, dict):
+                    image_url = clean_html(img.get("url"))
+
+                ings = ensure_list(obj.get("recipeIngredient") or obj.get("ingredients"))
+                ings = [normalize_ingredient(x) for x in ings if x]
+                ings = extract_unique_lines(ings)
+
+                instr: List[str] = []
+                ri = obj.get("recipeInstructions")
+                if isinstance(ri, list):
+                    for step in ri:
+                        if isinstance(step, dict):
+                            txt = clean_html(step.get("text") or step.get("name"))
+                        else:
+                            txt = clean_html(step)
+                        if txt:
+                            instr.append(txt)
+                elif isinstance(ri, str):
+                    instr = [clean_html(x) for x in ri.split("\n") if clean_html(x)]
+                instr = remove_exact_duplicates(instr)
+
+                def _duration_to_min(v: str) -> int:
+                    v = v or ""
+                    m = re.search(r"PT(?:(\d+)H)?(?:(\d+)M)?", v, re.I)
+                    if m:
+                        return (int(m.group(1) or 0) * 60) + int(m.group(2) or 0)
+                    return parse_time_value(v)
+
+                prep = _duration_to_min(safe_strip(obj.get("prepTime")))
+                cook = _duration_to_min(safe_strip(obj.get("cookTime")))
+                servings = parse_servings(obj.get("recipeYield"))
+
+                tags: List[str] = []
+                kw = obj.get("keywords")
+                if isinstance(kw, str):
+                    tags = [clean_html(x) for x in kw.split(",") if clean_html(x)]
+                elif isinstance(kw, list):
+                    tags = [clean_html(x) for x in kw if clean_html(x)]
+
+                model = RecipeModel(
+                    title=title,
+                    description=description,
+                    ingredients=ings,
+                    instructions=instr,
+                    prepTime=prep,
+                    cookTime=cook,
+                    servings=servings,
+                    tags=tags,
+                    imageUrl=image_url,
+                )
+                logger.info("[SCHEMA] success | title='%s' ings=%d steps=%d", model.title or "", len(model.ingredients), len(model.instructions))
+                return model
     except Exception as e:
-        logger.error(f"Error in OCR processing: {e}")
-        raise APIError(f"OCR processing failed: {str(e)}")
+        logger.debug("[SCHEMA] parse failed: %s", e, exc_info=True)
+    logger.info("[SCHEMA] not found")
+    return None
 
-def create_image_extraction_prompt(text: str) -> str:
-    """
-    Create a prompt for the LLM to extract recipe data from OCR text
-    """
-    prompt = (
-        "You are a recipe extraction specialist. Extract recipe details from this OCR-scanned text. "
-        "The text may have scanning errors, so use your judgment to interpret it correctly. "
-        "Return ONLY a JSON object with the following structure:\n"
-        "{\n"
-        "  \"title\": \"Recipe title\",\n"
-        "  \"description\": \"Brief description\",\n"
-        "  \"ingredients\": [\"ingredient 1\", \"ingredient 2\", ...],\n"
-        "  \"instructions\": [\"step 1\", \"step 2\", ...],\n"
-        "  \"prepTime\": numberOfMinutes,\n"
-        "  \"cookTime\": numberOfMinutes,\n"
-        "  \"servings\": numberOfServings,\n"
-        "  \"tags\": [\"tag1\", \"tag2\", ...]\n"
-        "}\n\n"
-        "IMPORTANT:\n"
-        "1. Return ONLY the JSON object, nothing else\n"
-        "2. If you can't determine a value, use a sensible default or empty value\n"
-        "3. Keep all steps and ingredients, exactly as they appear\n\n"
-        "Here is the scanned text:\n\n"
-        f"{text}"
-    )
-    return prompt
+# =============================================================================
+# Section utilities (robust for Hebrew pages)
+# =============================================================================
+ING_LABELS = [
+    "רכיבים", "מצרכים", "מרכיבים",
+]
+STEP_LABELS = [
+    "אופן ההכנה", "אופן הכנה", "הוראות הכנה", "הוראות", "הכנה",
+]
+STOP_LABELS = STEP_LABELS + [
+    "טיפים", "טיפים והערות", "הערות", "שיתוף", "עוד מתכונים", "ערכים תזונתיים",
+]
 
-def is_likely_instruction(line: str) -> bool:
-    """
-    Heuristic filter to decide if a line is a real cooking instruction or irrelevant text.
-    """
-    # Common cooking/action verbs in Hebrew
-    cooking_verbs = [
-        "מחממים", "מערבבים", "מוסיפים", "אופים", "מכניסים", "משמנים", "יוצקים",
-        "ממיסים", "שמים", "חותכים", "מטגנים", "מרתיחים", "מערבלים", "מקציפים",
-        "מקררים", "מצננים", "מתבלים", "מפזרים", "מקלפים", "מגרדים", "מקפלים"
-    ]
-    normalized = line.lower()
+def _text_lines_from_tag(tag: Tag) -> List[str]:
+    lines: List[str] = []
+    if tag.name in ("ul", "ol"):
+        for li in tag.find_all("li"):
+            t = clean_html(li.get_text())
+            if t:
+                lines.append(t)
+        return lines
 
-    # If it's obviously referencing other recipes or just "Try also..."
-    if "נסו גם את אלו" in normalized:
+    txt = tag.get_text(separator="\n", strip=True)
+    for line in txt.split("\n"):
+        line = clean_html(line)
+        if line:
+            lines.append(line)
+    return lines
+
+def _is_headerish(t: str) -> bool:
+    if len(t) <= 2:
         return False
-    if any(keyword in normalized for keyword in ["סמבוסק", "מניפת פילו", "שבלולי פיצה", "עראיס", "עוגת מייפל"]):
-        return False
-
-    # If line is too short, very unlikely to be an instruction
-    if len(normalized) < 8:
-        return False
-
-    # If it has at least one cooking verb or is fairly long (likely a step)
-    if any(verb in normalized for verb in cooking_verbs):
+    if any(lbl in t for lbl in ING_LABELS + STEP_LABELS + STOP_LABELS):
         return True
-
-    # Also allow lines that are somewhat detailed
-    if len(normalized) >= 40:
-        return True
-
     return False
 
-def filter_irrelevant_instructions(instructions: List[str]) -> List[str]:
-    """
-    Filter out lines that are not real cooking steps, e.g. references to other recipes.
-    """
-    return [inst for inst in instructions if is_likely_instruction(inst)]
+def _collect_after(start: Tag, stop_labels: List[str], max_nodes: int = 120) -> List[str]:
+    lines: List[str] = []
+    nodes = 0
+    for sib in start.next_siblings:
+        if isinstance(sib, NavigableString):
+            text = clean_html(str(sib))
+            if text:
+                for ln in text.split("\n"):
+                    ln = clean_html(ln)
+                    if ln:
+                        if any(lbl in ln for lbl in stop_labels):
+                            logger.debug("[SECT] stop on text '%s'", ln[:50])
+                            return lines
+                        lines.append(ln)
+            continue
 
-def normalize_recipe_fields(recipe_data: dict) -> dict:
-    """
-    Harmonize field names and unify numeric fields without losing any steps.
-    """
-    # If there's a "recipeName" but no "title," use recipeName
+        if not isinstance(sib, Tag):
+            continue
+
+        nodes += 1
+        if nodes > max_nodes:
+            logger.debug("[SECT] stop: node limit reached")
+            break
+
+        text = clean_html(sib.get_text())
+        if not text:
+            continue
+
+        if any(lbl in text for lbl in stop_labels):
+            logger.debug("[SECT] stop on tag-text '%s'", text[:60])
+            break
+
+        for ln in _text_lines_from_tag(sib):
+            if any(lbl in ln for lbl in stop_labels):
+                logger.debug("[SECT] stop within block '%s'", ln[:60])
+                return lines
+            if len(ln) < 2:
+                continue
+            if ln in ("שיתוף", "הדפסה"):
+                continue
+            lines.append(ln)
+
+    return lines
+
+def _find_first_matching_label(soup: BeautifulSoup, labels: List[str]) -> Optional[Tag]:
+    for tag in soup.find_all(["h1", "h2", "h3", "h4", "strong", "p", "span"]):
+        txt = clean_html(tag.get_text())
+        if any(lbl == txt or lbl in txt for lbl in labels):
+            return tag
+    return None
+
+def parse_times_from_soup(soup: BeautifulSoup) -> Tuple[int, int]:
+    txt = soup.get_text(separator="\n", strip=True)
+    prep = 0
+    cook = 0
+
+    m_prep = re.search(r"זמן\s*הכנה\s*[:\-]\s*([^\n\r]+)", txt)
+    if m_prep:
+        prep = parse_time_value(m_prep.group(1))
+
+    m_cook = re.search(r"זמן\s*(?:בישול|אפייה|בישול/אפייה|בישול\/אפייה)\s*[:\-]\s*([^\n\r]+)", txt)
+    if m_cook:
+        cook = parse_time_value(m_cook.group(1))
+
+    if cook == 0:
+        m_alt = re.search(r"(?:אופים|אפייה)\s*.*?(\d+\s*-\s*\d+|\d+)\s*(?:דק(?:ה|ות)?)", txt)
+        if m_alt:
+            cook = convert_to_int(m_alt.group(1))
+
+    logger.info("[TIME] parsed: prep=%s cook=%s", prep, cook)
+    return prep, cook
+
+# =============================================================================
+# Domain plugin: 10dakot.co.il
+# =============================================================================
+
+def plugin_10dakot(html: str) -> Optional[RecipeModel]:
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        if "10dakot" not in (soup.find("meta", attrs={"property": "og:site_name"}) or {}).get("content", "").lower() \
+           and "10dakot" not in (soup.find("link", rel="shortlink") or {}).get("href", "").lower() \
+           and "10dakot" not in html.lower():
+            return None  # not that site
+
+        title = ""
+        h1 = soup.find(["h1", "h2"])
+        if h1:
+            title = clean_html(h1.get_text())
+        if not title:
+            t = soup.find("title")
+            title = clean_html(t.get_text()) if t else ""
+
+        description = ""
+        md = soup.find("meta", attrs={"property": "og:description"}) or soup.find("meta", attrs={"name": "description"})
+        if md and md.get("content"):
+            description = clean_html(md["content"])
+
+        image_url = ""
+        ogimg = soup.find("meta", attrs={"property": "og:image"})
+        if ogimg and ogimg.get("content"):
+            image_url = ogimg["content"]
+
+        ing_header = _find_first_matching_label(soup, ING_LABELS)
+        step_header = _find_first_matching_label(soup, STEP_LABELS)
+        logger.info("[PLUGIN] 10dakot labels: ing=%s step=%s", bool(ing_header), bool(step_header))
+
+        ingredients: List[str] = []
+        instructions: List[str] = []
+
+        if ing_header:
+            ingredients = _collect_after(ing_header, stop_labels=STEP_LABELS + STOP_LABELS)
+        if step_header:
+            instructions = _collect_after(step_header, stop_labels=STOP_LABELS)
+
+        def looks_like_real_ingredient(s: str) -> bool:
+            return any(ch.isdigit() for ch in s) or any(w in s for w in ["כפית", "כפות", "כוס", "מ\"ל", "גרם", "ג’", "שמן", "סוכר", "קמח", "ביצ"])
+
+        real_ings = [x for x in ingredients if looks_like_real_ingredient(x)] or ingredients
+        real_ings = extract_unique_lines(real_ings)
+        instructions = remove_exact_duplicates([x for x in instructions if len(x) > 4])
+
+        prep, cook = parse_times_from_soup(soup)
+
+        if title and (len(real_ings) >= 2 or len(instructions) >= 2):
+            model = RecipeModel(
+                title=title,
+                description=description,
+                ingredients=real_ings,
+                instructions=instructions,
+                prepTime=prep,
+                cookTime=cook,
+                servings=1,
+                tags=[],
+                imageUrl=image_url,
+            )
+            logger.info("[PLUGIN] success | title='%s' ings=%d steps=%d", title, len(real_ings), len(instructions))
+            return model
+
+        logger.info("[PLUGIN] fallback (insufficient lines) | ings=%d steps=%d", len(real_ings), len(instructions))
+    except Exception as e:
+        logger.debug("[PLUGIN] error: %s", e, exc_info=True)
+    logger.info("[PLUGIN] no match")
+    return None
+
+# =============================================================================
+# Generic heuristic (if plugin not applicable)
+# =============================================================================
+
+def heuristic_extract_from_html(html: str) -> Optional[RecipeModel]:
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+
+        title = ""
+        h1 = soup.find(["h1", "h2"])
+        if h1:
+            title = clean_html(h1.get_text())
+        if not title:
+            t = soup.find("title")
+            title = clean_html(t.get_text()) if t else ""
+
+        description = ""
+        md = soup.find("meta", attrs={"property": "og:description"}) or soup.find("meta", attrs={"name": "description"})
+        if md and md.get("content"):
+            description = clean_html(md["content"])
+
+        image_url = ""
+        ogimg = soup.find("meta", attrs={"property": "og:image"})
+        if ogimg and ogimg.get("content"):
+            image_url = ogimg["content"]
+
+        ing_header = _find_first_matching_label(soup, ING_LABELS)
+        step_header = _find_first_matching_label(soup, STEP_LABELS)
+
+        ingredients: List[str] = []
+        instructions: List[str] = []
+        if ing_header:
+            ingredients = _collect_after(ing_header, stop_labels=STEP_LABELS + STOP_LABELS)
+        if step_header:
+            instructions = _collect_after(step_header, stop_labels=STOP_LABELS)
+
+        ingredients = extract_unique_lines([x for x in ingredients if x])
+        instructions = remove_exact_duplicates([x for x in instructions if x])
+
+        prep, cook = parse_times_from_soup(soup)
+
+        if (title and (len(ingredients) >= 2 or len(instructions) >= 2)) or (len(ingredients) >= 3 and len(instructions) >= 2):
+            logger.info("[HEUR] success | ings=%d steps=%d", len(ingredients), len(instructions))
+            return RecipeModel(
+                title=title,
+                description=description,
+                ingredients=ingredients,
+                instructions=instructions,
+                prepTime=prep,
+                cookTime=cook,
+                servings=1,
+                tags=[],
+                imageUrl=image_url,
+            )
+        logger.info("[HEUR] header sections not sufficient")
+    except Exception as e:
+        logger.debug("[HEUR] failed: %s", e, exc_info=True)
+    return None
+
+# =============================================================================
+# Prompts (tight: require strict JSON)
+# =============================================================================
+
+def create_recipe_extraction_prompt(section_text: str) -> str:
+    return (
+        "את/ה מומחה/ית לחילוץ מתכונים. החזר/י אך ורק אובייקט JSON תקין יחיד (ללא טקסט נוסף), "
+        "בדיוק עם המפתחות: title, description, ingredients, instructions, prepTime, cookTime, servings, tags, imageUrl, source.\n"
+        "כללים: 1) החזר JSON בלבד; 2) numbers כמספרים (לא מחרוזות); 3) ללא פסיקים מיותרים; 4) ללא המצאות;\n"
+        "- ingredients ו-instructions הן מערכים של מחרוזות נקיות (ללא מספור/תבליטים).\n"
+        "- prepTime/cookTime בדקות שלמות (int).\n"
+        "- servings מספר שלם.\n\n"
+        "טקסט המתכון (האזור הרלוונטי):\n"
+        f"{section_text}\n"
+        "סיום."
+    )
+
+# =============================================================================
+# JSON Repair/Extraction (keep as safety even with format='json')
+# =============================================================================
+
+def _strip_code_fences(text: str) -> str:
+    s = text.strip()
+    m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", s, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    if s.startswith("```"):
+        s = s.split("```", 1)[1]
+    if s.endswith("```"):
+        s = s.rsplit("```", 1)[0]
+    if s.lstrip().lower().startswith("json\n"):
+        s = s.lstrip()[5:]
+    return s.strip()
+
+def _normalize_quotes(text: str) -> str:
+    return (
+        text.replace("\u201c", '"').replace("\u201d", '"')
+        .replace("\u2018", "'").replace("\u2019", "'")
+        .replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
+    )
+
+def _remove_trailing_commas(s: str) -> str:
+    return re.sub(r",(\s*[}\]])", r"\1", s)
+
+def _quote_unquoted_keys(s: str) -> str:
+    return re.sub(r'(?<=[{,])\s*([A-Za-z_][A-Za-z0-9_\-]*)\s*:', r'"\1":', s)
+
+def _quote_unquoted_string_values(s: str) -> str:
+    s = re.sub(
+        r'(:\s*)(?!-?\d+(?:\.\d+)?\b)(?!true\b|false\b|null\b)(?!\"|\{|\[)([^,\}\]]+)',
+        lambda m: m.group(1) + '"' + m.group(2).strip().replace('"', '\\"') + '"',
+        s,
+        flags=re.IGNORECASE,
+    )
+    s = re.sub(
+        r'(?:(?<=\[)|(?<=,))\s*(?!-?\d+(?:\.\d+)?\b)(?!true\b|false\b|null\b)(?!\"|\{|\[)([^,\]\}]+)\s*(?=,|\])',
+        lambda m: ' "' + m.group(1).strip().replace('"', '\\"') + '"',
+        s,
+        flags=re.IGNORECASE,
+    )
+    return s
+
+def _collapse_whitespace(s: str) -> str:
+    return re.sub(r"\s+", " ", s).strip()
+
+async def extract_and_parse_llm_json(output: str) -> dict:
+    s = _strip_code_fences(_normalize_quotes(output))
+    s = _remove_trailing_commas(_quote_unquoted_keys(s))
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        pass
+    s2 = _quote_unquoted_string_values(s)
+    s2 = _remove_trailing_commas(s2)
+    try:
+        return json.loads(s2)
+    except json.JSONDecodeError:
+        s3 = _collapse_whitespace(s2)
+        s3 = _remove_trailing_commas(s3)
+        return json.loads(s3)
+
+# =============================================================================
+# Normalization
+# =============================================================================
+
+def normalize_recipe_fields(recipe_data: dict) -> RecipeModel:
     if not recipe_data.get("title") and recipe_data.get("recipeName"):
         recipe_data["title"] = recipe_data["recipeName"]
 
-    # Times
-    if "prepTime" in recipe_data:
-        recipe_data["prepTime"] = parse_time_value(recipe_data["prepTime"])
-    elif "prep_time" in recipe_data:
-        recipe_data["prepTime"] = parse_time_value(recipe_data["prep_time"])
-
-    if "cookTime" in recipe_data:
-        recipe_data["cookTime"] = parse_time_value(recipe_data["cookTime"])
-    elif "cook_time" in recipe_data:
-        recipe_data["cookTime"] = parse_time_value(recipe_data["cook_time"])
-
-    # Servings
+    recipe_data["prepTime"] = parse_time_value(recipe_data.get("prepTime", 0))
+    recipe_data["cookTime"] = parse_time_value(recipe_data.get("cookTime", 0))
     if "servings" in recipe_data:
         recipe_data["servings"] = parse_servings(recipe_data["servings"])
     elif "recipeYield" in recipe_data:
         recipe_data["servings"] = parse_servings(recipe_data["recipeYield"])
+    else:
+        recipe_data["servings"] = 1
 
-    # Ingredients
-    if "ingredients" in recipe_data:
-        raw_ings = ensure_list(recipe_data["ingredients"])
-        normalized_ings = [normalize_ingredient(ing) for ing in raw_ings]
-        normalized_ings = extract_unique_lines(normalized_ings)
-        # Filter out any potential empty strings *after* normalization
-        recipe_data["ingredients"] = [ing for ing in normalized_ings if ing]
+    ings = ensure_list(recipe_data.get("ingredients"))
+    ings = [normalize_ingredient(x) for x in ings]
+    ings = extract_unique_lines([x for x in ings if x])
 
-    # Instructions
-    if "instructions" in recipe_data:
-        if isinstance(recipe_data["instructions"], str):
-            lines = recipe_data["instructions"].split("\n")
-            lines = [clean_html(l) for l in lines if clean_html(l)]
-            recipe_data["instructions"] = lines
-        else:
-            raw_instructions = ensure_list(recipe_data["instructions"])
-            final_instructions = []
-            for inst in raw_instructions:
-                line = clean_html(inst)
-                if line:
-                    final_instructions.append(line)
-            recipe_data["instructions"] = final_instructions
+    instr = recipe_data.get("instructions", [])
+    if isinstance(instr, str):
+        instr = [clean_html(x) for x in instr.split("\n") if clean_html(x)]
+    else:
+        instr = [clean_html(x) for x in ensure_list(instr) if clean_html(x)]
+    instr = remove_exact_duplicates(instr)
 
-        recipe_data["instructions"] = remove_exact_duplicates(recipe_data["instructions"])
-        # Temporarily disable the aggressive instruction filter
-        # recipe_data["instructions"] = filter_irrelevant_instructions(recipe_data["instructions"])
-        # logger.debug("Instructions filtering DISABLED") # Optional log
+    tags = recipe_data.get("tags", [])
+    if isinstance(tags, str):
+        tags = [clean_html(x) for x in tags.split(",") if clean_html(x)]
+    else:
+        tags = [clean_html(x) for x in ensure_list(tags) if clean_html(x)]
 
-    # Tags
-    if "tags" in recipe_data:
-        if isinstance(recipe_data["tags"], str):
-            raw_tags = recipe_data["tags"].split(",")
-            final_tags = [clean_html(t) for t in raw_tags if clean_html(t)]
-            recipe_data["tags"] = final_tags
-        else:
-            raw_tags = ensure_list(recipe_data["tags"])
-            final_tags = []
-            for tag in raw_tags:
-                line = clean_html(tag)
-                if line:
-                    final_tags.append(line)
-            recipe_data["tags"] = final_tags
+    model = RecipeModel(
+        title=clean_html(recipe_data.get("title")),
+        description=clean_html(recipe_data.get("description")),
+        ingredients=ings,
+        instructions=instr,
+        prepTime=recipe_data.get("prepTime", 0),
+        cookTime=recipe_data.get("cookTime", 0),
+        servings=recipe_data.get("servings", 1),
+        tags=tags,
+        notes=clean_html(recipe_data.get("notes")),
+        source=clean_html(recipe_data.get("source")),
+        imageUrl=clean_html(recipe_data.get("imageUrl")),
+    )
+    logger.debug("[NORM] title='%s' ings=%d steps=%d prep=%d cook=%d",
+                 model.title, len(model.ingredients), len(model.instructions), model.prepTime, model.cookTime)
+    return model
 
-    # Title/description
-    if "title" in recipe_data:
-        recipe_data["title"] = clean_html(recipe_data["title"])
-    if "description" in recipe_data:
-        recipe_data["description"] = clean_html(recipe_data["description"])
+# =============================================================================
+# Fetchers
+# =============================================================================
+async def fetch_with_httpx(url: str) -> str:
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, headers={"User-Agent": "RecipeKeeper/1.1"}) as client:
+        r = await client.get(url, follow_redirects=True)
+        r.raise_for_status()
+        content = r.text
+        kb = len(content.encode("utf-8", "ignore")) // 1024
+        logger.info("[FETCH] httpx %d KB", kb)
+        return _limit_size(content)
 
-    # Add default empty lists/values if fields are missing after normalization
-    recipe_data.setdefault("title", "")
-    recipe_data.setdefault("description", "")
-    recipe_data.setdefault("ingredients", [])
-    recipe_data.setdefault("instructions", [])
-    recipe_data.setdefault("prepTime", 0)
-    recipe_data.setdefault("cookTime", 0)
-    recipe_data.setdefault("servings", 1)
-    recipe_data.setdefault("tags", [])
-    recipe_data.setdefault("notes", "")
-    recipe_data.setdefault("source", "")
-    recipe_data.setdefault("imageUrl", "") # Ensure imageUrl field exists
+async def fetch_with_playwright(url: str) -> str:
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            context = await browser.new_context()
+            page = await context.new_page()
+            await page.goto(url, wait_until="load", timeout=PLAYWRIGHT_TIMEOUT_MS)
+            content = await page.content()
+            kb = len(content.encode("utf-8", "ignore")) // 1024
+            logger.info("[FETCH] playwright %d KB", kb)
+            return _limit_size(content)
+        finally:
+            await browser.close()
 
-    return recipe_data
+async def smart_fetch(url: str) -> str:
+    try:
+        html = await fetch_with_httpx(url)
+        if len(html) < 5000:
+            logger.info("[FETCH] httpx small; fallback to playwright")
+            return await fetch_with_playwright(url)
+        return html
+    except Exception as e:
+        logger.info("[FETCH] httpx failed (%s); fallback to playwright", e)
+        return await fetch_with_playwright(url)
 
-# --- FastAPI app ---
+# =============================================================================
+# OCR
+# =============================================================================
+
+def extract_text_from_image(image_bytes: bytes) -> str:
+    try:
+        image = Image.open(io.BytesIO(image_bytes))
+        img = ImageOps.exif_transpose(image).convert("L")
+        img = img.filter(ImageFilter.SHARPEN)
+        img = img.point(lambda x: 0 if x < 160 else 255, mode="1")
+        config = "--psm 6"
+        text = pytesseract.image_to_string(img, lang="eng+heb", config=config)
+        logger.debug("[OCR] extracted %d chars", len(text))
+        return text
+    except Exception as e:
+        logger.error("[OCR] failure: %s", e, exc_info=True)
+        raise APIError(f"OCR processing failed: {str(e)}")
+
+# =============================================================================
+# FastAPI app (same endpoints your frontend uses)
+# =============================================================================
 app = FastAPI(
     title="Recipe Keeper API",
-    version="1.0.0",
-    description="API for extracting recipes from any webpage or image using Ollama"
+    version="1.2.0",
+    description="API for extracting recipes from webpages or images using schema.org, heuristics (Hebrew-aware), and LLM (Ollama).",
 )
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # tighten in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Content-Disposition", "Access-Control-Allow-Origin"]
+    expose_headers=["Content-Disposition", "Access-Control-Allow-Origin"],
 )
 
 @app.exception_handler(APIError)
 async def api_error_handler(request, exc: APIError):
-    logger.error(f"APIError: {exc.message}", extra={"details": exc.details})
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"error": exc.message, "details": exc.details, "status_code": exc.status_code}
-    )
+    logger.error("APIError: %s | details=%s", exc.message, exc.details)
+    return JSONResponse(status_code=exc.status_code, content={"error": exc.message, "details": exc.details})
 
 @app.get("/")
 async def root():
-    return {
-        "message": "Welcome to Recipe Keeper API",
-        "docs": "/docs",
-        "redoc": "/redoc"
-    }
+    return {"message": "Welcome to Recipe Keeper API", "docs": "/docs", "redoc": "/redoc"}
 
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+# -----------------------------------------------------------------------------
+# Chat (Ollama) — unchanged behavior
+# -----------------------------------------------------------------------------
 @app.post("/chat")
 async def chat(request: ChatRequest):
-    """
-    Chat endpoint: pass user message to Ollama with optional Hebrew instructions.
-    """
-    import requests
+    sys_prompt = (
+        "You are a helpful assistant. Please respond in Hebrew, clearly and well-formatted."
+        if request.language.lower().startswith("he")
+        else "You are a helpful assistant. Please respond in English, clearly and well-formatted."
+    )
+    prompt = f"{sys_prompt}\n\nUser: {request.message}\nAssistant:"
+    payload = {"model": MODEL_NAME, "prompt": prompt, "stream": False}
     try:
-        system_prompt = (
-            "You are a helpful assistant. Please respond in Hebrew. Your responses should be clear and well-formatted in Hebrew."
-            if request.language == "he"
-            else "You are a helpful assistant. Please respond in English. Your responses should be well-formatted."
-        )
-        ollama_req = {
-            "model": MODEL_NAME,
-            "prompt": f"{system_prompt}\n\nUser: {request.message}\nAssistant:",
-            "stream": False
-        }
-        logger.debug(f"Sending to Ollama: {ollama_req}")
-        resp = requests.post(OLLAMA_API_URL, json=ollama_req)
-        if resp.status_code != 200:
-            raise HTTPException(status_code=500, detail="Ollama request failed")
-        data = resp.json()
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            r = await client.post(OLLAMA_API_URL, json=payload)
+            r.raise_for_status()
+            data = r.json()
         return {"response": data.get("response", ""), "model": MODEL_NAME}
     except Exception as e:
-        logger.error(f"Error in chat: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("[CHAT] error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Ollama request failed")
 
+# -----------------------------------------------------------------------------
+# Extract recipe from URL (your endpoint name kept)
+# - Small change: enforce Ollama strict JSON with "format": "json" and temperature 0
+# -----------------------------------------------------------------------------
 @app.post("/extract_recipe")
-async def extract_recipe(request: RecipeExtractionRequest):
-    """
-    Use Playwright Async API to fetch the full webpage text, pass to the LLM with instructions
-    to produce strict JSON containing only the recipe—exactly as found, with no made-up content.
-    """
-    import requests
+async def extract_recipe(req: RecipeExtractionRequest):
+    url = req.url.strip()
+    logger.info("[FLOW] extract_recipe START | url=%s", url)
+    if not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="Invalid URL")
     try:
-        logger.info(f"Fetching URL: {request.url}")
-        try:
-            raw_html = await fetch_page_with_playwright(request.url)
-        except Exception as e:
-            logger.error(f"Playwright fetch failed: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Failed to fetch page content: {e}")
+        html = await smart_fetch(url)
+        logger.debug("[FLOW] fetched html len=%d", len(html))
 
-        if len(raw_html) < 100:
-            raise HTTPException(status_code=400, detail="Webpage content too short")
+        # 1) schema.org
+        model = parse_schema_org_recipe(html)
+        if model and model.ingredients and model.instructions:
+            if not model.source:
+                model.source = url
+            return model.model_dump()
 
-        # Convert HTML to text
-        text = extract_recipe_content(raw_html)
-        logger.info(f"Text length: {len(text)}")
-        logger.debug(f"--- Text sent to LLM ---\n{text[:1000]}...\n--- End Text ---")
+        # 2) domain plugin (10dakot)
+        model = plugin_10dakot(html)
+        if model and (model.ingredients or model.instructions):
+            if not model.source:
+                model.source = url
+            return model.model_dump()
 
-        # Build prompt
-        prompt = create_recipe_extraction_prompt(text)
-        # logger.info(f"Prompt:\n{prompt}") # Optionally disable logging long prompts
+        # 3) heuristic
+        model = heuristic_extract_from_html(html)
+        if model and (model.ingredients or model.instructions):
+            if not model.source:
+                model.source = url
+            return model.model_dump()
 
-        # Send prompt to Ollama (using synchronous requests for now)
-        ollama_req = {
+        # 4) LLM fallback — build focused section first; if too small, use full text
+        soup = BeautifulSoup(html, "html.parser")
+        ing_header = _find_first_matching_label(soup, ING_LABELS)
+        step_header = _find_first_matching_label(soup, STEP_LABELS)
+        section_text = ""
+        if ing_header:
+            ilines = _collect_after(ing_header, stop_labels=STEP_LABELS + STOP_LABELS)
+            if ilines:
+                section_text += "רכיבים:\n" + "\n".join(ilines) + "\n\n"
+        if step_header:
+            slines = _collect_after(step_header, stop_labels=STOP_LABELS)
+            if slines:
+                section_text += "אופן ההכנה:\n" + "\n".join(slines) + "\n\n"
+
+        if len(section_text) < 400:
+            section_text = extract_recipe_content(html)
+            logger.info("[FOCUS] using compact full text len=%d", len(section_text))
+        else:
+            logger.info("[FOCUS] built section text len=%d", len(section_text))
+
+        prompt = create_recipe_extraction_prompt(section_text)
+        payload = {
             "model": MODEL_NAME,
             "prompt": prompt,
             "stream": False,
-            "options": {
-                "temperature": 0.3,
-                "num_ctx": 4096, # Consider if this needs adjustment based on prompt/text length
-                "top_k": 50,
-                "top_p": 0.95,
-            }
+            "format": "json",               # <<< enforce strict JSON
+            "options": {"temperature": 0, "num_ctx": 4096, "top_k": 40, "top_p": 0.9},
         }
-        # Note: requests is synchronous. For a fully async app, consider httpx.
-        try:
-            resp = requests.post(OLLAMA_API_URL, json=ollama_req, timeout=60)
-            resp.raise_for_status()
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Ollama request failed: {e}", exc_info=True)
-            raise HTTPException(status_code=502, detail=f"Failed to contact LLM service: {e}")
-            
-        data = resp.json()
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            r = await client.post(OLLAMA_API_URL, json=payload)
+            r.raise_for_status()
+            data = r.json()
         output = data.get("response", "")
-        logger.info(f"LLM output received (length: {len(output)})")
-        logger.debug(f"--- Raw LLM Output ---\n{output}\n--- End Raw LLM Output ---")
+        logger.info("[LLM] response len=%d", len(output))
+        logger.debug("[LLM] sample: %s", output[:400])
 
-        # Extract JSON from the LLM response
-        match = re.search(r'\{.*\}', output, re.DOTALL)
-        if not match:
-            logger.error(f"No JSON found in LLM output: {output[:500]}...") # Log beginning of output
-            raise HTTPException(status_code=500, detail="No valid JSON structure found in LLM response")
-
-        json_str = match.group()
+        # If format=json worked, output is already JSON; keep repair as safety
         try:
-            recipe_dict = json.loads(json_str)
-            logger.debug(f"Raw LLM JSON parsed: {recipe_dict}") # Log the parsed dict
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON from LLM: {e}. JSON String: {json_str[:500]}...", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Invalid JSON format received from LLM: {e}")
+            recipe_dict = json.loads(output)
+        except Exception:
+            recipe_dict = await extract_and_parse_llm_json(output)
 
-        # Normalize fields (ensuring no None->strip errors, removing irrelevant instructions)
-        try:
-            logger.debug(f"Recipe dict BEFORE normalization: {recipe_dict}")
-            recipe_dict = normalize_recipe_fields(recipe_dict)
-            logger.debug(f"Recipe dict AFTER normalization: {recipe_dict}")
-        except Exception as e:
-             logger.error(f"Error normalizing recipe fields: {e}", exc_info=True)
-             # Don't fail the whole request, just return the raw dict maybe?
-             # Or raise specific normalization error
-             pass # Continue with potentially unnormalized data for now
+        prep, cook = parse_times_from_soup(BeautifulSoup(html, "html.parser"))
+        recipe_dict.setdefault("prepTime", prep)
+        recipe_dict.setdefault("cookTime", cook)
+        recipe_dict.setdefault("source", url)
 
-        logger.info(f"Extracted recipe: {recipe_dict.get('title', 'No title')}")
-        return recipe_dict
+        recipe_model = normalize_recipe_fields(recipe_dict)
+        if not recipe_model.title:
+            recipe_model.title = "Recipe"
+        logger.info("[FLOW] done via LLM | title='%s' ings=%d steps=%d prep=%d cook=%d",
+                    recipe_model.title, len(recipe_model.ingredients), len(recipe_model.instructions),
+                    recipe_model.prepTime, recipe_model.cookTime)
+        return recipe_model.model_dump()
 
-    except HTTPException: # Re-raise HTTPExceptions
-        raise
-    except Exception as e: # Catch other unexpected errors
-        logger.error(f"Unexpected recipe extraction error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred during recipe extraction")
-
-@app.post("/extract_recipe_from_image")
-async def extract_recipe_from_image(request: ImageExtractionRequest):
-    """
-    Extract recipe from an uploaded image using OCR and LLM
-    """
-    import requests
-    try:
-        # Decode base64 image
-        try:
-            image_data = base64.b64decode(request.image_data.split(',')[1] if ',' in request.image_data else request.image_data)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid image data: {str(e)}")
-        
-        # Extract text using OCR
-        text = extract_text_from_image(image_data)
-        if not text or len(text) < 50:
-            raise HTTPException(status_code=400, detail="Not enough text extracted from image")
-        
-        logger.info(f"Extracted text from image: {len(text)} characters")
-        
-        # Create prompt for LLM
-        prompt = create_image_extraction_prompt(text)
-        
-        # Send to Ollama
-        ollama_req = {
-            "model": MODEL_NAME,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.3,
-                "num_ctx": 4096,
-                "top_k": 50,
-                "top_p": 0.95,
-            }
-        }
-        
-        resp = requests.post(OLLAMA_API_URL, json=ollama_req, timeout=60)
-        resp.raise_for_status()
-        data = resp.json()
-        output = data.get("response", "")
-        
-        # Extract JSON from response
-        match = re.search(r'\{.*\}', output, re.DOTALL)
-        if not match:
-            raise HTTPException(status_code=500, detail="No JSON found in LLM output")
-            
-        json_str = match.group()
-        try:
-            recipe_dict = json.loads(json_str)
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=500, detail="Invalid JSON from LLM")
-            
-        # Normalize and clean up fields (remove irrelevant lines)
-        recipe_dict = normalize_recipe_fields(recipe_dict)
-        
-        logger.info(f"Extracted recipe from image: {recipe_dict.get('title', 'No title')}")
-        return recipe_dict
-        
-    except Exception as e:
-        logger.error(f"Image recipe extraction error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
-
-@app.post("/upload_recipe_image")
-async def upload_recipe_image(file: UploadFile = File(...)):
-    """
-    Upload and process a recipe image
-    """
-    try:
-        # Read the image
-        contents = await file.read()
-        
-        # Extract text using OCR
-        text = extract_text_from_image(contents)
-        if not text or len(text) < 50:
-            raise HTTPException(status_code=400, detail="Not enough text extracted from image")
-        
-        # Create prompt for LLM
-        prompt = create_image_extraction_prompt(text)
-        
-        # Send to Ollama
-        import requests
-        ollama_req = {
-            "model": MODEL_NAME,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.3,
-                "num_ctx": 4096,
-                "top_k": 50,
-                "top_p": 0.95,
-            }
-        }
-        
-        resp = requests.post(OLLAMA_API_URL, json=ollama_req, timeout=60)
-        resp.raise_for_status()
-        data = resp.json()
-        output = data.get("response", "")
-        
-        # Extract JSON from response
-        match = re.search(r'\{.*\}', output, re.DOTALL)
-        if not match:
-            raise HTTPException(status_code=500, detail="No JSON found in LLM output")
-            
-        json_str = match.group()
-        try:
-            recipe_dict = json.loads(json_str)
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=500, detail="Invalid JSON from LLM")
-            
-        # Normalize and clean up fields (remove irrelevant lines)
-        recipe_dict = normalize_recipe_fields(recipe_dict)
-        
-        logger.info(f"Extracted recipe from uploaded image: {recipe_dict.get('title', 'No title')}")
-        return recipe_dict
-        
-    except Exception as e:
-        logger.error(f"Error processing uploaded image: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error processing uploaded image: {str(e)}")
-
-# New route for custom recipe generation
-@app.post("/custom_recipe")
-async def custom_recipe(request: CustomRecipeRequest):
-    """
-    Generate a custom recipe based on provided groceries and a general description.
-    """
-    import requests
-    try:
-        # Build a prompt for recipe generation
-        prompt = (
-            "You are a recipe creation expert. Based on the following groceries and request, "
-            "create a detailed recipe. Include title, description, ingredients, instructions, prepTime, cookTime, servings, and tags. "
-            "Do not invent any details beyond what is reasonable given the inputs.\n\n"
-            "Groceries: " + request.groceries + "\n\n" +
-            "Request: " + request.description + "\n\n" +
-            "Return the recipe in a strict JSON format with the following keys:\n"
-            "{\n"
-            "  \"title\": \"Recipe title\",\n"
-            "  \"description\": \"Brief description\",\n"
-            "  \"ingredients\": [\"ingredient 1\", \"ingredient 2\", ...],\n"
-            "  \"instructions\": [\"step 1\", \"step 2\", ...],\n"
-            "  \"prepTime\": numberOfMinutes,\n"
-            "  \"cookTime\": numberOfMinutes,\n"
-            "  \"servings\": numberOfServings,\n"
-            "  \"tags\": [\"tag1\", \"tag2\", ...]\n"
-            "}\n\n"
-            "Ensure the recipe is consistent and realistic. Return ONLY the JSON."
-        )
-        ollama_req = {
-            "model": MODEL_NAME,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.5,
-                "num_ctx": 4096,
-                "top_k": 50,
-                "top_p": 0.95,
-            }
-        }
-        resp = requests.post(OLLAMA_API_URL, json=ollama_req, timeout=60)
-        resp.raise_for_status()
-        data = resp.json()
-        output = data.get("response", "")
-        # Extract JSON from the output
-        match = re.search(r'\{.*\}', output, re.DOTALL)
-        if not match:
-            raise HTTPException(status_code=500, detail="No valid JSON structure found in LLM response")
-        json_str = match.group()
-        try:
-            recipe_dict = json.loads(json_str)
-        except json.JSONDecodeError as e:
-            raise HTTPException(status_code=500, detail=f"Invalid JSON format received from LLM: {e}")
-        # Normalize fields (using existing normalization functions)
-        recipe_dict = normalize_recipe_fields(recipe_dict)
-        return recipe_dict
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error generating custom recipe: {e}", exc_info=True)
+        logger.error("[FLOW] unexpected error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred during recipe extraction")
+
+# -----------------------------------------------------------------------------
+# Extract recipe from Base64 image — now also uses format='json' for robustness
+# -----------------------------------------------------------------------------
+@app.post("/extract_recipe_from_image")
+async def extract_recipe_from_image(req: ImageExtractionRequest):
+    try:
+        data = req.image_data
+        if "," in data:
+            data = data.split(",", 1)[1]
+        image_bytes = base64.b64decode(data)
+        text = extract_text_from_image(image_bytes)
+        if not text or len(text) < 40:
+            raise HTTPException(status_code=400, detail="Not enough text extracted from image")
+
+        prompt = create_recipe_extraction_prompt(text)
+        payload = {
+            "model": MODEL_NAME,
+            "prompt": prompt,
+            "stream": False,
+            "format": "json",               # <<< strict JSON
+            "options": {"temperature": 0, "num_ctx": 4096, "top_k": 40, "top_p": 0.9},
+        }
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            r = await client.post(OLLAMA_API_URL, json=payload)
+            r.raise_for_status()
+            data = r.json()
+        output = data.get("response", "")
+
+        try:
+            recipe_dict = json.loads(output)
+        except Exception:
+            recipe_dict = await extract_and_parse_llm_json(output)
+        recipe_model = normalize_recipe_fields(recipe_dict)
+        return recipe_model.model_dump()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[IMG] error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
+
+# -----------------------------------------------------------------------------
+# Upload recipe image (multipart) — also strict JSON
+# -----------------------------------------------------------------------------
+@app.post("/upload_recipe_image")
+async def upload_recipe_image(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        text = extract_text_from_image(contents)
+        if not text or len(text) < 40:
+            raise HTTPException(status_code=400, detail="Not enough text extracted from image")
+
+        prompt = create_recipe_extraction_prompt(text)
+        payload = {
+            "model": MODEL_NAME,
+            "prompt": prompt,
+            "stream": False,
+            "format": "json",               # <<< strict JSON
+            "options": {"temperature": 0, "num_ctx": 4096, "top_k": 40, "top_p": 0.9},
+        }
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            r = await client.post(OLLAMA_API_URL, json=payload)
+            r.raise_for_status()
+            data = r.json()
+        output = data.get("response", "")
+
+        try:
+            recipe_dict = json.loads(output)
+        except Exception:
+            recipe_dict = await extract_and_parse_llm_json(output)
+        recipe_model = normalize_recipe_fields(recipe_dict)
+        return recipe_model.model_dump()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[UPLOAD] error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error processing uploaded image: {str(e)}")
+
+# -----------------------------------------------------------------------------
+# Custom recipe generation — keep endpoint; add format='json'
+# -----------------------------------------------------------------------------
+@app.post("/custom_recipe")
+async def custom_recipe(req: CustomRecipeRequest):
+    try:
+        prompt = (
+            "את/ה יוצר/ת מתכונים. בנה/י JSON יחיד ותקין בלבד.\n"
+            f"מצרכים זמינים: {req.groceries}\n"
+            f"תיאור בקשה: {req.description}\n\n"
+            "החזר/י אך ורק אובייקט עם המפתחות: "
+            "{title, description, ingredients, instructions, prepTime, cookTime, servings, tags, imageUrl, source}.\n"
+            "חוקים: JSON תקין בלבד; ללא פסיקים מיותרים; מספרים לא במרכאות."
+        )
+        payload = {
+            "model": MODEL_NAME,
+            "prompt": prompt,
+            "stream": False,
+            "format": "json",               # <<< strict JSON
+            "options": {"temperature": 0.5, "num_ctx": 4096, "top_k": 50, "top_p": 0.95},
+        }
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            r = await client.post(OLLAMA_API_URL, json=payload)
+            r.raise_for_status()
+            data = r.json()
+        output = data.get("response", "")
+
+        try:
+            recipe_dict = json.loads(output)
+        except Exception:
+            recipe_dict = await extract_and_parse_llm_json(output)
+        recipe_model = normalize_recipe_fields(recipe_dict)
+        return recipe_model.model_dump()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[CUSTOM] error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="An unexpected error occurred during custom recipe generation")
 
-# Add a route for proxying images to bypass CORS restrictions
+# -----------------------------------------------------------------------------
+# Simple image proxy (CORS bypass)
+# -----------------------------------------------------------------------------
 @app.get("/proxy_image")
 async def proxy_image(url: str):
-    """
-    Proxy an image from an external URL to bypass CORS restrictions.
-    """
-    import requests
-    from fastapi.responses import Response
-    
     try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        
-        # Get the content type
-        content_type = response.headers.get("Content-Type", "image/jpeg")
-        
-        # Return the image with the proper content type
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            content_type = r.headers.get("Content-Type", "image/jpeg")
+            content = r.content
         return Response(
-            content=response.content, 
+            content=content,
             media_type=content_type,
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Cache-Control": "public, max-age=86400"  # Cache for 24 hours
-            }
+            headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=86400"},
         )
     except Exception as e:
-        logger.error(f"Error proxying image: {e}")
+        logger.error("[PROXY] error: %s", e, exc_info=True)
         raise APIError(f"Failed to proxy image: {str(e)}", status_code=500)
 
+# =============================================================================
+# Entrypoint
+# =============================================================================
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

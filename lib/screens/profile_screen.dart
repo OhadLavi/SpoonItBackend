@@ -8,6 +8,8 @@ import 'package:recipe_keeper/utils/app_theme.dart';
 import 'package:recipe_keeper/utils/translations.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:recipe_keeper/services/image_service.dart';
+import 'package:recipe_keeper/widgets/app_header.dart';
+import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -18,25 +20,45 @@ class ProfileScreen extends ConsumerWidget {
     final userDataAsync = ref.watch(userDataProvider);
 
     return Scaffold(
-      appBar: AppBar(title: Text(AppTranslations.getText(ref, 'profile'))),
-      body: authState.when(
-        initial: () => const Center(child: CircularProgressIndicator()),
-        loading: () => const Center(child: CircularProgressIndicator()),
-        authenticated: (user) {
-          return userDataAsync.when(
-            data: (userData) {
-              if (userData == null) {
-                return const Center(child: Text('User data not found'));
-              }
+      backgroundColor: Colors.white,
+      body: Column(
+        children: [
+          const AppHeader(title: 'פרופיל'),
+          Expanded(
+            child: authState.when(
+              initial:
+                  () => const Center(
+                    child: CircularProgressIndicator(color: Color(0xFFFF7E6B)),
+                  ),
+              loading:
+                  () => const Center(
+                    child: CircularProgressIndicator(color: Color(0xFFFF7E6B)),
+                  ),
+              authenticated: (user) {
+                return userDataAsync.when(
+                  data: (userData) {
+                    if (userData == null) {
+                      return const Center(child: Text('User data not found'));
+                    }
 
-              return _buildProfileContent(context, ref, userData);
-            },
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (error, _) => Center(child: Text('Error: $error')),
-          );
-        },
-        unauthenticated: () => _buildSignInPrompt(context, ref),
-        error: (errorMessage) => Center(child: Text('Error: $errorMessage')),
+                    return _buildProfileContent(context, ref, userData);
+                  },
+                  loading:
+                      () => const Center(
+                        child: CircularProgressIndicator(
+                          color: Color(0xFFFF7E6B),
+                        ),
+                      ),
+                  error: (error, _) => Center(child: Text('Error: $error')),
+                );
+              },
+              unauthenticated: () => _buildSignInPrompt(context, ref),
+              error:
+                  (errorMessage) => Center(child: Text('Error: $errorMessage')),
+            ),
+          ),
+          const AppBottomNav(currentIndex: -1),
+        ],
       ),
     );
   }
@@ -50,12 +72,17 @@ class ProfileScreen extends ConsumerWidget {
           const SizedBox(height: 16),
           Text(
             AppTranslations.getText(ref, 'not_signed_in'),
-            style: AppTheme.headingStyle,
+            style: AppTheme.headingStyle.copyWith(
+              color: const Color(0xFF6E3C3F),
+              fontWeight: FontWeight.bold,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
             AppTranslations.getText(ref, 'sign_in_prompt'),
-            style: AppTheme.captionStyle,
+            style: AppTheme.captionStyle.copyWith(
+              color: const Color(0xFF6E3C3F).withOpacity(0.7),
+            ),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 24),
@@ -90,14 +117,15 @@ class ProfileScreen extends ConsumerWidget {
                 Text(
                   userData.displayName,
                   style: AppTheme.headingStyle.copyWith(
-                    color: Theme.of(context).textTheme.titleLarge?.color,
+                    color: const Color(0xFF6E3C3F),
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   userData.email,
                   style: AppTheme.captionStyle.copyWith(
-                    color: Theme.of(context).textTheme.bodyLarge?.color,
+                    color: const Color(0xFF6E3C3F).withOpacity(0.7),
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -119,7 +147,7 @@ class ProfileScreen extends ConsumerWidget {
   Widget _buildProfileImage(String? photoURL) {
     return CircleAvatar(
       radius: 60,
-      backgroundColor: Colors.grey[200],
+      backgroundColor: const Color(0xFFFF7E6B).withOpacity(0.1),
       backgroundImage:
           photoURL != null && photoURL.isNotEmpty
               ? CachedNetworkImageProvider(
@@ -128,7 +156,7 @@ class ProfileScreen extends ConsumerWidget {
               : null,
       child:
           photoURL == null || photoURL.isEmpty
-              ? const Icon(Icons.person, size: 60, color: Colors.grey)
+              ? const Icon(Icons.person, size: 60, color: Color(0xFFFF7E6B))
               : null,
     );
   }
@@ -138,9 +166,19 @@ class ProfileScreen extends ConsumerWidget {
     WidgetRef ref,
     AppUser userData,
   ) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F8F8),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            spreadRadius: 1,
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -149,7 +187,8 @@ class ProfileScreen extends ConsumerWidget {
             Text(
               AppTranslations.getText(ref, 'your_stats'),
               style: AppTheme.subheadingStyle.copyWith(
-                color: Theme.of(context).textTheme.titleLarge?.color,
+                color: const Color(0xFF6E3C3F),
+                fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 16),
@@ -159,14 +198,8 @@ class ProfileScreen extends ConsumerWidget {
                 _buildStatItem(
                   context: context,
                   icon: Icons.restaurant_menu,
-                  label: AppTranslations.getText(ref, 'recipes'),
+                  label: 'המתכונים שלי',
                   value: userData.recipeCount.toString(),
-                ),
-                _buildStatItem(
-                  context: context,
-                  icon: Icons.favorite,
-                  label: AppTranslations.getText(ref, 'favorites'),
-                  value: userData.favoriteCount.toString(),
                 ),
                 _buildStatItem(
                   context: context,
@@ -192,21 +225,24 @@ class ProfileScreen extends ConsumerWidget {
     required String label,
     required String value,
   }) {
-    final bool isDark = Theme.of(context).brightness == Brightness.dark;
-    final Color valueColor = isDark ? Colors.white : AppTheme.textColor;
-    final Color labelColor =
-        isDark ? Colors.white70 : AppTheme.secondaryTextColor;
-
     return Column(
       children: [
-        Icon(icon, color: AppTheme.primaryColor),
+        Icon(icon, color: const Color(0xFFFF7E6B)),
         const SizedBox(height: 8),
         Text(
           value,
-          style: AppTheme.subheadingStyle.copyWith(color: valueColor),
+          style: AppTheme.subheadingStyle.copyWith(
+            color: const Color(0xFF6E3C3F),
+            fontWeight: FontWeight.bold,
+          ),
         ),
         const SizedBox(height: 4),
-        Text(label, style: AppTheme.captionStyle.copyWith(color: labelColor)),
+        Text(
+          label,
+          style: AppTheme.captionStyle.copyWith(
+            color: const Color(0xFF6E3C3F).withOpacity(0.7),
+          ),
+        ),
       ],
     );
   }
@@ -215,9 +251,19 @@ class ProfileScreen extends ConsumerWidget {
     final currentLanguage = ref.watch(languageProvider);
     final currentTheme = ref.watch(themeModeProvider);
 
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F8F8),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            spreadRadius: 1,
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -226,7 +272,8 @@ class ProfileScreen extends ConsumerWidget {
             Text(
               AppTranslations.getText(ref, 'account_settings'),
               style: AppTheme.subheadingStyle.copyWith(
-                color: Theme.of(context).textTheme.titleLarge?.color,
+                color: const Color(0xFF6E3C3F),
+                fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 16),
@@ -413,106 +460,29 @@ class ProfileScreen extends ConsumerWidget {
     return ListTile(
       leading: Icon(
         icon,
-        color: isDestructive ? Colors.red : AppTheme.primaryColor,
+        color: isDestructive ? Colors.red : const Color(0xFFFF7E6B),
       ),
       title: Text(
         title,
         style: TextStyle(
-          color: isDestructive ? Colors.red : null,
+          color: isDestructive ? Colors.red : const Color(0xFF6E3C3F),
           fontFamily: 'Poppins',
+          fontWeight: FontWeight.w500,
         ),
       ),
       subtitle:
           subtitle != null
               ? Text(
                 subtitle,
-                style: const TextStyle(fontFamily: 'Poppins', fontSize: 12),
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontSize: 12,
+                  color: const Color(0xFF6E3C3F).withOpacity(0.6),
+                ),
               )
               : null,
       trailing: const Icon(Icons.chevron_right),
       onTap: onTap,
-    );
-  }
-
-  void _changePassword(BuildContext context, WidgetRef ref) {
-    String errorMessage = '';
-    final TextEditingController currentController = TextEditingController();
-    final TextEditingController newController = TextEditingController();
-    showDialog(
-      context: context,
-      builder:
-          (context) => StatefulBuilder(
-            builder:
-                (context, setState) => AlertDialog(
-                  title: Text(AppTranslations.getText(ref, 'change_password')),
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TextField(
-                        controller: currentController,
-                        obscureText: true,
-                        decoration: InputDecoration(
-                          labelText: AppTranslations.getText(
-                            ref,
-                            'current_password',
-                          ),
-                        ),
-                      ),
-                      TextField(
-                        controller: newController,
-                        obscureText: true,
-                        decoration: InputDecoration(
-                          labelText: AppTranslations.getText(
-                            ref,
-                            'new_password',
-                          ),
-                        ),
-                      ),
-                      if (errorMessage.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            errorMessage,
-                            style: const TextStyle(color: Colors.red),
-                          ),
-                        ),
-                    ],
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: Text(AppTranslations.getText(ref, 'cancel')),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        // Simulated password check; "correctpassword" is the valid current password.
-                        if (currentController.text != 'correctpassword') {
-                          setState(() {
-                            errorMessage = AppTranslations.getText(
-                              ref,
-                              'wrong_current_password',
-                            );
-                          });
-                        } else {
-                          Navigator.pop(context);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                AppTranslations.getText(
-                                  ref,
-                                  'password_changed',
-                                ),
-                              ),
-                            ),
-                          );
-                          // TODO: Proceed with actual password update
-                        }
-                      },
-                      child: Text(AppTranslations.getText(ref, 'ok')),
-                    ),
-                  ],
-                ),
-          ),
     );
   }
 
@@ -550,7 +520,10 @@ class ProfileScreen extends ConsumerWidget {
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (context) => const Center(child: CircularProgressIndicator()),
+        builder:
+            (context) => const Center(
+              child: CircularProgressIndicator(color: Color(0xFFFF7E6B)),
+            ),
       );
 
       await ref.read(authProvider.notifier).deleteAccount();

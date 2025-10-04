@@ -2,22 +2,24 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
-  // Light Theme Colors
-  static const Color primaryColor = Colors.lightBlue;
+  // Light Theme Colors - Updated to match new app style
+  static const Color primaryColor = Color(0xFFFF7E6B); // Peach/Coral
   static const Color lightBlueColor = Colors.lightBlue;
-  static const Color accentColor = Color(0xFF64B5F6); // Light Blue 300
-  static const Color backgroundColor = Color(0xFFF5F5F5);
-  static const Color cardColor = Colors.white;
-  static const Color textColor = Color(0xFF333333);
-  static const Color secondaryTextColor = Color(0xFF757575);
+  static const Color accentColor = Color(0xFFFF7E6B); // Peach/Coral
+  static const Color backgroundColor = Colors.white;
+  static const Color cardColor = Color(0xFFF8F8F8); // Light gray
+  static const Color textColor = Color(0xFF6E3C3F); // Dark reddish-brown
+  static const Color secondaryTextColor = Color(
+    0xFF6E3C3F,
+  ); // Dark reddish-brown with opacity
   static const Color errorColor = Color(0xFFE53935);
-  static const Color successColor = Color(0xFF29B6F6); // Light Blue 400
+  static const Color successColor = Color(0xFFFF7E6B); // Peach/Coral
   static const Color warningColor = Color(0xFFFFA000);
   static const Color dividerColor = Color(0xFFE0E0E0);
 
-  // Dark Theme Colors
-  static const Color darkPrimaryColor = Colors.lightBlue;
-  static const Color darkAccentColor = Color(0xFF82B1FF); // Light Blue A100
+  // Dark Theme Colors - Updated to match new app style
+  static const Color darkPrimaryColor = Color(0xFFFF7E6B); // Peach/Coral
+  static const Color darkAccentColor = Color(0xFFFF7E6B); // Peach/Coral
   static const Color darkBackgroundColor = Color(0xFF121212);
   static const Color darkCardColor = Color(0xFF1E1E1E);
   static const Color darkTextColor = Color(0xFFEEEEEE);

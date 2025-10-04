@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+start_backend.bat
+BACKEND_SETUP.md
+start_backend.sh

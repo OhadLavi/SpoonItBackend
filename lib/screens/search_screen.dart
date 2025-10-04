@@ -9,6 +9,8 @@ import 'package:recipe_keeper/models/recipe.dart';
 import 'package:recipe_keeper/utils/translations.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:recipe_keeper/services/image_service.dart';
+import 'package:recipe_keeper/widgets/app_header.dart';
+import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({super.key});
@@ -84,9 +86,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final recipesState = ref.watch(recipeStateProvider);
 
     return Scaffold(
-      appBar: AppBar(title: Text(AppTranslations.getText(ref, 'search'))),
+      backgroundColor: Colors.white,
       body: Column(
         children: [
+          const AppHeader(title: 'חיפוש'),
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: TextField(
@@ -107,7 +110,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           recipesState.when(
             loading:
                 () => const Expanded(
-                  child: Center(child: CircularProgressIndicator()),
+                  child: Center(
+                    child: CircularProgressIndicator(color: Color(0xFFFF7E6B)),
+                  ),
                 ),
             error:
                 (error, stackTrace) => Expanded(
@@ -123,7 +128,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             data: (recipes) {
               if (_isSearching) {
                 return const Expanded(
-                  child: Center(child: CircularProgressIndicator()),
+                  child: Center(
+                    child: CircularProgressIndicator(color: Color(0xFFFF7E6B)),
+                  ),
                 );
               } else if (_searchQuery.isNotEmpty && _searchResults.isEmpty) {
                 return Expanded(
@@ -231,7 +238,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                                         placeholder:
                                             (context, url) => const Center(
                                               child: CircularProgressIndicator(
-                                                color: AppTheme.primaryColor,
+                                                color: Color(0xFFFF7E6B),
                                               ),
                                             ),
                                         errorWidget: (context, url, error) {
@@ -350,6 +357,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               }
             },
           ),
+          const AppBottomNav(currentIndex: -1),
         ],
       ),
       floatingActionButton:

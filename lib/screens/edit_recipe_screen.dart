@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:recipe_keeper/providers/recipe_provider.dart';
 import 'package:recipe_keeper/widgets/recipe_form.dart';
-import 'package:recipe_keeper/utils/translations.dart';
+import 'package:recipe_keeper/widgets/app_header.dart';
+import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
+import 'package:recipe_keeper/utils/app_theme.dart';
 
 class EditRecipeScreen extends ConsumerStatefulWidget {
   final String recipeId;
@@ -20,113 +22,236 @@ class _EditRecipeScreenState extends ConsumerState<EditRecipeScreen> {
   @override
   Widget build(BuildContext context) {
     final recipeAsync = ref.watch(recipeProvider(widget.recipeId));
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isLargeScreen = screenWidth > 900;
 
     return recipeAsync.when(
       data: (recipe) {
         if (recipe == null) {
           return Scaffold(
-            appBar: AppBar(
-              title: Text(AppTranslations.getText(ref, 'edit_recipe')),
-            ),
-            body: Center(
-              child: Text(AppTranslations.getText(ref, 'recipe_not_found')),
+            backgroundColor: Colors.white,
+            body: Column(
+              children: [
+                AppHeader(
+                  title: 'עריכת מתכון',
+                  showBackButton: true,
+                  onBackPressed: () => context.pop(),
+                ),
+                Expanded(
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.restaurant_menu,
+                          size: 80,
+                          color: AppTheme.secondaryTextColor.withOpacity(0.5),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'המתכון לא נמצא',
+                          style: const TextStyle(
+                            fontFamily: 'Poppins',
+                            fontSize: 18,
+                            fontWeight: FontWeight.w500,
+                            color: AppTheme.textColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const AppBottomNav(currentIndex: -1),
+              ],
             ),
           );
         }
 
         return Scaffold(
-          appBar: AppBar(
-            title: Text(AppTranslations.getText(ref, 'edit_recipe')),
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back),
-              onPressed: () => context.pop(),
-            ),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.save),
-                tooltip: AppTranslations.getText(ref, 'save_changes'),
-                onPressed: () {
-                  // Show saving indicator
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(AppTranslations.getText(ref, 'saving')),
-                      backgroundColor: Colors.green,
-                      duration: const Duration(seconds: 1),
-                    ),
-                  );
-
-                  // Use the form key to trigger validation and submission
-                  final formState = _formKey?.currentState;
-                  if (formState != null && formState.validate()) {
-                    // This will call the onSubmit callback on the RecipeForm
-                    // which already handles the success messaging and navigation
-                  }
-                },
-              ),
-            ],
-            elevation: 0, // Remove shadow for a more modern look
-            backgroundColor:
-                Theme.of(context).brightness == Brightness.dark
-                    ? Colors.black54
-                    : Theme.of(context).primaryColor,
-          ),
-          body: Container(
-            color:
-                Theme.of(context).brightness == Brightness.dark
-                    ? Colors.black12
-                    : Colors.grey[50],
-            child: Center(
-              child: Container(
-                constraints: BoxConstraints(
-                  maxWidth: isLargeScreen ? 900 : double.infinity,
-                ),
-                child: Card(
-                  margin: const EdgeInsets.all(16.0),
-                  elevation: 4,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: RecipeForm(
-                    initialRecipe: recipe,
-                    isEditing: true,
-                    onFormReady: (key) {
-                      // Store the key reference directly without setState
-                      _formKey = key;
-                    },
-                    onSubmit: () {
-                      // Handle successful save callback - this will be called after form validation
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            AppTranslations.getText(
-                              ref,
-                              'recipe_updated_successfully',
-                            ),
-                          ),
-                          backgroundColor: Colors.green,
+          backgroundColor: Colors.white,
+          body: Column(
+            children: [
+              AppHeader(
+                title: 'עריכת מתכון',
+                showBackButton: true,
+                onBackPressed: () => context.pop(),
+                customContent: Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(20),
                         ),
-                      );
-                      // Navigate to recipe detail screen after successful save
-                      context.go('/recipe/${recipe.id}');
-                    },
+                        child: Center(
+                          child: Text(
+                            recipe.title,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                              fontFamily: 'Heebo',
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Container(
+                      height: 40,
+                      width: 40,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: IconButton(
+                        icon: const Icon(
+                          Icons.save,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                        onPressed: () {
+                          // Show saving indicator
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: const Text(
+                                'שומר...',
+                                style: TextStyle(
+                                  fontFamily: 'Heebo',
+                                  color: Colors.white,
+                                ),
+                              ),
+                              backgroundColor: const Color(0xFFFF7E6B),
+                              duration: const Duration(seconds: 1),
+                            ),
+                          );
+
+                          // Use the form key to trigger validation and submission
+                          final formState = _formKey?.currentState;
+                          if (formState != null && formState.validate()) {
+                            // This will call the onSubmit callback on the RecipeForm
+                            // which already handles the success messaging and navigation
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Container(
+                  color: const Color(0xFFF8F8F8),
+                  child: Center(
+                    child: Container(
+                      constraints: const BoxConstraints(maxWidth: 900),
+                      child: Card(
+                        margin: const EdgeInsets.all(16.0),
+                        elevation: 4,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: RecipeForm(
+                          initialRecipe: recipe,
+                          isEditing: true,
+                          onFormReady: (key) {
+                            // Store the key reference directly without setState
+                            _formKey = key;
+                          },
+                          onSubmit: () {
+                            // Handle successful save callback - this will be called after form validation
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'המתכון עודכן בהצלחה!',
+                                  style: TextStyle(
+                                    fontFamily: 'Heebo',
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                backgroundColor: Color(0xFFFF7E6B),
+                              ),
+                            );
+                            // Navigate to recipe detail screen after successful save
+                            context.go('/recipe/${recipe.id}');
+                          },
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
+              const AppBottomNav(currentIndex: -1),
+            ],
           ),
         );
       },
       loading:
-          () =>
-              const Scaffold(body: Center(child: CircularProgressIndicator())),
+          () => Scaffold(
+            backgroundColor: Colors.white,
+            body: Column(
+              children: [
+                AppHeader(
+                  title: 'עריכת מתכון',
+                  showBackButton: true,
+                  onBackPressed: () => context.pop(),
+                ),
+                const Expanded(
+                  child: Center(
+                    child: CircularProgressIndicator(color: Color(0xFFFF7E6B)),
+                  ),
+                ),
+                const AppBottomNav(currentIndex: -1),
+              ],
+            ),
+          ),
       error:
           (error, stackTrace) => Scaffold(
-            appBar: AppBar(
-              title: Text(AppTranslations.getText(ref, 'edit_recipe')),
+            backgroundColor: Colors.white,
+            body: Column(
+              children: [
+                AppHeader(
+                  title: 'עריכת מתכון',
+                  showBackButton: true,
+                  onBackPressed: () => context.pop(),
+                ),
+                Expanded(
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.error_outline,
+                          size: 80,
+                          color: AppTheme.secondaryTextColor.withOpacity(0.5),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'שגיאה בטעינת המתכון',
+                          style: const TextStyle(
+                            fontFamily: 'Poppins',
+                            fontSize: 18,
+                            fontWeight: FontWeight.w500,
+                            color: AppTheme.textColor,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          error.toString(),
+                          style: const TextStyle(
+                            fontFamily: 'Poppins',
+                            fontSize: 14,
+                            color: AppTheme.secondaryTextColor,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const AppBottomNav(currentIndex: -1),
+              ],
             ),
-            body: Center(child: Text('Error: ${error.toString()}')),
           ),
     );
   }

@@ -125,7 +125,7 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
                                       placeholder:
                                           (context, url) => const Center(
                                             child: CircularProgressIndicator(
-                                              color: AppTheme.primaryColor,
+                                              color: Color(0xFFFF7E6B),
                                             ),
                                           ),
                                       errorWidget: (context, url, error) {
@@ -353,7 +353,10 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
             ),
           );
         },
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading:
+            () => const Center(
+              child: CircularProgressIndicator(color: Color(0xFFFF7E6B)),
+            ),
         error:
             (error, stackTrace) =>
                 Center(child: Text('Error: ${error.toString()}')),

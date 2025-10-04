@@ -150,6 +150,9 @@ class AuthService {
   // Sign in with Google
   Future<UserCredential> signInWithGoogle() async {
     try {
+      // Sign out first to prevent "Future already completed" errors
+      await _googleSignIn.signOut();
+
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
         throw Exception('Google sign in aborted');
@@ -186,7 +189,19 @@ class AuthService {
       }
 
       return userCredential;
+    } on StateError catch (e) {
+      // Handle "Future already completed" errors gracefully
+      developer.log(
+        'Google Sign-In state error (likely hot reload): $e',
+        name: 'AuthService',
+      );
+      // Try to return current user if authenticated
+      if (_auth.currentUser != null) {
+        throw Exception('Please refresh the page and try again');
+      }
+      rethrow;
     } catch (e) {
+      developer.log('Google sign in error: $e', name: 'AuthService', error: e);
       rethrow;
     }
   }
