@@ -1,19 +1,28 @@
+// lib/providers/auth_provider.dart
+import 'dart:async';
+import 'dart:developer' as developer;
+
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_auth/firebase_auth.dart'
+    show User; // for StreamSubscription<User?>
+
 import 'package:recipe_keeper/models/app_user.dart';
 import 'package:recipe_keeper/services/auth_service.dart';
 
-// Define the possible authentication states
 enum AuthStatus { initial, loading, authenticated, unauthenticated, error }
 
-// Define the authentication state class
 class AuthState {
   final AuthStatus status;
   final AppUser? user;
   final String? errorMessage;
 
-  AuthState({this.status = AuthStatus.initial, this.user, this.errorMessage});
+  const AuthState({
+    this.status = AuthStatus.initial,
+    this.user,
+    this.errorMessage,
+  });
 
-  // Create a copy of the current state with updated fields
   AuthState copyWith({
     AuthStatus? status,
     AppUser? user,
@@ -26,7 +35,6 @@ class AuthState {
     );
   }
 
-  // Add a when method to match what's being used in the profile screen
   T when<T>({
     required T Function() initial,
     required T Function() loading,
@@ -40,9 +48,7 @@ class AuthState {
       case AuthStatus.loading:
         return loading();
       case AuthStatus.authenticated:
-        if (user != null) {
-          return authenticated(user!);
-        }
+        if (user != null) return authenticated(user!);
         return unauthenticated();
       case AuthStatus.unauthenticated:
         return unauthenticated();
@@ -52,48 +58,103 @@ class AuthState {
   }
 }
 
-// Define the authentication notifier
-class AuthNotifier extends StateNotifier<AuthState> {
-  final AuthService _authService;
+class AuthNotifier extends Notifier<AuthState> {
+  AuthService? _authService;
+  StreamSubscription<User?>? _sub;
 
-  AuthNotifier(this._authService) : super(AuthState()) {
-    // Check if user is already logged in when the notifier is created
-    checkAuthStatus();
+  @override
+  AuthState build() {
+    // React to authService readiness and changes
+    ref.listen<AsyncValue<AuthService>>(
+      authServiceProvider,
+      (prev, next) => _handleService(next),
+      fireImmediately: true,
+    );
+
+    // Ensure resources are released when provider is disposed
+    ref.onDispose(() {
+      _sub?.cancel();
+    });
+
+    return const AuthState(status: AuthStatus.loading);
   }
 
-  // Update favorite recipes locally for optimistic UI updates
-  void updateFavoriteLocally(String recipeId, bool isFavorite) {
-    if (state.user == null) return;
+  void _handleService(AsyncValue<AuthService> svcAsync) {
+    svcAsync.when(
+      data: (svc) {
+        _authService = svc;
 
-    final currentFavorites = List<String>.from(state.user!.favoriteRecipes);
+        // (Re)wire auth stream
+        _sub?.cancel();
+        _sub = _authService!.authChangesStream.listen(
+          (u) async {
+            if (kDebugMode) {
+              developer.log('authChanges: uid=${u?.uid}', name: 'AuthNotifier');
+            }
+            if (u == null) {
+              state = state.copyWith(
+                status: AuthStatus.unauthenticated,
+                user: null,
+              );
+            } else {
+              await _loadUserData(u.uid);
+            }
+          },
+          onError: (e, st) {
+            state = state.copyWith(
+              status: AuthStatus.error,
+              errorMessage: e.toString(),
+            );
+          },
+        );
 
-    if (isFavorite && !currentFavorites.contains(recipeId)) {
-      currentFavorites.add(recipeId);
-    } else if (!isFavorite && currentFavorites.contains(recipeId)) {
-      currentFavorites.remove(recipeId);
-    }
-
-    // Update state with new favorites list
-    final updatedUser = state.user!.copyWith(favoriteRecipes: currentFavorites);
-    state = state.copyWith(user: updatedUser);
+        // If we already have a current user, load it once immediately
+        final current = _authService!.currentUser;
+        if (current == null) {
+          state = state.copyWith(
+            status: AuthStatus.unauthenticated,
+            user: null,
+          );
+        } else {
+          _loadUserData(current.uid);
+        }
+      },
+      loading: () {
+        state = state.copyWith(status: AuthStatus.loading);
+      },
+      error: (e, st) {
+        state = AuthState(
+          status: AuthStatus.error,
+          errorMessage: 'Failed to init auth service: $e',
+        );
+      },
+    );
   }
 
-  // Check the current authentication status
-  Future<void> checkAuthStatus() async {
+  Future<void> _loadUserData(String uid) async {
     try {
       state = state.copyWith(status: AuthStatus.loading);
-      final user = _authService.currentUser;
-
-      if (user != null) {
-        final userData = await _authService.getUserData(user.uid);
+      final userData = await _authService!.getUserData(uid);
+      if (userData != null) {
         state = state.copyWith(
           status: AuthStatus.authenticated,
           user: userData,
         );
       } else {
-        state = state.copyWith(status: AuthStatus.unauthenticated);
+        state = state.copyWith(
+          status: AuthStatus.error,
+          errorMessage: 'User data not found',
+        );
       }
-    } catch (e) {
+    } catch (e, st) {
+      if (kDebugMode) {
+        developer.log(
+          'loadUserData error',
+          name: 'AuthNotifier',
+          error: e,
+          stackTrace: st,
+        );
+      }
       state = state.copyWith(
         status: AuthStatus.error,
         errorMessage: e.toString(),
@@ -101,134 +162,68 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  // Register with email and password
+  // DRY helper for all login/registration flows
+  Future<void> _completeLogin(
+    Future<UserCredentialLite> Function() action,
+  ) async {
+    try {
+      state = state.copyWith(status: AuthStatus.loading);
+      final cred = await action();
+      final uid = cred.uid;
+      if (uid == null) throw Exception('No user in credential');
+      final data = await _authService!.getUserData(uid);
+      if (data == null) throw Exception('User data missing');
+      state = state.copyWith(status: AuthStatus.authenticated, user: data);
+    } catch (e, st) {
+      if (kDebugMode) {
+        developer.log(
+          '_completeLogin error',
+          name: 'AuthNotifier',
+          error: e,
+          stackTrace: st,
+        );
+      }
+      state = state.copyWith(
+        status: AuthStatus.error,
+        errorMessage: e.toString(),
+      );
+    }
+  }
+
+  // Public actions
   Future<void> registerWithEmailAndPassword(
     String name,
     String email,
     String password,
-  ) async {
-    try {
-      state = state.copyWith(status: AuthStatus.loading);
-      final userCredential = await _authService.registerWithEmailAndPassword(
-        email,
-        password,
-        name,
-      );
-
-      if (userCredential.user != null) {
-        final userData = await _authService.getUserData(
-          userCredential.user!.uid,
-        );
-        state = state.copyWith(
-          status: AuthStatus.authenticated,
-          user: userData,
-        );
-      } else {
-        state = state.copyWith(
-          status: AuthStatus.error,
-          errorMessage: 'Registration failed',
-        );
-      }
-    } catch (e) {
-      state = state.copyWith(
-        status: AuthStatus.error,
-        errorMessage: e.toString(),
-      );
-    }
+  ) {
+    _ensureReady();
+    return _completeLogin(
+      () => _authService!.registerWithEmailAndPassword(email, password, name),
+    );
   }
 
-  // Sign in with email and password
-  Future<void> signInWithEmailAndPassword(String email, String password) async {
-    try {
-      state = state.copyWith(status: AuthStatus.loading);
-      final userCredential = await _authService.signInWithEmailAndPassword(
-        email,
-        password,
-      );
-
-      if (userCredential.user != null) {
-        final userData = await _authService.getUserData(
-          userCredential.user!.uid,
-        );
-        state = state.copyWith(
-          status: AuthStatus.authenticated,
-          user: userData,
-        );
-      } else {
-        state = state.copyWith(
-          status: AuthStatus.error,
-          errorMessage: 'Sign in failed',
-        );
-      }
-    } catch (e) {
-      state = state.copyWith(
-        status: AuthStatus.error,
-        errorMessage: e.toString(),
-      );
-    }
+  Future<void> signInWithEmailAndPassword(String email, String password) {
+    _ensureReady();
+    return _completeLogin(
+      () => _authService!.signInWithEmailAndPassword(email, password),
+    );
   }
 
-  // Sign in with Google
-  Future<void> signInWithGoogle() async {
-    try {
-      state = state.copyWith(status: AuthStatus.loading);
-      final userCredential = await _authService.signInWithGoogle();
-
-      if (userCredential.user != null) {
-        final userData = await _authService.getUserData(
-          userCredential.user!.uid,
-        );
-        state = state.copyWith(
-          status: AuthStatus.authenticated,
-          user: userData,
-        );
-      } else {
-        state = state.copyWith(
-          status: AuthStatus.error,
-          errorMessage: 'Google sign in failed',
-        );
-      }
-    } catch (e) {
-      state = state.copyWith(
-        status: AuthStatus.error,
-        errorMessage: e.toString(),
-      );
-    }
+  Future<void> signInWithGoogle() {
+    _ensureReady();
+    return _completeLogin(_authService!.signInWithGoogle);
   }
 
-  // Sign in anonymously
-  Future<void> signInAnonymously() async {
-    try {
-      state = state.copyWith(status: AuthStatus.loading);
-      final userCredential = await _authService.signInAnonymously();
-
-      if (userCredential.user != null) {
-        final userData = await _authService.getUserData(
-          userCredential.user!.uid,
-        );
-        state = state.copyWith(
-          status: AuthStatus.authenticated,
-          user: userData,
-        );
-      } else {
-        state = state.copyWith(
-          status: AuthStatus.error,
-          errorMessage: 'Anonymous sign in failed',
-        );
-      }
-    } catch (e) {
-      state = state.copyWith(
-        status: AuthStatus.error,
-        errorMessage: e.toString(),
-      );
-    }
+  Future<void> signInAnonymously() {
+    _ensureReady();
+    return _completeLogin(_authService!.signInAnonymously);
   }
 
-  // Sign out
   Future<void> signOut() async {
+    _ensureReady();
     try {
       state = state.copyWith(status: AuthStatus.loading);
-      await _authService.signOut();
+      await _authService!.signOut();
       state = state.copyWith(status: AuthStatus.unauthenticated, user: null);
     } catch (e) {
       state = state.copyWith(
@@ -238,24 +233,26 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  // Update user profile
   Future<void> updateProfile(String displayName, String? photoURL) async {
+    _ensureReady();
     try {
       if (state.user == null) return;
-
       state = state.copyWith(status: AuthStatus.loading);
-      await _authService.updateUserProfile(
+      await _authService!.updateUserProfile(
         displayName: displayName,
         photoURL: photoURL,
       );
 
-      final user = _authService.currentUser;
-      if (user != null) {
-        final userData = await _authService.getUserData(user.uid);
+      // Refresh current user data
+      final uid = _authService!.currentUser?.uid;
+      if (uid != null) {
+        final userData = await _authService!.getUserData(uid);
         state = state.copyWith(
           status: AuthStatus.authenticated,
           user: userData,
         );
+      } else {
+        state = state.copyWith(status: AuthStatus.unauthenticated, user: null);
       }
     } catch (e) {
       state = state.copyWith(
@@ -265,13 +262,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  // Delete account
   Future<void> deleteAccount() async {
+    _ensureReady();
     try {
       if (state.user == null) return;
-
       state = state.copyWith(status: AuthStatus.loading);
-      await _authService.deleteAccount();
+      await _authService!.deleteAccount();
       state = state.copyWith(status: AuthStatus.unauthenticated, user: null);
     } catch (e) {
       state = state.copyWith(
@@ -280,28 +276,48 @@ class AuthNotifier extends StateNotifier<AuthState> {
       );
     }
   }
+
+  // Optimistic local favorites
+  void updateFavoriteLocally(String recipeId, bool isFavorite) {
+    final u = state.user;
+    if (u == null) return;
+    final current = List<String>.from(u.favoriteRecipes);
+    if (isFavorite && !current.contains(recipeId)) {
+      current.add(recipeId);
+    } else if (!isFavorite && current.contains(recipeId)) {
+      current.remove(recipeId);
+    }
+    state = state.copyWith(user: u.copyWith(favoriteRecipes: current));
+    // Optionally: enqueue background write & rollback on failure
+  }
+
+  void _ensureReady() {
+    if (_authService == null) {
+      throw StateError('AuthService not ready yet');
+    }
+  }
 }
 
-// Provider for the authentication state
-final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
-  final authService = AuthService();
-  return AuthNotifier(authService);
-});
+// Riverpod 3 NotifierProvider
+final authProvider = NotifierProvider<AuthNotifier, AuthState>(
+  () => AuthNotifier(),
+);
 
-// Provider for user data
+// Derived provider for convenience
 final userDataProvider = Provider<AsyncValue<AppUser?>>((ref) {
-  final authState = ref.watch(authProvider);
-
-  if (authState.status == AuthStatus.authenticated && authState.user != null) {
-    return AsyncValue.data(authState.user);
-  } else if (authState.status == AuthStatus.error) {
-    return AsyncValue.error(
-      authState.errorMessage ?? 'Unknown error',
-      StackTrace.current,
-    );
-  } else if (authState.status == AuthStatus.loading) {
-    return const AsyncValue.loading();
-  } else {
-    return const AsyncValue.data(null);
+  final s = ref.watch(authProvider);
+  switch (s.status) {
+    case AuthStatus.authenticated:
+      return AsyncValue.data(s.user);
+    case AuthStatus.error:
+      return AsyncValue.error(
+        s.errorMessage ?? 'Unknown error',
+        StackTrace.current,
+      );
+    case AuthStatus.loading:
+      return const AsyncValue.loading();
+    case AuthStatus.initial:
+    case AuthStatus.unauthenticated:
+      return const AsyncValue.data(null);
   }
 });

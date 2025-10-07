@@ -115,9 +115,12 @@ class AppRouter {
 
       // Category recipes screen
       GoRoute(
-        path: '/category/:name',
+        path: '/category/:name/:id',
         builder: (context, state) =>
-            CategoryRecipesScreen(categoryName: state.pathParameters['name']!),
+            CategoryRecipesScreen(
+              categoryName: state.pathParameters['name']!,
+              categoryId: state.pathParameters['id']!,
+            ),
       ),
 
       // Edit Profile Screen (Outside the ShellRoute)

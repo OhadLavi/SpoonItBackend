@@ -3,9 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:recipe_keeper/services/category_service.dart';
 import 'package:recipe_keeper/models/category.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:recipe_keeper/services/category_icon_service.dart';
 
 class AddCategoryDialog extends ConsumerStatefulWidget {
-  const AddCategoryDialog({super.key});
+  final Category? categoryToEdit;
+
+  const AddCategoryDialog({super.key, this.categoryToEdit});
 
   @override
   ConsumerState<AddCategoryDialog> createState() => _AddCategoryDialogState();
@@ -13,28 +17,29 @@ class AddCategoryDialog extends ConsumerStatefulWidget {
 
 class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
   final TextEditingController _nameController = TextEditingController();
-  String _selectedIcon = 'cake';
+  String _selectedIcon = 'main';
   bool _isLoading = false;
+  String? _errorMessage;
 
-  // Predefined icons for categories
-  final List<Map<String, dynamic>> _availableIcons = [
-    {'name': 'cake', 'icon': Icons.cake, 'label': 'עוגה'},
-    {'name': 'room_service', 'icon': Icons.room_service, 'label': 'מנה עיקרית'},
-    {'name': 'fastfood', 'icon': Icons.fastfood, 'label': 'מזון מהיר'},
-    {'name': 'cookie', 'icon': Icons.cookie, 'label': 'עוגיות'},
-    {'name': 'cake_outlined', 'icon': Icons.cake_outlined, 'label': 'עוגות'},
-    {'name': 'ramen_dining', 'icon': Icons.ramen_dining, 'label': 'סלטים'},
-    {'name': 'bakery_dining', 'icon': Icons.bakery_dining, 'label': 'לחמים'},
-    {'name': 'local_pizza', 'icon': Icons.local_pizza, 'label': 'פיצה'},
-    {'name': 'restaurant', 'icon': Icons.restaurant, 'label': 'מסעדה'},
-    {'name': 'coffee', 'icon': Icons.coffee, 'label': 'קפה'},
-    {'name': 'ice_cream', 'icon': Icons.ac_unit, 'label': 'גלידה'},
-    {
-      'name': 'lunch_dining',
-      'icon': Icons.lunch_dining,
-      'label': 'ארוחת צהריים',
-    },
+  // Available SVG icons for categories - only these 7 icons
+  final List<Map<String, dynamic>> _availableIcons = const [
+    {'name': 'bread', 'label': 'לחמים'},
+    {'name': 'cookies', 'label': 'עוגיות'},
+    {'name': 'cakes', 'label': 'עוגות'},
+    {'name': 'salads', 'label': 'סלטים'},
+    {'name': 'sides', 'label': 'תוספות'},
+    {'name': 'main', 'label': 'מנה עיקרית'},
+    {'name': 'pastries', 'label': 'מאפים'},
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.categoryToEdit != null) {
+      _nameController.text = widget.categoryToEdit!.name;
+      _selectedIcon = widget.categoryToEdit!.icon;
+    }
+  }
 
   @override
   void dispose() {
@@ -44,19 +49,35 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final screenWidth = media.size.width;
+
+    // Let the dialog actually resize on desktop/web
+    final horizontalInset =
+        screenWidth < 480
+            ? 12.0
+            : screenWidth < 800
+            ? 20.0
+            : 32.0;
+
     return AlertDialog(
-      backgroundColor: Colors.white,
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: horizontalInset,
+        vertical: 24,
+      ),
+      backgroundColor: AppTheme.backgroundColor,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: Text(
-        'הוסף קטגוריה חדשה',
-        style: TextStyle(
-          color: Color(0xFF6E3C3F),
-          fontFamily: 'Poppins',
+        widget.categoryToEdit != null ? 'ערוך קטגוריה' : 'הוסף קטגוריה חדשה',
+        style: const TextStyle(
+          color: AppTheme.textColor,
+          fontFamily: AppTheme.secondaryFontFamily,
           fontWeight: FontWeight.bold,
           fontSize: 20,
         ),
         textAlign: TextAlign.center,
       ),
+
       content: SizedBox(
         width: MediaQuery.of(context).size.width * 0.9,
         child: SingleChildScrollView(
@@ -66,16 +87,21 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
               // Category name field
               Container(
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF8F8F8),
+                  color: AppTheme.cardColor,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: TextField(
                   controller: _nameController,
                   decoration: InputDecoration(
                     labelText: 'שם הקטגוריה',
+                    hintText: 'הכנס שם לקטגוריה',
                     labelStyle: const TextStyle(
-                      color: Color(0xFF6E3C3F),
-                      fontFamily: 'Poppins',
+                      color: AppTheme.textColor,
+                      fontFamily: AppTheme.secondaryFontFamily,
+                    ),
+                    hintStyle: TextStyle(
+                      color: AppTheme.textColor.withOpacity(0.6),
+                      fontFamily: AppTheme.secondaryFontFamily,
                     ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
@@ -84,14 +110,14 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(
-                        color: Color(0xFF6E3C3F).withOpacity(0.2),
+                        color: AppTheme.textColor.withOpacity(0.2),
                         width: 1,
                       ),
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(
-                        color: Color(0xFFFF7E6B),
+                      borderRadius: const BorderRadius.all(Radius.circular(8)),
+                      borderSide: BorderSide(
+                        color: AppTheme.primaryColor, // avoid const here
                         width: 2,
                       ),
                     ),
@@ -100,19 +126,53 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
                     contentPadding: const EdgeInsets.all(12),
                   ),
                   style: const TextStyle(
-                    color: Color(0xFF6E3C3F),
-                    fontFamily: 'Poppins',
+                    color: AppTheme.textColor,
+                    fontFamily: AppTheme.secondaryFontFamily,
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 12),
 
-              // Icon selection
-              Text(
+              // Error message
+              if (_errorMessage != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.errorColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: AppTheme.errorColor.withOpacity(0.3),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.error_outline,
+                        color: AppTheme.errorColor,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _errorMessage!,
+                          style: const TextStyle(
+                            color: AppTheme.errorColor,
+                            fontFamily: AppTheme.secondaryFontFamily,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              const Text(
                 'בחר אייקון',
                 style: TextStyle(
-                  color: Color(0xFF6E3C3F),
-                  fontFamily: 'Poppins',
+                  color: AppTheme.textColor,
+                  fontFamily: AppTheme.secondaryFontFamily,
                   fontWeight: FontWeight.w600,
                   fontSize: 16,
                 ),
@@ -132,35 +192,38 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
                 itemCount: _availableIcons.length,
                 itemBuilder: (context, index) {
                   final iconData = _availableIcons[index];
-                  final isSelected = _selectedIcon == iconData['name'];
+                  final bool isSelected = _selectedIcon == iconData['name'];
 
                   return GestureDetector(
                     onTap: () {
                       setState(() {
-                        _selectedIcon = iconData['name'];
+                        _selectedIcon = iconData['name'] as String;
                       });
                     },
                     child: Container(
                       decoration: BoxDecoration(
                         color:
                             isSelected
-                                ? Color(0xFFFF7E6B).withOpacity(0.1)
-                                : Color(0xFFF8F8F8),
+                                ? AppTheme.primaryColor.withOpacity(0.1)
+                                : AppTheme.cardColor,
                         borderRadius: BorderRadius.circular(8),
-                        border:
-                            isSelected
-                                ? Border.all(color: Color(0xFFFF7E6B), width: 2)
-                                : Border.all(
-                                  color: Color(0xFF6E3C3F).withOpacity(0.1),
-                                ),
+                        border: Border.all(
+                          color:
+                              isSelected
+                                  ? AppTheme.primaryColor
+                                  : AppTheme.textColor.withOpacity(0.1),
+                          width: isSelected ? 2 : 1,
+                        ),
                       ),
-                      child: Icon(
-                        iconData['icon'],
-                        color:
-                            isSelected
-                                ? Color(0xFFFF7E6B)
-                                : Color(0xFF6E3C3F).withOpacity(0.6),
-                        size: 24,
+                      child: Center(
+                        child: SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: CategoryIconService.getIconByKey(
+                            iconData['name'] as String,
+                            size: 40,
+                          ),
+                        ),
                       ),
                     ),
                   );
@@ -170,38 +233,44 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
           ),
         ),
       ),
+
       actions: [
         TextButton(
           onPressed: _isLoading ? null : () => Navigator.pop(context),
-          child: Text(
+          child: const Text(
             'ביטול',
-            style: TextStyle(color: Color(0xFF6E3C3F), fontFamily: 'Poppins'),
+            style: TextStyle(
+              color: AppTheme.textColor,
+              fontFamily: AppTheme.secondaryFontFamily,
+            ),
           ),
         ),
         ElevatedButton(
           onPressed: _isLoading ? null : _createCategory,
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFFFF7E6B),
-            foregroundColor: Colors.white,
-            disabledBackgroundColor: const Color(0xFFFF7E6B).withOpacity(0.3),
+            backgroundColor: AppTheme.primaryColor,
+            foregroundColor: AppTheme.backgroundColor,
+            disabledBackgroundColor: AppTheme.primaryColor.withOpacity(0.3),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
             ),
           ),
           child:
               _isLoading
-                  ? SizedBox(
+                  ? const SizedBox(
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        AppTheme.backgroundColor,
+                      ),
                     ),
                   )
                   : Text(
-                    'הוסף',
-                    style: TextStyle(
-                      fontFamily: 'Poppins',
+                    widget.categoryToEdit != null ? 'עדכן' : 'הוסף',
+                    style: const TextStyle(
+                      fontFamily: AppTheme.secondaryFontFamily,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -212,19 +281,14 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
 
   Future<void> _createCategory() async {
     if (_nameController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'אנא הכנס שם לקטגוריה',
-            style: TextStyle(fontFamily: 'Poppins'),
-          ),
-          backgroundColor: Color(0xFFFF7E6B),
-        ),
-      );
+      setState(() {
+        _errorMessage = 'אנא הכנס שם לקטגוריה';
+      });
       return;
     }
 
     setState(() {
+      _errorMessage = null;
       _isLoading = true;
     });
 
@@ -234,39 +298,61 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
         throw Exception('משתמש לא מחובר');
       }
 
-      final category = Category(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        name: _nameController.text.trim(),
-        icon: _selectedIcon,
-        userId: user.uid,
-      );
-
       final categoryService = CategoryService();
-      await categoryService.addCategory(category);
 
-      if (mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'הקטגוריה נוספה בהצלחה!',
-              style: TextStyle(fontFamily: 'Poppins'),
-            ),
-            backgroundColor: Color(0xFFFF7E6B),
-          ),
+      if (widget.categoryToEdit != null) {
+        // Update existing category
+        final updatedCategory = Category(
+          id: widget.categoryToEdit!.id,
+          name: _nameController.text.trim(),
+          icon: _selectedIcon,
+          userId: user.uid,
         );
+        await categoryService.updateCategory(updatedCategory);
+
+        if (mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                'הקטגוריה עודכנה בהצלחה!',
+                style: TextStyle(fontFamily: AppTheme.secondaryFontFamily),
+              ),
+              backgroundColor: AppTheme.primaryColor,
+            ),
+          );
+        }
+      } else {
+        // Create new category
+        final category = Category(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          name: _nameController.text.trim(),
+          icon: _selectedIcon,
+          userId: user.uid,
+        );
+        await categoryService.addCategory(category);
+
+        if (mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                'הקטגוריה נוספה בהצלחה!',
+                style: TextStyle(fontFamily: AppTheme.secondaryFontFamily),
+              ),
+              backgroundColor: AppTheme.primaryColor,
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'שגיאה בהוספת הקטגוריה: ${e.toString()}',
-              style: TextStyle(fontFamily: 'Poppins'),
-            ),
-            backgroundColor: Colors.red,
-          ),
-        );
+        setState(() {
+          _errorMessage =
+              widget.categoryToEdit != null
+                  ? 'שגיאה בעדכון הקטגוריה: ${e.toString()}'
+                  : 'שגיאה בהוספת הקטגוריה: ${e.toString()}';
+        });
       }
     } finally {
       if (mounted) {

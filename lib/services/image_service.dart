@@ -5,12 +5,13 @@ import 'package:uuid/uuid.dart';
 import 'package:path/path.dart' as path;
 import 'dart:developer' as developer;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:recipe_keeper/config/env_config.dart';
 
 // Define the provider
 final imageServiceProvider = Provider<ImageService>((ref) => ImageService());
 
 class ImageService {
-  static const String _proxyUrl = 'http://localhost:8000/proxy_image?url=';
+  String get _proxyUrl => '${EnvConfig.apiBaseUrl}/proxy_image?url=';
   final FirebaseStorage _storage = FirebaseStorage.instance;
 
   // Upload a recipe image file to Firebase Storage

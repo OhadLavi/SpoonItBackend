@@ -2,9 +2,10 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:recipe_keeper/models/recipe.dart';
 import 'dart:developer' as developer;
+import 'package:recipe_keeper/config/env_config.dart';
 
 class RecipeExtractionService {
-  static const String baseUrl = 'http://localhost:8000';
+  String get baseUrl => EnvConfig.apiBaseUrl;
 
   Future<Recipe> extractRecipeFromUrl(String url) async {
     try {

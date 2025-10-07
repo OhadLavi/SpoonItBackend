@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:recipe_keeper/providers/auth_provider.dart';
-import 'package:recipe_keeper/providers/settings_provider.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
 import 'package:recipe_keeper/utils/helpers.dart';
-import 'package:recipe_keeper/utils/translations.dart';
 import 'package:recipe_keeper/widgets/auth_widgets.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
@@ -24,6 +23,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   bool _isPasswordVisible = false;
   bool _isConfirmPasswordVisible = false;
   bool _isLoading = false;
+  String? _errorMessage;
 
   @override
   void dispose() {
@@ -38,6 +38,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     if (_formKey.currentState!.validate()) {
       setState(() {
         _isLoading = true;
+        _errorMessage = null;
       });
 
       try {
@@ -57,20 +58,18 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           }
         } else if (authState.status == AuthStatus.error) {
           if (mounted) {
-            Helpers.showSnackBar(
-              context,
-              authState.errorMessage ?? 'An error occurred during registration',
-              isError: true,
-            );
+            setState(() {
+              _errorMessage = Helpers.simplifyAuthError(
+                authState.errorMessage ?? 'Unknown error',
+              );
+            });
           }
         }
       } catch (e) {
         if (mounted) {
-          Helpers.showSnackBar(
-            context,
-            'An error occurred: ${e.toString()}',
-            isError: true,
-          );
+          setState(() {
+            _errorMessage = Helpers.simplifyAuthError(e.toString());
+          });
         }
       } finally {
         if (mounted) {
@@ -84,12 +83,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isHebrew = ref.watch(settingsProvider).language == AppLanguage.hebrew;
-    const coralColor = Color(0xFFFF7E6B);
-    const mainTextColor = Color(0xFF6E3C3F);
+    const coralColor = AppTheme.primaryColor;
+    const mainTextColor = AppTheme.textColor;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: AppTheme.cardColor,
       body: Stack(
         children: [
           // AuthHeader (shared with login)
@@ -133,7 +131,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       'ליצור חשבון',
                       textAlign: TextAlign.right,
                       style: TextStyle(
-                        fontFamily: 'Heebo',
+                        fontFamily: AppTheme.primaryFontFamily,
                         fontSize: 32,
                         fontWeight: FontWeight.bold,
                         color: mainTextColor,
@@ -145,11 +143,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   Container(
                     margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppTheme.backgroundColor,
                       borderRadius: BorderRadius.circular(24),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
+                          color: AppTheme.dividerColor.withOpacity(0.04),
                           blurRadius: 8,
                           offset: const Offset(0, 2),
                         ),
@@ -158,21 +156,29 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     child: TextFormField(
                       controller: _nameController,
                       textAlign: TextAlign.right,
+                      textDirection: TextDirection.rtl,
                       style: const TextStyle(
                         color: mainTextColor,
                         fontWeight: FontWeight.w300,
                       ),
                       onChanged: (value) => setState(() {}),
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         hintText: 'שם/כינוי',
                         hintStyle: TextStyle(
                           color: mainTextColor,
                           fontWeight: FontWeight.w300,
                         ),
-                        prefixIcon: Icon(
-                          Icons.person_outline,
-                          color: mainTextColor,
-                          size: 20,
+                        prefixIcon: Padding(
+                          padding: EdgeInsets.all(12.0),
+                          child: SvgPicture.asset(
+                            'assets/images/profile.svg',
+                            width: 18,
+                            height: 18,
+                            colorFilter: ColorFilter.mode(
+                              AppTheme.textColor,
+                              BlendMode.srcIn,
+                            ),
+                          ),
                         ),
                         border: InputBorder.none,
                         enabledBorder: InputBorder.none,
@@ -194,11 +200,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   Container(
                     margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppTheme.backgroundColor,
                       borderRadius: BorderRadius.circular(24),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
+                          color: AppTheme.dividerColor.withOpacity(0.04),
                           blurRadius: 8,
                           offset: const Offset(0, 2),
                         ),
@@ -211,21 +217,32 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           _emailController.text.isEmpty
                               ? TextAlign.right
                               : TextAlign.left,
+                      textDirection:
+                          _emailController.text.isEmpty
+                              ? TextDirection.rtl
+                              : TextDirection.ltr,
                       style: const TextStyle(
                         color: mainTextColor,
                         fontWeight: FontWeight.w300,
                       ),
                       onChanged: (value) => setState(() {}),
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         hintText: 'אימייל',
                         hintStyle: TextStyle(
                           color: mainTextColor,
                           fontWeight: FontWeight.w300,
                         ),
-                        prefixIcon: Icon(
-                          Icons.email_outlined,
-                          color: mainTextColor,
-                          size: 20,
+                        prefixIcon: Padding(
+                          padding: EdgeInsets.all(12.0),
+                          child: SvgPicture.asset(
+                            'assets/images/email.svg',
+                            width: 18,
+                            height: 18,
+                            colorFilter: ColorFilter.mode(
+                              AppTheme.textColor,
+                              BlendMode.srcIn,
+                            ),
+                          ),
                         ),
                         border: InputBorder.none,
                         enabledBorder: InputBorder.none,
@@ -250,11 +267,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   Container(
                     margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppTheme.backgroundColor,
                       borderRadius: BorderRadius.circular(24),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
+                          color: AppTheme.dividerColor.withOpacity(0.04),
                           blurRadius: 8,
                           offset: const Offset(0, 2),
                         ),
@@ -267,6 +284,10 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           _passwordController.text.isEmpty
                               ? TextAlign.right
                               : TextAlign.left,
+                      textDirection:
+                          _passwordController.text.isEmpty
+                              ? TextDirection.rtl
+                              : TextDirection.ltr,
                       style: const TextStyle(
                         color: mainTextColor,
                         fontWeight: FontWeight.w300,
@@ -274,14 +295,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       onChanged: (value) => setState(() {}),
                       decoration: InputDecoration(
                         hintText: 'סיסמה',
-                        hintStyle: const TextStyle(
+                        hintStyle: TextStyle(
                           color: mainTextColor,
                           fontWeight: FontWeight.w300,
-                        ),
-                        prefixIcon: const Icon(
-                          Icons.lock_outline,
-                          color: mainTextColor,
-                          size: 20,
                         ),
                         border: InputBorder.none,
                         enabledBorder: InputBorder.none,
@@ -290,13 +306,25 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           horizontal: 20,
                           vertical: 18,
                         ),
+                        prefixIcon: Padding(
+                          padding: EdgeInsets.all(12.0),
+                          child: SvgPicture.asset(
+                            'assets/images/password.svg',
+                            width: 18,
+                            height: 18,
+                            colorFilter: ColorFilter.mode(
+                              AppTheme.textColor,
+                              BlendMode.srcIn,
+                            ),
+                          ),
+                        ),
                         suffixIcon: IconButton(
                           icon: Icon(
                             _isPasswordVisible
                                 ? Icons.visibility_outlined
                                 : Icons.visibility_off_outlined,
                             color: mainTextColor,
-                            size: 20,
+                            size: 18,
                           ),
                           onPressed: () {
                             setState(() {
@@ -317,11 +345,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   Container(
                     margin: const EdgeInsets.only(bottom: 24),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppTheme.backgroundColor,
                       borderRadius: BorderRadius.circular(24),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
+                          color: AppTheme.dividerColor.withOpacity(0.04),
                           blurRadius: 8,
                           offset: const Offset(0, 2),
                         ),
@@ -334,6 +362,10 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           _confirmPasswordController.text.isEmpty
                               ? TextAlign.right
                               : TextAlign.left,
+                      textDirection:
+                          _confirmPasswordController.text.isEmpty
+                              ? TextDirection.rtl
+                              : TextDirection.ltr,
                       style: const TextStyle(
                         color: mainTextColor,
                         fontWeight: FontWeight.w300,
@@ -341,14 +373,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       onChanged: (value) => setState(() {}),
                       decoration: InputDecoration(
                         hintText: 'שוב סיסמה',
-                        hintStyle: const TextStyle(
+                        hintStyle: TextStyle(
                           color: mainTextColor,
                           fontWeight: FontWeight.w300,
-                        ),
-                        prefixIcon: const Icon(
-                          Icons.lock_outline,
-                          color: mainTextColor,
-                          size: 20,
                         ),
                         border: InputBorder.none,
                         enabledBorder: InputBorder.none,
@@ -357,13 +384,25 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           horizontal: 20,
                           vertical: 18,
                         ),
+                        prefixIcon: Padding(
+                          padding: EdgeInsets.all(12.0),
+                          child: SvgPicture.asset(
+                            'assets/images/password.svg',
+                            width: 18,
+                            height: 18,
+                            colorFilter: ColorFilter.mode(
+                              AppTheme.textColor,
+                              BlendMode.srcIn,
+                            ),
+                          ),
+                        ),
                         suffixIcon: IconButton(
                           icon: Icon(
                             _isConfirmPasswordVisible
                                 ? Icons.visibility_outlined
                                 : Icons.visibility_off_outlined,
                             color: mainTextColor,
-                            size: 20,
+                            size: 18,
                           ),
                           onPressed: () {
                             setState(() {
@@ -384,6 +423,41 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       },
                     ),
                   ),
+                  // Error Message Display
+                  if (_errorMessage != null) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppTheme.errorColor.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: AppTheme.errorColor.withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.error_outline,
+                            color: AppTheme.errorColor,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _errorMessage!,
+                              style: TextStyle(
+                                color: AppTheme.errorColor,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
                   // Register Button
                   SizedBox(
                     width: double.infinity,
@@ -393,27 +467,21 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           _isLoading ? null : _registerWithEmailAndPassword,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: coralColor,
-                        foregroundColor: Colors.white,
+                        foregroundColor: AppTheme.backgroundColor,
+                        disabledBackgroundColor: coralColor,
+                        disabledForegroundColor: AppTheme.backgroundColor,
+                        shadowColor: Colors.transparent,
+                        elevation: 0,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(24),
                         ),
                         textStyle: const TextStyle(
-                          fontFamily: 'Heebo',
+                          fontFamily: AppTheme.primaryFontFamily,
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
                         ),
                       ),
-                      child:
-                          _isLoading
-                              ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                              : const Text('יאללה נתחיל!'),
+                      child: const Text('יאללה נתחיל!'),
                     ),
                   ),
                 ],

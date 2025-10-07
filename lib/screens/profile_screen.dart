@@ -20,7 +20,7 @@ class ProfileScreen extends ConsumerWidget {
     final userDataAsync = ref.watch(userDataProvider);
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.backgroundColor,
       body: Column(
         children: [
           const AppHeader(title: 'פרופיל'),
@@ -28,11 +28,15 @@ class ProfileScreen extends ConsumerWidget {
             child: authState.when(
               initial:
                   () => const Center(
-                    child: CircularProgressIndicator(color: Color(0xFFFF7E6B)),
+                    child: CircularProgressIndicator(
+                      color: AppTheme.primaryColor,
+                    ),
                   ),
               loading:
                   () => const Center(
-                    child: CircularProgressIndicator(color: Color(0xFFFF7E6B)),
+                    child: CircularProgressIndicator(
+                      color: AppTheme.primaryColor,
+                    ),
                   ),
               authenticated: (user) {
                 return userDataAsync.when(
@@ -46,7 +50,7 @@ class ProfileScreen extends ConsumerWidget {
                   loading:
                       () => const Center(
                         child: CircularProgressIndicator(
-                          color: Color(0xFFFF7E6B),
+                          color: AppTheme.primaryColor,
                         ),
                       ),
                   error: (error, _) => Center(child: Text('Error: $error')),
@@ -57,9 +61,9 @@ class ProfileScreen extends ConsumerWidget {
                   (errorMessage) => Center(child: Text('Error: $errorMessage')),
             ),
           ),
-          const AppBottomNav(currentIndex: -1),
         ],
       ),
+      bottomNavigationBar: const AppBottomNav(currentIndex: -1),
     );
   }
 
@@ -68,12 +72,16 @@ class ProfileScreen extends ConsumerWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.account_circle, size: 80, color: Colors.grey[400]),
+          Icon(
+            Icons.account_circle,
+            size: 80,
+            color: AppTheme.secondaryTextColor,
+          ),
           const SizedBox(height: 16),
           Text(
             AppTranslations.getText(ref, 'not_signed_in'),
             style: AppTheme.headingStyle.copyWith(
-              color: const Color(0xFF6E3C3F),
+              color: AppTheme.textColor,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -81,7 +89,7 @@ class ProfileScreen extends ConsumerWidget {
           Text(
             AppTranslations.getText(ref, 'sign_in_prompt'),
             style: AppTheme.captionStyle.copyWith(
-              color: const Color(0xFF6E3C3F).withOpacity(0.7),
+              color: AppTheme.textColor.withOpacity(0.7),
             ),
             textAlign: TextAlign.center,
           ),
@@ -117,7 +125,7 @@ class ProfileScreen extends ConsumerWidget {
                 Text(
                   userData.displayName,
                   style: AppTheme.headingStyle.copyWith(
-                    color: const Color(0xFF6E3C3F),
+                    color: AppTheme.textColor,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -125,7 +133,7 @@ class ProfileScreen extends ConsumerWidget {
                 Text(
                   userData.email,
                   style: AppTheme.captionStyle.copyWith(
-                    color: const Color(0xFF6E3C3F).withOpacity(0.7),
+                    color: AppTheme.textColor.withOpacity(0.7),
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -147,7 +155,7 @@ class ProfileScreen extends ConsumerWidget {
   Widget _buildProfileImage(String? photoURL) {
     return CircleAvatar(
       radius: 60,
-      backgroundColor: const Color(0xFFFF7E6B).withOpacity(0.1),
+      backgroundColor: AppTheme.primaryColor.withOpacity(0.1),
       backgroundImage:
           photoURL != null && photoURL.isNotEmpty
               ? CachedNetworkImageProvider(
@@ -156,7 +164,7 @@ class ProfileScreen extends ConsumerWidget {
               : null,
       child:
           photoURL == null || photoURL.isEmpty
-              ? const Icon(Icons.person, size: 60, color: Color(0xFFFF7E6B))
+              ? const Icon(Icons.person, size: 60, color: AppTheme.primaryColor)
               : null,
     );
   }
@@ -168,11 +176,11 @@ class ProfileScreen extends ConsumerWidget {
   ) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFFF8F8F8),
+        color: AppTheme.cardColor,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: AppTheme.secondaryTextColor.withOpacity(0.1),
             spreadRadius: 1,
             blurRadius: 4,
             offset: const Offset(0, 2),
@@ -187,7 +195,7 @@ class ProfileScreen extends ConsumerWidget {
             Text(
               AppTranslations.getText(ref, 'your_stats'),
               style: AppTheme.subheadingStyle.copyWith(
-                color: const Color(0xFF6E3C3F),
+                color: AppTheme.textColor,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -227,12 +235,12 @@ class ProfileScreen extends ConsumerWidget {
   }) {
     return Column(
       children: [
-        Icon(icon, color: const Color(0xFFFF7E6B)),
+        Icon(icon, color: AppTheme.primaryColor),
         const SizedBox(height: 8),
         Text(
           value,
           style: AppTheme.subheadingStyle.copyWith(
-            color: const Color(0xFF6E3C3F),
+            color: AppTheme.textColor,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -240,7 +248,7 @@ class ProfileScreen extends ConsumerWidget {
         Text(
           label,
           style: AppTheme.captionStyle.copyWith(
-            color: const Color(0xFF6E3C3F).withOpacity(0.7),
+            color: AppTheme.textColor.withOpacity(0.7),
           ),
         ),
       ],
@@ -253,11 +261,11 @@ class ProfileScreen extends ConsumerWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFFF8F8F8),
+        color: AppTheme.cardColor,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: AppTheme.secondaryTextColor.withOpacity(0.1),
             spreadRadius: 1,
             blurRadius: 4,
             offset: const Offset(0, 2),
@@ -272,7 +280,7 @@ class ProfileScreen extends ConsumerWidget {
             Text(
               AppTranslations.getText(ref, 'account_settings'),
               style: AppTheme.subheadingStyle.copyWith(
-                color: const Color(0xFF6E3C3F),
+                color: AppTheme.textColor,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -460,13 +468,13 @@ class ProfileScreen extends ConsumerWidget {
     return ListTile(
       leading: Icon(
         icon,
-        color: isDestructive ? Colors.red : const Color(0xFFFF7E6B),
+        color: isDestructive ? AppTheme.errorColor : AppTheme.primaryColor,
       ),
       title: Text(
         title,
         style: TextStyle(
-          color: isDestructive ? Colors.red : const Color(0xFF6E3C3F),
-          fontFamily: 'Poppins',
+          color: isDestructive ? AppTheme.errorColor : AppTheme.textColor,
+          fontFamily: AppTheme.secondaryFontFamily,
           fontWeight: FontWeight.w500,
         ),
       ),
@@ -475,9 +483,9 @@ class ProfileScreen extends ConsumerWidget {
               ? Text(
                 subtitle,
                 style: TextStyle(
-                  fontFamily: 'Poppins',
+                  fontFamily: AppTheme.secondaryFontFamily,
                   fontSize: 12,
-                  color: const Color(0xFF6E3C3F).withOpacity(0.6),
+                  color: AppTheme.textColor.withOpacity(0.6),
                 ),
               )
               : null,
@@ -507,7 +515,7 @@ class ProfileScreen extends ConsumerWidget {
                 },
                 child: Text(
                   AppTranslations.getText(ref, 'delete'),
-                  style: const TextStyle(color: Colors.red),
+                  style: TextStyle(color: AppTheme.errorColor),
                 ),
               ),
             ],
@@ -522,7 +530,7 @@ class ProfileScreen extends ConsumerWidget {
         barrierDismissible: false,
         builder:
             (context) => const Center(
-              child: CircularProgressIndicator(color: Color(0xFFFF7E6B)),
+              child: CircularProgressIndicator(color: AppTheme.primaryColor),
             ),
       );
 

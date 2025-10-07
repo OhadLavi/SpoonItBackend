@@ -31,10 +31,10 @@ logging.basicConfig(
 logger = logging.getLogger("recipe-keeper")
 
 # =============================================================================
-# Config (kept from your app: same endpoints usage + model name)
+# Config
 # =============================================================================
 OLLAMA_API_URL = "http://127.0.0.1:11434/api/generate"
-MODEL_NAME = "gemma3:4b"  # <-- your model name retained
+MODEL_NAME = "gemma3:4b"
 HTTP_TIMEOUT = 30.0
 PLAYWRIGHT_TIMEOUT_MS = 35000
 FETCH_MAX_BYTES = 2_500_000  # ~2.5MB safety cap
@@ -80,13 +80,39 @@ class RecipeModel(BaseModel):
     imageUrl: str = ""
 
 # =============================================================================
-# Utils
+# Utils & Normalization
 # =============================================================================
 HEBREW_NUMBERS = {
     "אחד": 1, "אחת": 1, "שתיים": 2, "שניים": 2, "שתים": 2, "שלוש": 3, "שלושה": 3,
     "ארבע": 4, "ארבעה": 4, "חמש": 5, "חמישה": 5, "שש": 6, "שישה": 6, "שבע": 7, "שבעה": 7,
     "שמונה": 8, "תשע": 9, "עשר": 10,
 }
+
+FRACTIONS_CHARS = "¼½¾⅓⅔⅛⅜⅝⅞"
+MEASURE_RE = re.compile(
+    rf"""(?x)
+    (?:\d+\s*(?:/\s*\d+)?|[{FRACTIONS_CHARS}])\s*
+    (?:גרם|ג['׳]?|מ\"?ל|ml|כפ(?:ית|יות|ה|ות)|כוס(?:ות)?|טיפ(?:ה|ות)|
+       שק(?:ית|יות)|חביל(?:ה|ות)|אריז(?:ה|ות)?|קוב(?:יה|יות)|יחיד(?:ה|ות)|
+       פרוס(?:ה|ות)|ביצ(?:ה|ים)?|קורט)
+    """,
+    re.IGNORECASE,
+)
+NUMBERY_RE = re.compile(r"\d")
+
+ING_HEADERS = [
+    "רכיבים", "מצרכים", "מרכיבים", "מצרכים למתכון",
+    "ingredients", "ingredient", "what you need",
+]
+STEP_HEADERS = [
+    "אופן ההכנה", "אופן הכנה", "הוראות הכנה", "הוראות", "הכנה",
+    "כיצד מכינים", "שיטה", "הכנות", "Preparation", "Directions", "Instructions", "Method",
+]
+STOP_LABELS = STEP_HEADERS + [
+    "טיפים", "טיפים והערות", "הערות", "שיתוף", "עוד מתכונים",
+    "ערכים תזונתיים", "הערך התזונתי", "קלוריות", "ציוד נדרש", "ציוד",
+    "תגובות", "סרטון", "סרטונים", "שלח לחבר", "הדפסה", "AI המלצות", "חדש",
+]
 
 def safe_strip(v: Any) -> str:
     return "" if v is None else str(v).strip()
@@ -97,75 +123,12 @@ def clean_html(text: Any) -> str:
         return ""
     return BeautifulSoup(s, "html.parser").get_text(separator=" ", strip=True)
 
-def convert_to_int(num_str: Any) -> int:
-    s = safe_strip(num_str)
-    if not s:
-        return 0
-    # handle simple ranges like "35-40"
-    m = re.search(r"(\d+)\s*-\s*(\d+)", s)
-    if m:
-        return max(int(m.group(1)), int(m.group(2)))
-    try:
-        return int(s)
-    except ValueError:
-        for word, val in HEBREW_NUMBERS.items():
-            if word in s:
-                return val
-    return 0
-
-def parse_time_value(time_str: Any) -> int:
-    """
-    Returns minutes; handles:
-      - "35-40 דקות" (takes upper bound)
-      - "שעה ו-10 דקות", "1 שעה 20 דקות"
-      - hr/hour/min variations + Hebrew (דקה/דקות/שעה/שעות/אפייה)
-    """
-    s = clean_html(time_str).lower()
-    if not s:
-        return 0
-
-    # range in minutes: "35-40 דקות"
-    m = re.search(r"(\d+)\s*-\s*(\d+)\s*(?:דק(?:ה|ות)?|min|minutes?)", s)
-    if m:
-        return max(int(m.group(1)), int(m.group(2)))
-
-    # explicit hour count
-    mh = re.search(r"(\d+)\s*(?:שעה(?:ות)?|hr|hour|hours)", s)
-    add_minutes = 0
-    if mh:
-        add_minutes += int(mh.group(1)) * 60
-    elif "שעה" in s and not mh:
-        add_minutes += 60
-
-    mm = re.findall(r"(\d+)\s*(?:דק(?:ה|ות)?|min|minutes?)", s)
-    if mm:
-        add_minutes += sum(int(x) for x in mm[:1])  # take first numeric minute amount
-
-    if add_minutes:
-        return add_minutes
-
-    # plain numbers with minutes word somewhere
-    m2 = re.search(r"(\d+)\s*(?:דק(?:ה|ות)?|min|minutes?)", s)
-    if m2:
-        return int(m2.group(1))
-
-    # fallback: just digits
-    m3 = re.search(r"(\d+)", s)
-    if m3:
-        return int(m3.group(1))
-    return 0
-
-def parse_servings(servings_str: Any) -> int:
-    s = clean_html(servings_str).lower()
-    if not s:
-        return 1
-    m = re.search(r"(\d+)", s)
-    if m:
-        return int(m.group(1))
-    for word, val in HEBREW_NUMBERS.items():
-        if word in s:
-            return val
-    return 1
+def _limit_size(s: str, max_bytes: int = FETCH_MAX_BYTES) -> str:
+    b = s.encode("utf-8", errors="ignore")
+    if len(b) <= max_bytes:
+        return s
+    logger.info("[FETCH] truncated HTML from %d KB to %d KB", len(b)//1024, max_bytes//1024)
+    return b[:max_bytes].decode("utf-8", errors="ignore")
 
 def ensure_list(value: Any) -> list:
     if isinstance(value, list):
@@ -178,7 +141,7 @@ def extract_unique_lines(lines: Iterable[str]) -> List[str]:
     seen = set()
     out: List[str] = []
     for line in lines:
-        line = line.strip()
+        line = clean_html(line)
         if not line:
             continue
         key = line.lower()
@@ -212,29 +175,239 @@ def normalize_ingredient(item: Any) -> str:
         return " ".join(parts).strip()
     return clean_html(item)
 
-def _limit_size(s: str, max_bytes: int = FETCH_MAX_BYTES) -> str:
-    b = s.encode("utf-8", errors="ignore")
-    if len(b) <= max_bytes:
-        return s
-    logger.info("[FETCH] truncated HTML from %d KB to %d KB", len(b)//1024, max_bytes//1024)
-    return b[:max_bytes].decode("utf-8", errors="ignore")
+def convert_to_int(num_str: Any) -> int:
+    s = safe_strip(num_str)
+    if not s:
+        return 0
+    m = re.search(r"(\d+)\s*-\s*(\d+)", s)
+    if m:
+        return max(int(m.group(1)), int(m.group(2)))
+    try:
+        return int(s)
+    except ValueError:
+        for word, val in HEBREW_NUMBERS.items():
+            if word in s:
+                return val
+    return 0
+
+def parse_time_value(time_str: Any) -> int:
+    """
+    Returns minutes; handles:
+      - "35-40 דקות"
+      - "שעה ו-10 דקות", "1 שעה 20 דקות"
+      - hr/hour/min variations + Hebrew
+    """
+    s = clean_html(time_str).lower()
+    if not s:
+        return 0
+
+    m = re.search(r"(\d+)\s*-\s*(\d+)\s*(?:דק(?:ה|ות)?|min|minutes?)", s)
+    if m:
+        return max(int(m.group(1)), int(m.group(2)))
+
+    mh = re.search(r"(\d+)\s*(?:שעה(?:ות)?|hr|hour|hours)", s)
+    add_minutes = 0
+    if mh:
+        add_minutes += int(mh.group(1)) * 60
+    elif "שעה" in s and not mh:
+        add_minutes += 60
+
+    mm = re.findall(r"(\d+)\s*(?:דק(?:ה|ות)?|min|minutes?)", s)
+    if mm:
+        add_minutes += int(mm[0])
+
+    if add_minutes:
+        return add_minutes
+
+    m2 = re.search(r"(\d+)\s*(?:דק(?:ה|ות)?|min|minutes?)", s)
+    if m2:
+        return int(m2.group(1))
+
+    m3 = re.search(r"(\d+)", s)
+    if m3:
+        return int(m3.group(1))
+    return 0
+
+def parse_servings(servings_str: Any) -> int:
+    s = clean_html(servings_str).lower()
+    if not s:
+        return 1
+    m = re.search(r"(\d+)", s)
+    if m:
+        return int(m.group(1))
+    for word, val in HEBREW_NUMBERS.items():
+        if word in s:
+            return val
+    return 1
 
 # =============================================================================
-# HTML/Text Extraction
+# HTML helpers
 # =============================================================================
-def extract_recipe_content(html_content: str) -> str:
-    soup = BeautifulSoup(html_content, "html.parser")
-    text = soup.get_text(separator="\n", strip=True)
-    text = _limit_size(text, 120_000)  # keep prompt size manageable
-    logger.debug("[EXTRACT] Text length = %d", len(text))
-    return text
+def _find_first_matching_label(soup: BeautifulSoup, labels: List[str]) -> Optional[Tag]:
+    for tag in soup.find_all(["h1", "h2", "h3", "h4", "strong", "p", "span", "div"]):
+        txt = clean_html(tag.get_text())
+        if any(lbl.lower() in txt.lower() for lbl in labels):
+            return tag
+    return None
 
-# Keep your schema.org JSON-LD parser (no new deps)
+def _text_lines_from_tag(tag: Tag) -> List[str]:
+    lines: List[str] = []
+    if tag.name in ("ul", "ol"):
+        for li in tag.find_all("li"):
+            t = clean_html(li.get_text())
+            if t:
+                lines.append(t)
+        return lines
 
+    # table → flatten rows
+    if tag.name == "table":
+        for tr in tag.find_all("tr"):
+            cells = [clean_html(td.get_text()) for td in tr.find_all(["td", "th"])]
+            row = " ".join([c for c in cells if c])
+            if row:
+                lines.append(row)
+        return lines
+
+    txt = tag.get_text(separator="\n", strip=True)
+    for line in txt.split("\n"):
+        line = clean_html(line)
+        if line:
+            lines.append(line)
+    return lines
+
+def _collect_after(start: Tag, stop_labels: List[str], max_nodes: int = 160) -> List[str]:
+    """Collect texty blocks after a header until another header/stop label appears."""
+    lines: List[str] = []
+    nodes = 0
+    for sib in start.next_siblings:
+        if isinstance(sib, NavigableString):
+            text = clean_html(str(sib))
+            for ln in text.split("\n"):
+                ln = clean_html(ln)
+                if not ln:
+                    continue
+                if any(lbl.lower() in ln.lower() for lbl in stop_labels):
+                    return lines
+                lines.append(ln)
+            continue
+
+        if not isinstance(sib, Tag):
+            continue
+
+        nodes += 1
+        if nodes > max_nodes:
+            break
+
+        text = clean_html(sib.get_text())
+        if not text:
+            continue
+
+        # reached another header / stop area
+        if any(lbl.lower() in text.lower() for lbl in stop_labels):
+            break
+
+        # prefer structured children first
+        if sib.name in ("ul", "ol", "table"):
+            lines.extend(_text_lines_from_tag(sib))
+            continue
+
+        # also gather within blocks
+        for ln in _text_lines_from_tag(sib):
+            if any(lbl.lower() in ln.lower() for lbl in stop_labels):
+                return lines
+            if ln in ("שיתוף", "הדפסה"):
+                continue
+            lines.append(ln)
+
+    return lines
+
+# =============================================================================
+# Ingredient & Instruction normalization
+# =============================================================================
+def _has_measure(s: str) -> bool:
+    s = clean_html(s)
+    if not s:
+        return False
+    return bool(MEASURE_RE.search(s)) or "קורט" in s
+
+def _stitch_broken_ingredient_lines(lines: List[str]) -> List[str]:
+    """Join lines where the amount/notes were pushed to the next line."""
+    out: List[str] = []
+    for ln in lines:
+        ln = clean_html(ln)
+        if not ln:
+            continue
+        if out and not _has_measure(out[-1]) and (_has_measure(ln) or ln.startswith("(") or ln.startswith("או ")):
+            out[-1] = (out[-1] + " " + ln).strip()
+        elif out and not _has_measure(out[-1]) and re.match(r"^\d", ln):
+            out[-1] = (out[-1] + " " + ln).strip()
+        else:
+            out.append(ln)
+    return out
+
+def _filter_to_measured_ingredients(lines: List[str]) -> List[str]:
+    """Drop 'brand suggestions' and keep true ingredients with amounts."""
+    stitched = _stitch_broken_ingredient_lines(lines)
+    measured = [x for x in stitched if _has_measure(x) or NUMBERY_RE.search(x)]
+    # If we were too strict and ended up with too little, relax slightly but still avoid obvious brand lists
+    if len(measured) < 2:
+        measured = [x for x in stitched if _has_measure(x) or "לפי הטעם" in x or "קורט" in x]
+    # Final dedupe/clean
+    measured = [re.sub(r"\s{2,}", " ", x).strip("•-—· ").strip() for x in measured]
+    return extract_unique_lines([x for x in measured if len(x) > 1])
+
+def _normalize_instruction_lines(lines: List[str]) -> List[str]:
+    """Turn <ol>/<ul> or '1 ...'/'2 ...' blocks into clean steps with wrapping support."""
+    # prefer li-based segmentation first
+    li_like: List[str] = []
+    for raw in lines:
+        # split numbered paragraphs into pseudo-li
+        m = re.match(r"^\s*(\d+)[\.\)]?\s*(.*)$", clean_html(raw))
+        if m:
+            li_like.append(f"{m.group(1)}. {m.group(2).strip()}")
+        else:
+            li_like.append(clean_html(raw))
+
+    # collapse to numbered steps
+    steps: List[str] = []
+    buf = ""
+    last_num = None
+    for ln in li_like:
+        if not ln:
+            continue
+        m = re.match(r"^\s*(\d+)[\.\)]\s+(.*)$", ln)
+        if m:
+            # boundary
+            if buf:
+                steps.append(buf.strip())
+                buf = ""
+            last_num = int(m.group(1))
+            buf = m.group(2).strip()
+        else:
+            # continuation line (avoid meta)
+            if any(x in ln for x in ("סוג המנה", "דרגת קושי", "זמן הכנה", "כשרות")):
+                continue
+            if buf:
+                sep = " " if not ln.startswith("(") else " "
+                buf += sep + ln
+            else:
+                buf = ln
+    if buf:
+        steps.append(buf.strip())
+
+    # If we didn't detect numbers, fallback to bulletish grouping by sentence-ish lines
+    if not steps:
+        for ln in lines:
+            t = clean_html(ln)
+            if len(t) > 2:
+                steps.append(t)
+    steps = [re.sub(r"\s{2,}", " ", s).strip("•-—· ").strip() for s in steps]
+    return remove_exact_duplicates([s for s in steps if len(s) > 2])
+
+# =============================================================================
+# Schema.org fast path
+# =============================================================================
 def parse_schema_org_recipe(html: str) -> Optional[RecipeModel]:
-    """
-    Parse JSON-LD (schema.org/Recipe). If found and valid, return RecipeModel.
-    """
     try:
         soup = BeautifulSoup(html, "html.parser")
         scripts = soup.find_all("script", type="application/ld+json")
@@ -331,91 +504,56 @@ def parse_schema_org_recipe(html: str) -> Optional[RecipeModel]:
     return None
 
 # =============================================================================
-# Section utilities (robust for Hebrew pages)
+# Generic HTML extraction (lists + tables)
 # =============================================================================
-ING_LABELS = [
-    "רכיבים", "מצרכים", "מרכיבים",
-]
-STEP_LABELS = [
-    "אופן ההכנה", "אופן הכנה", "הוראות הכנה", "הוראות", "הכנה",
-]
-STOP_LABELS = STEP_LABELS + [
-    "טיפים", "טיפים והערות", "הערות", "שיתוף", "עוד מתכונים", "ערכים תזונתיים",
-]
-
-def _text_lines_from_tag(tag: Tag) -> List[str]:
+def _extract_ingredient_candidates(soup: BeautifulSoup) -> List[str]:
     lines: List[str] = []
-    if tag.name in ("ul", "ol"):
-        for li in tag.find_all("li"):
-            t = clean_html(li.get_text())
-            if t:
-                lines.append(t)
-        return lines
 
-    txt = tag.get_text(separator="\n", strip=True)
-    for line in txt.split("\n"):
-        line = clean_html(line)
-        if line:
-            lines.append(line)
-    return lines
+    # 1) Prefer sections after recognized "ingredients" headers
+    ing_header = _find_first_matching_label(soup, ING_HEADERS)
+    if ing_header:
+        lines.extend(_collect_after(ing_header, stop_labels=STOP_LABELS, max_nodes=220))
 
-def _is_headerish(t: str) -> bool:
-    if len(t) <= 2:
-        return False
-    if any(lbl in t for lbl in ING_LABELS + STEP_LABELS + STOP_LABELS):
-        return True
-    return False
+    # 2) Also scan nearby tables (site like Foodsdictionary keeps amounts in tables)
+    # Choose tables with at least 2 rows that look measure-ish
+    for tbl in soup.find_all("table"):
+        rows = _text_lines_from_tag(tbl)
+        score = sum(1 for r in rows if _has_measure(r) or NUMBERY_RE.search(r))
+        if score >= 2:
+            lines.extend(rows)
 
-def _collect_after(start: Tag, stop_labels: List[str], max_nodes: int = 120) -> List[str]:
+    # 3) Fallback: any UL/OL with many measure-y items anywhere on page
+    for lst in soup.find_all(["ul", "ol"]):
+        items = [clean_html(li.get_text()) for li in lst.find_all("li")]
+        if not items:
+            continue
+        score = sum(1 for r in items if _has_measure(r) or NUMBERY_RE.search(r))
+        if score >= max(2, len(items) // 3):
+            lines.extend(items)
+
+    return extract_unique_lines([x for x in lines if x])
+
+def _extract_instruction_candidates(soup: BeautifulSoup) -> List[str]:
     lines: List[str] = []
-    nodes = 0
-    for sib in start.next_siblings:
-        if isinstance(sib, NavigableString):
-            text = clean_html(str(sib))
-            if text:
-                for ln in text.split("\n"):
-                    ln = clean_html(ln)
-                    if ln:
-                        if any(lbl in ln for lbl in stop_labels):
-                            logger.debug("[SECT] stop on text '%s'", ln[:50])
-                            return lines
-                        lines.append(ln)
-            continue
 
-        if not isinstance(sib, Tag):
-            continue
+    step_header = _find_first_matching_label(soup, STEP_HEADERS)
+    if step_header:
+        lines.extend(_collect_after(step_header, stop_labels=STOP_LABELS, max_nodes=260))
 
-        nodes += 1
-        if nodes > max_nodes:
-            logger.debug("[SECT] stop: node limit reached")
-            break
+    # Prefer ordered lists with many items
+    for ol in soup.find_all("ol"):
+        items = [clean_html(li.get_text()) for li in ol.find_all("li")]
+        if len(items) >= 2:
+            lines.extend(items)
 
-        text = clean_html(sib.get_text())
-        if not text:
-            continue
+    # Some sites use <p> with numbered prefixes
+    if not lines:
+        paras = [clean_html(p.get_text()) for p in soup.find_all("p")]
+        numbered = [p for p in paras if re.match(r"^\s*\d+[\.\)]\s+", p)]
+        if len(numbered) >= 2:
+            lines.extend(numbered)
 
-        if any(lbl in text for lbl in stop_labels):
-            logger.debug("[SECT] stop on tag-text '%s'", text[:60])
-            break
-
-        for ln in _text_lines_from_tag(sib):
-            if any(lbl in ln for lbl in stop_labels):
-                logger.debug("[SECT] stop within block '%s'", ln[:60])
-                return lines
-            if len(ln) < 2:
-                continue
-            if ln in ("שיתוף", "הדפסה"):
-                continue
-            lines.append(ln)
-
-    return lines
-
-def _find_first_matching_label(soup: BeautifulSoup, labels: List[str]) -> Optional[Tag]:
-    for tag in soup.find_all(["h1", "h2", "h3", "h4", "strong", "p", "span"]):
-        txt = clean_html(tag.get_text())
-        if any(lbl == txt or lbl in txt for lbl in labels):
-            return tag
-    return None
+    return extract_unique_lines([x for x in lines if x])
 
 def parse_times_from_soup(soup: BeautifulSoup) -> Tuple[int, int]:
     txt = soup.get_text(separator="\n", strip=True)
@@ -438,158 +576,15 @@ def parse_times_from_soup(soup: BeautifulSoup) -> Tuple[int, int]:
     logger.info("[TIME] parsed: prep=%s cook=%s", prep, cook)
     return prep, cook
 
-# =============================================================================
-# Domain plugin: 10dakot.co.il
-# =============================================================================
-
-def plugin_10dakot(html: str) -> Optional[RecipeModel]:
-    try:
-        soup = BeautifulSoup(html, "html.parser")
-        if "10dakot" not in (soup.find("meta", attrs={"property": "og:site_name"}) or {}).get("content", "").lower() \
-           and "10dakot" not in (soup.find("link", rel="shortlink") or {}).get("href", "").lower() \
-           and "10dakot" not in html.lower():
-            return None  # not that site
-
-        title = ""
-        h1 = soup.find(["h1", "h2"])
-        if h1:
-            title = clean_html(h1.get_text())
-        if not title:
-            t = soup.find("title")
-            title = clean_html(t.get_text()) if t else ""
-
-        description = ""
-        md = soup.find("meta", attrs={"property": "og:description"}) or soup.find("meta", attrs={"name": "description"})
-        if md and md.get("content"):
-            description = clean_html(md["content"])
-
-        image_url = ""
-        ogimg = soup.find("meta", attrs={"property": "og:image"})
-        if ogimg and ogimg.get("content"):
-            image_url = ogimg["content"]
-
-        ing_header = _find_first_matching_label(soup, ING_LABELS)
-        step_header = _find_first_matching_label(soup, STEP_LABELS)
-        logger.info("[PLUGIN] 10dakot labels: ing=%s step=%s", bool(ing_header), bool(step_header))
-
-        ingredients: List[str] = []
-        instructions: List[str] = []
-
-        if ing_header:
-            ingredients = _collect_after(ing_header, stop_labels=STEP_LABELS + STOP_LABELS)
-        if step_header:
-            instructions = _collect_after(step_header, stop_labels=STOP_LABELS)
-
-        def looks_like_real_ingredient(s: str) -> bool:
-            return any(ch.isdigit() for ch in s) or any(w in s for w in ["כפית", "כפות", "כוס", "מ\"ל", "גרם", "ג’", "שמן", "סוכר", "קמח", "ביצ"])
-
-        real_ings = [x for x in ingredients if looks_like_real_ingredient(x)] or ingredients
-        real_ings = extract_unique_lines(real_ings)
-        instructions = remove_exact_duplicates([x for x in instructions if len(x) > 4])
-
-        prep, cook = parse_times_from_soup(soup)
-
-        if title and (len(real_ings) >= 2 or len(instructions) >= 2):
-            model = RecipeModel(
-                title=title,
-                description=description,
-                ingredients=real_ings,
-                instructions=instructions,
-                prepTime=prep,
-                cookTime=cook,
-                servings=1,
-                tags=[],
-                imageUrl=image_url,
-            )
-            logger.info("[PLUGIN] success | title='%s' ings=%d steps=%d", title, len(real_ings), len(instructions))
-            return model
-
-        logger.info("[PLUGIN] fallback (insufficient lines) | ings=%d steps=%d", len(real_ings), len(instructions))
-    except Exception as e:
-        logger.debug("[PLUGIN] error: %s", e, exc_info=True)
-    logger.info("[PLUGIN] no match")
-    return None
+def extract_recipe_content(html_content: str) -> str:
+    soup = BeautifulSoup(html_content, "html.parser")
+    text = soup.get_text(separator="\n", strip=True)
+    text = _limit_size(text, 120_000)
+    return text
 
 # =============================================================================
-# Generic heuristic (if plugin not applicable)
+# LLM JSON repair helpers
 # =============================================================================
-
-def heuristic_extract_from_html(html: str) -> Optional[RecipeModel]:
-    try:
-        soup = BeautifulSoup(html, "html.parser")
-
-        title = ""
-        h1 = soup.find(["h1", "h2"])
-        if h1:
-            title = clean_html(h1.get_text())
-        if not title:
-            t = soup.find("title")
-            title = clean_html(t.get_text()) if t else ""
-
-        description = ""
-        md = soup.find("meta", attrs={"property": "og:description"}) or soup.find("meta", attrs={"name": "description"})
-        if md and md.get("content"):
-            description = clean_html(md["content"])
-
-        image_url = ""
-        ogimg = soup.find("meta", attrs={"property": "og:image"})
-        if ogimg and ogimg.get("content"):
-            image_url = ogimg["content"]
-
-        ing_header = _find_first_matching_label(soup, ING_LABELS)
-        step_header = _find_first_matching_label(soup, STEP_LABELS)
-
-        ingredients: List[str] = []
-        instructions: List[str] = []
-        if ing_header:
-            ingredients = _collect_after(ing_header, stop_labels=STEP_LABELS + STOP_LABELS)
-        if step_header:
-            instructions = _collect_after(step_header, stop_labels=STOP_LABELS)
-
-        ingredients = extract_unique_lines([x for x in ingredients if x])
-        instructions = remove_exact_duplicates([x for x in instructions if x])
-
-        prep, cook = parse_times_from_soup(soup)
-
-        if (title and (len(ingredients) >= 2 or len(instructions) >= 2)) or (len(ingredients) >= 3 and len(instructions) >= 2):
-            logger.info("[HEUR] success | ings=%d steps=%d", len(ingredients), len(instructions))
-            return RecipeModel(
-                title=title,
-                description=description,
-                ingredients=ingredients,
-                instructions=instructions,
-                prepTime=prep,
-                cookTime=cook,
-                servings=1,
-                tags=[],
-                imageUrl=image_url,
-            )
-        logger.info("[HEUR] header sections not sufficient")
-    except Exception as e:
-        logger.debug("[HEUR] failed: %s", e, exc_info=True)
-    return None
-
-# =============================================================================
-# Prompts (tight: require strict JSON)
-# =============================================================================
-
-def create_recipe_extraction_prompt(section_text: str) -> str:
-    return (
-        "את/ה מומחה/ית לחילוץ מתכונים. החזר/י אך ורק אובייקט JSON תקין יחיד (ללא טקסט נוסף), "
-        "בדיוק עם המפתחות: title, description, ingredients, instructions, prepTime, cookTime, servings, tags, imageUrl, source.\n"
-        "כללים: 1) החזר JSON בלבד; 2) numbers כמספרים (לא מחרוזות); 3) ללא פסיקים מיותרים; 4) ללא המצאות;\n"
-        "- ingredients ו-instructions הן מערכים של מחרוזות נקיות (ללא מספור/תבליטים).\n"
-        "- prepTime/cookTime בדקות שלמות (int).\n"
-        "- servings מספר שלם.\n\n"
-        "טקסט המתכון (האזור הרלוונטי):\n"
-        f"{section_text}\n"
-        "סיום."
-    )
-
-# =============================================================================
-# JSON Repair/Extraction (keep as safety even with format='json')
-# =============================================================================
-
 def _strip_code_fences(text: str) -> str:
     s = text.strip()
     m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", s, re.IGNORECASE)
@@ -651,9 +646,8 @@ async def extract_and_parse_llm_json(output: str) -> dict:
         return json.loads(s3)
 
 # =============================================================================
-# Normalization
+# Normalization to RecipeModel
 # =============================================================================
-
 def normalize_recipe_fields(recipe_data: dict) -> RecipeModel:
     if not recipe_data.get("title") and recipe_data.get("recipeName"):
         recipe_data["title"] = recipe_data["recipeName"]
@@ -741,7 +735,6 @@ async def smart_fetch(url: str) -> str:
 # =============================================================================
 # OCR
 # =============================================================================
-
 def extract_text_from_image(image_bytes: bytes) -> str:
     try:
         image = Image.open(io.BytesIO(image_bytes))
@@ -757,17 +750,33 @@ def extract_text_from_image(image_bytes: bytes) -> str:
         raise APIError(f"OCR processing failed: {str(e)}")
 
 # =============================================================================
-# FastAPI app (same endpoints your frontend uses)
+# Prompts
+# =============================================================================
+def create_recipe_extraction_prompt(section_text: str) -> str:
+    return (
+        "את/ה מומחה/ית לחילוץ מתכונים. החזר/י אך ורק אובייקט JSON תקין יחיד (ללא טקסט נוסף), "
+        "בדיוק עם המפתחות: title, description, ingredients, instructions, prepTime, cookTime, servings, tags, imageUrl, source.\n"
+        "כללים: 1) החזר JSON בלבד; 2) numbers כמספרים (לא מחרוזות); 3) ללא פסיקים מיותרים; 4) ללא המצאות;\n"
+        "- ingredients ו-instructions הן מערכים של מחרוזות נקיות (ללא מספור/תבליטים).\n"
+        "- prepTime/cookTime בדקות שלמות (int).\n"
+        "- servings מספר שלם.\n\n"
+        "טקסט המתכון (האזור הרלוונטי):\n"
+        f"{section_text}\n"
+        "סיום."
+    )
+
+# =============================================================================
+# FastAPI app
 # =============================================================================
 app = FastAPI(
     title="Recipe Keeper API",
-    version="1.2.0",
-    description="API for extracting recipes from webpages or images using schema.org, heuristics (Hebrew-aware), and LLM (Ollama).",
+    version="1.3.0",
+    description="Generic recipe extraction via schema.org, DOM heuristics (Hebrew/English), and LLM fallback.",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -810,18 +819,80 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail="Ollama request failed")
 
 # -----------------------------------------------------------------------------
-# Extract recipe from URL (your endpoint name kept)
-# - Small change: enforce Ollama strict JSON with "format": "json" and temperature 0
+# Core extraction
 # -----------------------------------------------------------------------------
+def _build_filtered_section_for_llm(soup: BeautifulSoup) -> str:
+    """Create a compact, *already-filtered* section for LLM fallback."""
+    ing_candidates = _extract_ingredient_candidates(soup)
+    ings = _filter_to_measured_ingredients(ing_candidates)
+
+    step_candidates = _extract_instruction_candidates(soup)
+    steps = _normalize_instruction_lines(step_candidates)
+
+    parts: List[str] = []
+    if ings:
+        parts.append("רכיבים:\n" + "\n".join(ings))
+    if steps:
+        parts.append("אופן ההכנה:\n" + "\n".join(steps))
+    return "\n\n".join(parts)
+
+def _extract_generic_from_html(html: str) -> Optional[RecipeModel]:
+    soup = BeautifulSoup(html, "html.parser")
+
+    # title / description / image
+    title = ""
+    h1 = soup.find(["h1", "h2"])
+    if h1:
+        title = clean_html(h1.get_text())
+    if not title:
+        t = soup.find("title")
+        title = clean_html(t.get_text()) if t else ""
+
+    description = ""
+    md = soup.find("meta", attrs={"property": "og:description"}) or soup.find("meta", attrs={"name": "description"})
+    if md and md.get("content"):
+        description = clean_html(md["content"])
+
+    image_url = ""
+    ogimg = soup.find("meta", attrs={"property": "og:image"})
+    if ogimg and ogimg.get("content"):
+        image_url = ogimg["content"]
+
+    # ingredients / instructions
+    ing_candidates = _extract_ingredient_candidates(soup)
+    ingredients = _filter_to_measured_ingredients(ing_candidates)
+
+    step_candidates = _extract_instruction_candidates(soup)
+    instructions = _normalize_instruction_lines(step_candidates)
+
+    prep, cook = parse_times_from_soup(soup)
+
+    if (title and (len(ingredients) >= 2 or len(instructions) >= 2)) or (len(ingredients) >= 3 and len(instructions) >= 2):
+        logger.info("[GENERIC] success | ings=%d steps=%d", len(ingredients), len(instructions))
+        return RecipeModel(
+            title=title,
+            description=description,
+            ingredients=ingredients,
+            instructions=instructions,
+            prepTime=prep,
+            cookTime=cook,
+            servings=1,
+            tags=[],
+            imageUrl=image_url,
+        )
+    logger.info("[GENERIC] not confident | ings=%d steps=%d", len(ingredients), len(instructions))
+    return None
+
 @app.post("/extract_recipe")
 async def extract_recipe(req: RecipeExtractionRequest):
     url = req.url.strip()
     logger.info("[FLOW] extract_recipe START | url=%s", url)
     if not url.startswith("http"):
         raise HTTPException(status_code=400, detail="Invalid URL")
+
     try:
         html = await smart_fetch(url)
-        logger.debug("[FLOW] fetched html len=%d", len(html))
+        soup = BeautifulSoup(html, "html.parser")
 
         # 1) schema.org
         model = parse_schema_org_recipe(html)
@@ -830,46 +901,25 @@ async def extract_recipe(req: RecipeExtractionRequest):
                 model.source = url
             return model.model_dump()
 
-        # 2) domain plugin (10dakot)
-        model = plugin_10dakot(html)
+        # 2) generic DOM heuristics (tables + lists; measured-only)
+        model = _extract_generic_from_html(html)
         if model and (model.ingredients or model.instructions):
             if not model.source:
                 model.source = url
             return model.model_dump()
 
-        # 3) heuristic
-        model = heuristic_extract_from_html(html)
-        if model and (model.ingredients or model.instructions):
-            if not model.source:
-                model.source = url
-            return model.model_dump()
+        # 3) LLM fallback with filtered section
+        section_text = _build_filtered_section_for_llm(soup)
+        if len(section_text) < 80:
+            section_text = extract_recipe_content(html)  # desperate fallback
 
-        # 4) LLM fallback — build focused section first; if too small, use full text
-        soup = BeautifulSoup(html, "html.parser")
-        ing_header = _find_first_matching_label(soup, ING_LABELS)
-        step_header = _find_first_matching_label(soup, STEP_LABELS)
-        section_text = ""
-        if ing_header:
-            ilines = _collect_after(ing_header, stop_labels=STEP_LABELS + STOP_LABELS)
-            if ilines:
-                section_text += "רכיבים:\n" + "\n".join(ilines) + "\n\n"
-        if step_header:
-            slines = _collect_after(step_header, stop_labels=STOP_LABELS)
-            if slines:
-                section_text += "אופן ההכנה:\n" + "\n".join(slines) + "\n\n"
-
-        if len(section_text) < 400:
-            section_text = extract_recipe_content(html)
-            logger.info("[FOCUS] using compact full text len=%d", len(section_text))
-        else:
-            logger.info("[FOCUS] built section text len=%d", len(section_text))
-
+        logger.info("[FOCUS] section len=%d", len(section_text))
         prompt = create_recipe_extraction_prompt(section_text)
         payload = {
             "model": MODEL_NAME,
             "prompt": prompt,
             "stream": False,
-            "format": "json",               # <<< enforce strict JSON
+            "format": "json",
             "options": {"temperature": 0, "num_ctx": 4096, "top_k": 40, "top_p": 0.9},
         }
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
@@ -877,16 +927,13 @@ async def extract_recipe(req: RecipeExtractionRequest):
             r.raise_for_status()
             data = r.json()
         output = data.get("response", "")
-        logger.info("[LLM] response len=%d", len(output))
-        logger.debug("[LLM] sample: %s", output[:400])
 
-        # If format=json worked, output is already JSON; keep repair as safety
         try:
             recipe_dict = json.loads(output)
         except Exception:
             recipe_dict = await extract_and_parse_llm_json(output)
 
-        prep, cook = parse_times_from_soup(BeautifulSoup(html, "html.parser"))
+        prep, cook = parse_times_from_soup(soup)
         recipe_dict.setdefault("prepTime", prep)
         recipe_dict.setdefault("cookTime", cook)
         recipe_dict.setdefault("source", url)
@@ -906,7 +953,7 @@ async def extract_recipe(req: RecipeExtractionRequest):
         raise HTTPException(status_code=500, detail="An unexpected error occurred during recipe extraction")
 
 # -----------------------------------------------------------------------------
-# Extract recipe from Base64 image — now also uses format='json' for robustness
+# Extract recipe from Base64 image
 # -----------------------------------------------------------------------------
 @app.post("/extract_recipe_from_image")
 async def extract_recipe_from_image(req: ImageExtractionRequest):
@@ -924,7 +971,7 @@ async def extract_recipe_from_image(req: ImageExtractionRequest):
             "model": MODEL_NAME,
             "prompt": prompt,
             "stream": False,
-            "format": "json",               # <<< strict JSON
+            "format": "json",
             "options": {"temperature": 0, "num_ctx": 4096, "top_k": 40, "top_p": 0.9},
         }
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
@@ -947,7 +994,7 @@ async def extract_recipe_from_image(req: ImageExtractionRequest):
         raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
 
 # -----------------------------------------------------------------------------
-# Upload recipe image (multipart) — also strict JSON
+# Upload recipe image (multipart)
 # -----------------------------------------------------------------------------
 @app.post("/upload_recipe_image")
 async def upload_recipe_image(file: UploadFile = File(...)):
@@ -962,7 +1009,7 @@ async def upload_recipe_image(file: UploadFile = File(...)):
             "model": MODEL_NAME,
             "prompt": prompt,
             "stream": False,
-            "format": "json",               # <<< strict JSON
+            "format": "json",
             "options": {"temperature": 0, "num_ctx": 4096, "top_k": 40, "top_p": 0.9},
         }
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
@@ -985,7 +1032,7 @@ async def upload_recipe_image(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Error processing uploaded image: {str(e)}")
 
 # -----------------------------------------------------------------------------
-# Custom recipe generation — keep endpoint; add format='json'
+# Custom recipe generation
 # -----------------------------------------------------------------------------
 @app.post("/custom_recipe")
 async def custom_recipe(req: CustomRecipeRequest):
@@ -1002,7 +1049,7 @@ async def custom_recipe(req: CustomRecipeRequest):
             "model": MODEL_NAME,
             "prompt": prompt,
             "stream": False,
-            "format": "json",               # <<< strict JSON
+            "format": "json",
             "options": {"temperature": 0.5, "num_ctx": 4096, "top_k": 50, "top_p": 0.95},
         }
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
@@ -1048,4 +1095,4 @@ async def proxy_image(url: str):
 # Entrypoint
 # =============================================================================
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8002)

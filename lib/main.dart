@@ -1,82 +1,104 @@
+// lib/main.dart
+import 'dart:async';
+import 'dart:developer' as developer;
+
+import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode;
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'dart:developer' as developer;
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:recipe_keeper/services/firebase_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'package:recipe_keeper/firebase_options.dart';
 import 'package:recipe_keeper/utils/app_router.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
 import 'package:recipe_keeper/widgets/connectivity_widget.dart';
-import 'package:recipe_keeper/firebase_options.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:recipe_keeper/providers/settings_provider.dart';
+import 'package:recipe_keeper/providers/auth_provider.dart';
+import 'package:recipe_keeper/services/firebase_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  try {
-    // Initialize Firebase Core FIRST
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
+  // Global error handlers (avoid PII in production logs)
+  FlutterError.onError = (FlutterErrorDetails details) {
+    developer.log(
+      'FlutterError',
+      name: 'Main',
+      error: details.exception,
+      stackTrace: details.stack,
     );
-    developer.log('Firebase Core initialized in main()', name: 'Main');
+  };
 
-    // Configure Firestore Settings and Persistence BEFORE first use
-    try {
-      // Get the instance
-      final FirebaseFirestore firestore = FirebaseFirestore.instance;
-      // Set the settings on the instance
-      firestore.settings = const Settings(
-        persistenceEnabled: true,
-        cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
-        sslEnabled: true,
-        ignoreUndefinedProperties: true,
+  runZonedGuarded(
+    () async {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
       );
-      developer.log('Firestore settings applied', name: 'Main');
-      // Persistence is enabled via the settings, no separate call needed
-    } catch (e, stack) {
+      developer.log('Firebase initialized', name: 'Main');
+
+      // Firestore settings (avoid unlimited cache)
+      FirebaseFirestore.instance.settings = const Settings(
+        persistenceEnabled: true,
+        cacheSizeBytes: 100 * 1024 * 1024, // 100MB
+        ignoreUndefinedProperties: true,
+        sslEnabled: true,
+      );
+
+      runApp(const ProviderScope(child: RecipeKeeperApp()));
+    },
+    (error, stack) {
       developer.log(
-        'Error configuring Firestore settings/persistence: $e',
+        'Uncaught zone error',
         name: 'Main',
-        error: e,
+        error: error,
         stackTrace: stack,
       );
-    }
-
-    // Now run the app
-    runApp(const ProviderScope(child: RecipeKeeperApp()));
-
-    // Initialize other services and run diagnostics AFTER runApp
-    // Diagnostics can sometimes interfere with initial web load, comment out for now
-    /*
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // await FirebaseService.initializeFirebase(); // This might be redundant now
-      // developer.log('Firebase service initialized post-frame', name: 'Main');
-      await _runDiagnostics(); 
-    });
-    */
-  } catch (e, stackTrace) {
-    developer.log(
-      'Firebase initialization error in main(): $e',
-      name: 'Main',
-      error: e,
-      stackTrace: stackTrace,
-    );
-    // Optionally run a fallback app if Firebase init fails critically
-    runApp(const ProviderScope(child: RecipeKeeperApp())); // Still run app
-  }
+      runApp(const ProviderScope(child: RecipeKeeperApp()));
+    },
+  );
 }
 
-class RecipeKeeperApp extends ConsumerWidget {
+class RecipeKeeperApp extends ConsumerStatefulWidget {
   const RecipeKeeperApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // Register a callback to dispose Firebase when app is terminated
+  ConsumerState<RecipeKeeperApp> createState() => _RecipeKeeperAppState();
+}
+
+class _RecipeKeeperAppState extends ConsumerState<RecipeKeeperApp>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
     if (!kIsWeb) {
-      // Skip in web to avoid DOM issues
-      WidgetsBinding.instance.addObserver(_AppLifecycleObserver());
+      WidgetsBinding.instance.addObserver(this);
+    }
+  }
+
+  @override
+  void dispose() {
+    if (!kIsWeb) {
+      WidgetsBinding.instance.removeObserver(this);
+    }
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached) {
+      // App is being terminated, clean up resources
+      FirebaseService.dispose();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Touching auth provider ensures it’s initialized
+    final authState = ref.watch(authProvider);
+    if (kDebugMode) {
+      developer.log('Auth status=${authState.status}', name: 'Main');
     }
 
     final settings = ref.watch(settingsProvider);
@@ -90,35 +112,17 @@ class RecipeKeeperApp extends ConsumerWidget {
       themeMode: themeMode,
       routerConfig: AppRouter.router,
       debugShowCheckedModeBanner: false,
-      // Add localization support
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      supportedLocales: const [
-        Locale('he', 'IL'), // Hebrew
-        Locale('en', 'US'), // English
-      ],
+      supportedLocales: const [Locale('he', 'IL'), Locale('en', 'US')],
       locale: isHebrew ? const Locale('he', 'IL') : const Locale('en', 'US'),
       builder: (context, child) {
-        // Wrap the entire app with the connectivity widget
-        return Directionality(
-          textDirection: isHebrew ? TextDirection.rtl : TextDirection.ltr,
-          child: ConnectivityWidget(child: child ?? const SizedBox()),
-        );
+        // MaterialApp provides Directionality from locale
+        return ConnectivityWidget(child: child ?? const SizedBox());
       },
     );
-  }
-}
-
-/// Observer to handle app lifecycle events
-class _AppLifecycleObserver extends WidgetsBindingObserver {
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.detached) {
-      // App is being terminated, clean up resources
-      FirebaseService.dispose();
-    }
   }
 }

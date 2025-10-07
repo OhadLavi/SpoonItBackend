@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:recipe_keeper/utils/app_theme.dart';
 
 class AuthHeader extends StatelessWidget {
   final double height;
@@ -8,7 +9,7 @@ class AuthHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const coralColor = Color(0xFFFF7E6B);
+    const coralColor = AppTheme.primaryColor;
     return Container(
       width: double.infinity,
       height: height,
@@ -24,7 +25,7 @@ class AuthHeader extends StatelessWidget {
               width: 300,
               height: 300,
               colorFilter: ColorFilter.mode(
-                Colors.black.withValues(alpha: 0.4),
+                AppTheme.textColor,
                 BlendMode.srcIn,
               ),
             ),
@@ -38,19 +39,19 @@ class AuthHeader extends StatelessWidget {
                 Icon(
                   Icons.circle,
                   size: 6,
-                  color: Colors.black.withValues(alpha: 0.15),
+                  color: AppTheme.dividerColor.withValues(alpha: 0.15),
                 ),
                 const SizedBox(width: 4),
                 Icon(
                   Icons.circle,
                   size: 6,
-                  color: Colors.black.withValues(alpha: 0.10),
+                  color: AppTheme.dividerColor.withValues(alpha: 0.10),
                 ),
                 const SizedBox(width: 4),
                 Icon(
                   Icons.circle,
                   size: 6,
-                  color: Colors.black.withValues(alpha: 0.07),
+                  color: AppTheme.dividerColor.withValues(alpha: 0.07),
                 ),
               ],
             ),
@@ -96,7 +97,7 @@ class AuthPanel extends StatelessWidget {
               vertical: 32,
             ),
             decoration: const BoxDecoration(
-              color: Color(0xFFF8F8F8),
+              color: AppTheme.cardColor,
               borderRadius: BorderRadius.only(
                 topLeft: Radius.circular(40),
                 topRight: Radius.circular(40),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
+import 'package:recipe_keeper/utils/app_theme.dart';
 
 class AppBottomNav extends StatelessWidget {
   final int currentIndex;
@@ -11,74 +13,80 @@ class AppBottomNav extends StatelessWidget {
     return SafeArea(
       top: false,
       child: SizedBox(
-        height: 60,
+        height: 88,
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            // Navigation bar with curved cutout
-            Positioned.fill(
-              child: CustomPaint(
-                painter: CurvedBottomNavPainter(),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    // Home
-                    Expanded(
-                      child: _navBarItem(
-                        Icons.home,
-                        'בית',
-                        currentIndex == 0,
-                        () {
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: SizedBox(
+                height: 60,
+                child: CustomPaint(
+                  painter: CurvedBottomNavPainter(),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      // Home
+                      Expanded(
+                        child: _navBarItem(null, 'בית', currentIndex == 0, () {
                           if (currentIndex != 0) {
                             context.go('/home');
                           }
-                        },
+                        }),
                       ),
-                    ),
-                    // Empty space for FAB
-                    const SizedBox(width: 80),
-                    // Shopping list
-                    Expanded(
-                      child: _navBarItem(
-                        Icons.list_alt,
-                        'רשימת קניות',
-                        currentIndex == 1,
-                        () {
-                          if (currentIndex != 1) {
-                            context.go('/shopping-list');
-                          }
-                        },
+                      // Empty space for FAB
+                      const SizedBox(width: 80),
+                      // Shopping list
+                      Expanded(
+                        child: _navBarItem(
+                          null,
+                          'רשימת קניות',
+                          currentIndex == 1,
+                          () {
+                            if (currentIndex != 1) {
+                              context.go('/shopping-list');
+                            }
+                          },
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
-            // FAB positioned above the navigation bar
+
+            // FAB fully inside Stack bounds → clickable everywhere
             Positioned(
-              top: -28,
+              top: 0, // no negative offset
               left: 0,
               right: 0,
               child: Center(
-                child: GestureDetector(
-                  onTap: () => _showAddRecipeOptions(context),
-                  child: Container(
-                    height: 56,
-                    width: 56,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: const Color(0xFFFF7E6B),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    onTap: () => _showAddRecipeOptions(context),
+                    child: Container(
+                      height: 56,
+                      width: 56,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: AppTheme.primaryColor,
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.dividerColor.withOpacity(0.2),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          Icons.add,
+                          color: AppTheme.backgroundColor,
+                          size: 30,
                         ),
-                      ],
-                    ),
-                    child: const Center(
-                      child: Icon(Icons.add, color: Colors.white, size: 30),
+                      ),
                     ),
                   ),
                 ),
@@ -91,7 +99,7 @@ class AppBottomNav extends StatelessWidget {
   }
 
   Widget _navBarItem(
-    IconData icon,
+    IconData? icon,
     String label,
     bool selected,
     VoidCallback onTap,
@@ -105,12 +113,28 @@ class AppBottomNav extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: Colors.black, size: 20),
+            if (icon != null)
+              Icon(icon, color: AppTheme.iconColor, size: 20)
+            else
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: SvgPicture.asset(
+                  label == 'בית'
+                      ? 'assets/images/home.svg'
+                      : 'assets/images/list_alt.svg',
+                  colorFilter: const ColorFilter.mode(
+                    AppTheme.iconColor,
+                    BlendMode.srcIn,
+                  ),
+                  fit: BoxFit.contain,
+                ),
+              ),
             const SizedBox(height: 1),
             Text(
               label,
               style: TextStyle(
-                color: Colors.black,
+                color: AppTheme.textColor,
                 fontSize: 9,
                 fontWeight: selected ? FontWeight.bold : FontWeight.normal,
               ),
@@ -124,7 +148,7 @@ class AppBottomNav extends StatelessWidget {
   void _showAddRecipeOptions(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.backgroundColor,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -133,7 +157,7 @@ class AppBottomNav extends StatelessWidget {
             textDirection: TextDirection.rtl,
             child: Container(
               decoration: const BoxDecoration(
-                color: Colors.white,
+                color: AppTheme.backgroundColor,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
               ),
               child: Padding(
@@ -146,18 +170,21 @@ class AppBottomNav extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
-                        fontFamily: 'Heebo',
-                        color: Color(0xFF6E3C3F),
+                        fontFamily: AppTheme.primaryFontFamily,
+                        color: AppTheme.textColor,
                       ),
                     ),
                     const SizedBox(height: 20),
                     ListTile(
-                      leading: const Icon(Icons.edit, color: Color(0xFFFF7E6B)),
+                      leading: const Icon(
+                        Icons.edit,
+                        color: AppTheme.primaryColor,
+                      ),
                       title: const Text(
                         'צור מתכון חדש',
                         style: TextStyle(
-                          fontFamily: 'Heebo',
-                          color: Color(0xFF6E3C3F),
+                          fontFamily: AppTheme.primaryFontFamily,
+                          color: AppTheme.textColor,
                         ),
                       ),
                       onTap: () {
@@ -166,12 +193,15 @@ class AppBottomNav extends StatelessWidget {
                       },
                     ),
                     ListTile(
-                      leading: const Icon(Icons.link, color: Color(0xFFFF7E6B)),
+                      leading: const Icon(
+                        Icons.link,
+                        color: AppTheme.primaryColor,
+                      ),
                       title: const Text(
                         'ייבא מקישור',
                         style: TextStyle(
-                          fontFamily: 'Heebo',
-                          color: Color(0xFF6E3C3F),
+                          fontFamily: AppTheme.primaryFontFamily,
+                          color: AppTheme.textColor,
                         ),
                       ),
                       onTap: () {
@@ -182,13 +212,13 @@ class AppBottomNav extends StatelessWidget {
                     ListTile(
                       leading: const Icon(
                         Icons.camera_alt,
-                        color: Color(0xFFFF7E6B),
+                        color: AppTheme.primaryColor,
                       ),
                       title: const Text(
                         'סרוק מתכון',
                         style: TextStyle(
-                          fontFamily: 'Heebo',
-                          color: Color(0xFF6E3C3F),
+                          fontFamily: AppTheme.primaryFontFamily,
+                          color: AppTheme.textColor,
                         ),
                       ),
                       onTap: () {
@@ -208,7 +238,7 @@ class AppBottomNav extends StatelessWidget {
 
 class CurvedBottomNavPainter extends CustomPainter {
   CurvedBottomNavPainter({
-    this.barColor = const Color(0xFFF8F8F8),
+    this.barColor = AppTheme.cardColor,
     this.fabDiameter = 56, // your FAB is 56 → radius 28
     this.notchDepth, // how deep the valley dips below the top edge
     this.shoulder = 22, // how wide the rounded “shoulders” are

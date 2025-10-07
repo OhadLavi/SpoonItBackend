@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:recipe_keeper/providers/auth_provider.dart';
-import 'package:recipe_keeper/providers/settings_provider.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
 import 'package:recipe_keeper/utils/helpers.dart';
-import 'package:recipe_keeper/utils/translations.dart';
 import 'package:recipe_keeper/widgets/auth_widgets.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -21,6 +20,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _passwordController = TextEditingController();
   bool _isPasswordVisible = false;
   bool _isLoading = false;
+  String? _errorMessage;
 
   @override
   void dispose() {
@@ -33,6 +33,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (_formKey.currentState!.validate()) {
       setState(() {
         _isLoading = true;
+        _errorMessage = null;
       });
 
       try {
@@ -51,20 +52,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           }
         } else if (authState.status == AuthStatus.error) {
           if (mounted) {
-            Helpers.showSnackBar(
-              context,
-              authState.errorMessage ?? 'An error occurred during sign in',
-              isError: true,
-            );
+            setState(() {
+              _errorMessage = Helpers.simplifyAuthError(
+                authState.errorMessage ?? 'Unknown error',
+              );
+            });
           }
         }
       } catch (e) {
         if (mounted) {
-          Helpers.showSnackBar(
-            context,
-            'An error occurred: ${e.toString()}',
-            isError: true,
-          );
+          setState(() {
+            _errorMessage = Helpers.simplifyAuthError(e.toString());
+          });
         }
       } finally {
         if (mounted) {
@@ -79,6 +78,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<void> _signInWithGoogle() async {
     setState(() {
       _isLoading = true;
+      _errorMessage = null;
     });
 
     try {
@@ -92,61 +92,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         }
       } else if (authState.status == AuthStatus.error) {
         if (mounted) {
-          Helpers.showSnackBar(
-            context,
-            authState.errorMessage ?? 'An error occurred during Google sign in',
-            isError: true,
-          );
+          setState(() {
+            _errorMessage = Helpers.simplifyAuthError(
+              authState.errorMessage ?? 'Unknown error',
+            );
+          });
         }
       }
     } catch (e) {
-      if (mounted) {
-        Helpers.showSnackBar(
-          context,
-          'An error occurred: ${e.toString()}',
-          isError: true,
-        );
-      }
-    } finally {
       if (mounted) {
         setState(() {
-          _isLoading = false;
+          _errorMessage = Helpers.simplifyAuthError(e.toString());
         });
-      }
-    }
-  }
-
-  Future<void> _signInAnonymously() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      await ref.read(authProvider.notifier).signInAnonymously();
-
-      final authState = ref.read(authProvider);
-
-      if (authState.status == AuthStatus.authenticated) {
-        if (mounted) {
-          context.go('/home');
-        }
-      } else if (authState.status == AuthStatus.error) {
-        if (mounted) {
-          Helpers.showSnackBar(
-            context,
-            authState.errorMessage ??
-                'An error occurred during anonymous sign in',
-            isError: true,
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        Helpers.showSnackBar(
-          context,
-          'An error occurred: ${e.toString()}',
-          isError: true,
-        );
       }
     } finally {
       if (mounted) {
@@ -159,15 +116,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const coralColor = Color(0xFFFF7E6B);
-    const mainTextColor = Color(0xFF6E3C3F);
+    const coralColor = AppTheme.primaryColor;
+    const mainTextColor = AppTheme.textColor;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: AppTheme.cardColor,
       body: Stack(
         children: [
           // AuthHeader with welcome text
-          const AuthHeader(
+          AuthHeader(
             height: 320,
             child: Padding(
               padding: EdgeInsets.only(top: 100, right: 32, left: 32),
@@ -179,13 +136,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     'שלום!',
                     textAlign: TextAlign.right,
                     style: TextStyle(
-                      fontFamily: 'Heebo',
+                      fontFamily: AppTheme.primaryFontFamily,
                       fontSize: 48,
                       fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      color: AppTheme.backgroundColor,
                       shadows: [
                         Shadow(
-                          color: Colors.black26,
+                          color: AppTheme.dividerColor.withValues(alpha: 0.26),
                           blurRadius: 4,
                           offset: Offset(0, 2),
                         ),
@@ -197,12 +154,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     'ברוכים הבאים ל-SpoonIt',
                     textAlign: TextAlign.right,
                     style: TextStyle(
-                      fontFamily: 'Heebo',
+                      fontFamily: AppTheme.primaryFontFamily,
                       fontSize: 18,
-                      color: Colors.white,
+                      color: AppTheme.backgroundColor,
                       shadows: [
                         Shadow(
-                          color: Colors.black12,
+                          color: AppTheme.dividerColor.withValues(alpha: 0.12),
                           blurRadius: 2,
                           offset: Offset(0, 1),
                         ),
@@ -228,7 +185,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       'התחברות',
                       textAlign: TextAlign.right,
                       style: TextStyle(
-                        fontFamily: 'Heebo',
+                        fontFamily: AppTheme.primaryFontFamily,
                         fontSize: 32,
                         fontWeight: FontWeight.bold,
                         color: mainTextColor,
@@ -240,11 +197,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   Container(
                     margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppTheme.backgroundColor,
                       borderRadius: BorderRadius.circular(24),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
+                          color: AppTheme.dividerColor.withValues(alpha: 0.04),
                           blurRadius: 8,
                           offset: const Offset(0, 2),
                         ),
@@ -257,21 +214,32 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           _emailController.text.isEmpty
                               ? TextAlign.right
                               : TextAlign.left,
+                      textDirection:
+                          _emailController.text.isEmpty
+                              ? TextDirection.rtl
+                              : TextDirection.ltr,
                       style: const TextStyle(
                         color: mainTextColor,
                         fontWeight: FontWeight.w300,
                       ),
                       onChanged: (value) => setState(() {}),
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         hintText: 'אימייל',
                         hintStyle: TextStyle(
                           color: mainTextColor,
                           fontWeight: FontWeight.w300,
                         ),
-                        prefixIcon: Icon(
-                          Icons.email_outlined,
-                          color: mainTextColor,
-                          size: 20,
+                        prefixIcon: Padding(
+                          padding: EdgeInsets.all(12.0),
+                          child: SvgPicture.asset(
+                            'assets/images/email.svg',
+                            width: 18,
+                            height: 18,
+                            colorFilter: ColorFilter.mode(
+                              AppTheme.textColor,
+                              BlendMode.srcIn,
+                            ),
+                          ),
                         ),
                         border: InputBorder.none,
                         enabledBorder: InputBorder.none,
@@ -296,11 +264,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppTheme.backgroundColor,
                       borderRadius: BorderRadius.circular(24),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
+                          color: AppTheme.dividerColor.withValues(alpha: 0.04),
                           blurRadius: 8,
                           offset: const Offset(0, 2),
                         ),
@@ -313,6 +281,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           _passwordController.text.isEmpty
                               ? TextAlign.right
                               : TextAlign.left,
+                      textDirection:
+                          _passwordController.text.isEmpty
+                              ? TextDirection.rtl
+                              : TextDirection.ltr,
                       style: const TextStyle(
                         color: mainTextColor,
                         fontWeight: FontWeight.w300,
@@ -320,17 +292,29 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       onChanged: (value) => setState(() {}),
                       decoration: InputDecoration(
                         hintText: 'סיסמה',
-                        hintStyle: const TextStyle(
+                        hintStyle: TextStyle(
                           color: mainTextColor,
                           fontWeight: FontWeight.w300,
                         ),
-                        prefixIcon: IconButton(
+                        prefixIcon: Padding(
+                          padding: EdgeInsets.all(12.0),
+                          child: SvgPicture.asset(
+                            'assets/images/password.svg',
+                            width: 18,
+                            height: 18,
+                            colorFilter: ColorFilter.mode(
+                              AppTheme.textColor,
+                              BlendMode.srcIn,
+                            ),
+                          ),
+                        ),
+                        suffixIcon: IconButton(
                           icon: Icon(
                             _isPasswordVisible
                                 ? Icons.visibility_outlined
                                 : Icons.visibility_off_outlined,
                             color: mainTextColor,
-                            size: 20,
+                            size: 18,
                           ),
                           onPressed: () {
                             setState(() {
@@ -354,15 +338,46 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       },
                     ),
                   ),
+                  // Error Message Display
+                  if (_errorMessage != null) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppTheme.errorColor.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: AppTheme.errorColor.withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.error_outline,
+                            color: AppTheme.errorColor,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _errorMessage!,
+                              style: TextStyle(
+                                color: AppTheme.errorColor,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   // Forgot Password Link (left)
                   Align(
                     alignment: Alignment.centerLeft,
                     child: TextButton(
                       onPressed: () {
-                        Helpers.showSnackBar(
-                          context,
-                          'פיצ׳ר שחזור סיסמה יגיע בקרוב',
-                        );
+                        // TODO: Implement password reset
                       },
                       child: const Text(
                         'שכחתי סיסמה',
@@ -379,27 +394,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           _isLoading ? null : _signInWithEmailAndPassword,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: coralColor,
-                        foregroundColor: Colors.white,
+                        foregroundColor: AppTheme.backgroundColor,
+                        disabledBackgroundColor: coralColor,
+                        disabledForegroundColor: AppTheme.backgroundColor,
+                        shadowColor: Colors.transparent,
+                        elevation: 0,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(24),
                         ),
                         textStyle: const TextStyle(
-                          fontFamily: 'Heebo',
+                          fontFamily: AppTheme.primaryFontFamily,
                           fontWeight: FontWeight.bold,
                           fontSize: 18,
                         ),
                       ),
-                      child:
-                          _isLoading
-                              ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                              : const Text('התחבר'),
+                      child: const Text('התחבר'),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -407,12 +416,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   Row(
                     children: [
                       const Expanded(child: Divider()),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: const Text(
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Text(
                           'אפשר להתחבר גם עם',
                           style: TextStyle(
-                            fontFamily: 'Heebo',
+                            fontFamily: AppTheme.primaryFontFamily,
                             color: mainTextColor,
                             fontSize: 14,
                           ),
@@ -429,29 +438,31 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       // Facebook
                       InkWell(
                         onTap: () {
-                          Helpers.showSnackBar(
-                            context,
-                            'פייסבוק לא נתמך עדיין',
-                          );
+                          // TODO: Implement Facebook login
                         },
                         child: Container(
                           width: 44,
                           height: 44,
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: AppTheme.backgroundColor,
                             shape: BoxShape.circle,
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.08),
+                                color: AppTheme.dividerColor.withValues(
+                                  alpha: 0.08,
+                                ),
                                 blurRadius: 4,
                                 offset: const Offset(0, 2),
                               ),
                             ],
                           ),
-                          child: const Icon(
-                            Icons.facebook,
-                            color: Color(0xFF1877F3),
-                            size: 28,
+                          child: Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: SvgPicture.asset(
+                              'assets/images/facebook.svg',
+                              width: 28,
+                              height: 28,
+                            ),
                           ),
                         ),
                       ),
@@ -463,11 +474,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           width: 44,
                           height: 44,
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: AppTheme.backgroundColor,
                             shape: BoxShape.circle,
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.08),
+                                color: AppTheme.dividerColor.withValues(
+                                  alpha: 0.08,
+                                ),
                                 blurRadius: 4,
                                 offset: const Offset(0, 2),
                               ),
@@ -475,15 +488,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           ),
                           child: Padding(
                             padding: const EdgeInsets.all(8.0),
-                            child: Image.network(
-                              'https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg',
-                              fit: BoxFit.contain,
-                              errorBuilder:
-                                  (context, error, stackTrace) => Icon(
-                                    Icons.g_mobiledata_rounded,
-                                    color: Color(0xFF4285F4),
-                                    size: 28,
-                                  ),
+                            child: SvgPicture.asset(
+                              'assets/images/google.svg',
+                              width: 28,
+                              height: 28,
                             ),
                           ),
                         ),
@@ -499,7 +507,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         'רוצה לשמור מתכונים? ',
                         style: TextStyle(
                           color: mainTextColor,
-                          fontFamily: 'Heebo',
+                          fontFamily: AppTheme.primaryFontFamily,
                           fontSize: 14,
                         ),
                       ),
@@ -512,7 +520,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           style: TextStyle(
                             color: coralColor,
                             fontWeight: FontWeight.bold,
-                            fontFamily: 'Heebo',
+                            fontFamily: AppTheme.primaryFontFamily,
                             fontSize: 14,
                           ),
                         ),

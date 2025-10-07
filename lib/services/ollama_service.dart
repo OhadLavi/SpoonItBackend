@@ -1,8 +1,9 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:recipe_keeper/config/env_config.dart';
 
 class OllamaService {
-  static const String baseUrl = 'http://localhost:8000';
+  String get baseUrl => EnvConfig.apiBaseUrl;
 
   Future<String> sendMessage(String message) async {
     try {

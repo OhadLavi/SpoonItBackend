@@ -5,6 +5,7 @@ import 'package:recipe_keeper/providers/settings_provider.dart';
 import 'package:recipe_keeper/utils/translations.dart';
 import 'package:recipe_keeper/widgets/app_header.dart';
 import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
+import 'package:recipe_keeper/utils/app_theme.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({super.key});
@@ -98,7 +99,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const CircularProgressIndicator(color: Color(0xFFFF7E6B)),
+                    const CircularProgressIndicator(
+                      color: AppTheme.primaryColor,
+                    ),
                     const SizedBox(width: 8),
                     Text(AppTranslations.getText(ref, 'loading')),
                   ],
@@ -143,9 +146,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 ],
               ),
             ),
-            const AppBottomNav(currentIndex: -1),
           ],
         ),
+        bottomNavigationBar: const AppBottomNav(currentIndex: -1),
       ),
     );
   }
@@ -188,7 +191,7 @@ class MessageBubble extends StatelessWidget {
         child: Text(
           message.text,
           style: TextStyle(
-            color: message.isUser ? Colors.white : null,
+            color: message.isUser ? AppTheme.backgroundColor : null,
             fontFamily: isHebrew ? 'Heebo' : null,
             fontSize: 16,
           ),

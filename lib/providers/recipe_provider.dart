@@ -7,7 +7,25 @@ import 'package:recipe_keeper/services/auth_service.dart';
 import 'package:recipe_keeper/providers/auth_provider.dart' as auth;
 
 // State provider for tracking favorite states with immediate UI feedback
-final favoritesUIProvider = StateProvider<Map<String, bool>>((ref) => {});
+class FavoritesUINotifier extends Notifier<Map<String, bool>> {
+  @override
+  Map<String, bool> build() => {};
+
+  void updateFavorite(String recipeId, bool isFavorite) {
+    state = {...state, recipeId: isFavorite};
+  }
+
+  void removeFavorite(String recipeId) {
+    final newState = Map<String, bool>.from(state);
+    newState.remove(recipeId);
+    state = newState;
+  }
+}
+
+final favoritesUIProvider =
+    NotifierProvider<FavoritesUINotifier, Map<String, bool>>(
+      () => FavoritesUINotifier(),
+    );
 
 // Define the possible recipe states
 enum RecipeStatus { initial, loading, success, error }
@@ -43,13 +61,26 @@ class RecipeState {
 }
 
 // Define the recipe notifier
-class RecipeNotifier extends StateNotifier<AsyncValue<List<Recipe>>> {
-  final RecipeService _recipeService;
-  final Ref _ref;
-  final AuthService _authService;
+class RecipeNotifier extends Notifier<AsyncValue<List<Recipe>>> {
+  late final RecipeService _recipeService;
+  late final AuthService _authService;
 
-  RecipeNotifier(this._recipeService, this._ref, this._authService)
-    : super(const AsyncValue.loading());
+  @override
+  AsyncValue<List<Recipe>> build() {
+    _recipeService = ref.read(recipeServiceProvider);
+
+    // Watch the async auth service provider
+    final authServiceAsync = ref.watch(authServiceProvider);
+
+    return authServiceAsync.when(
+      data: (authService) {
+        _authService = authService;
+        return const AsyncValue.loading();
+      },
+      loading: () => const AsyncValue.loading(),
+      error: (error, stackTrace) => AsyncValue.error(error, stackTrace),
+    );
+  }
 
   Future<void> loadRecipes() async {
     try {
@@ -152,6 +183,9 @@ class RecipeNotifier extends StateNotifier<AsyncValue<List<Recipe>>> {
       state.whenData((currentRecipes) {
         state = AsyncValue.data([recipeWithDescription, ...currentRecipes]);
       });
+
+      // Invalidate user recipes provider to refresh category views
+      ref.invalidate(userRecipesProvider(recipe.userId));
     } catch (e) {
       developer.log('Error adding recipe: $e', name: 'RecipeNotifier');
       state = AsyncValue.error(e, StackTrace.current);
@@ -207,10 +241,10 @@ class RecipeNotifier extends StateNotifier<AsyncValue<List<Recipe>>> {
       }
 
       // Refresh user data and recipe providers
-      _ref.invalidate(auth.userDataProvider);
-      _ref.invalidate(userRecipesProvider(recipe.userId));
-      _ref.invalidate(recipeProvider(recipeId));
-      _ref.invalidate(recipeStateProvider);
+      ref.invalidate(auth.userDataProvider);
+      ref.invalidate(userRecipesProvider(recipe.userId));
+      ref.invalidate(recipeProvider(recipeId));
+      ref.invalidate(recipeStateProvider);
     } catch (e) {
       developer.log('Error deleting recipe: $e', name: 'RecipeNotifier');
       state = AsyncValue.error(e, StackTrace.current);
@@ -244,8 +278,8 @@ class RecipeNotifier extends StateNotifier<AsyncValue<List<Recipe>>> {
       });
 
       // Refresh recipe providers
-      _ref.invalidate(recipeProvider(recipe.id));
-      _ref.invalidate(userRecipesProvider(recipe.userId));
+      ref.invalidate(recipeProvider(recipe.id));
+      ref.invalidate(userRecipesProvider(recipe.userId));
     } catch (e) {
       developer.log('Error updating recipe: $e', name: 'RecipeNotifier');
       state = AsyncValue.error(e, StackTrace.current);
@@ -259,11 +293,11 @@ class RecipeNotifier extends StateNotifier<AsyncValue<List<Recipe>>> {
 
     try {
       // 1. Optimistic UI update
-      _ref.read(favoritesUIProvider.notifier).update((map) {
-        final copy = Map.of(map);
-        copy[recipe.id] = newFav;
-        return copy;
-      });
+      if (newFav) {
+        ref.read(favoritesUIProvider.notifier).updateFavorite(recipe.id, true);
+      } else {
+        ref.read(favoritesUIProvider.notifier).removeFavorite(recipe.id);
+      }
 
       // 2. Update recipe document
       await _recipeService.updateRecipe(updated);
@@ -288,25 +322,17 @@ class RecipeNotifier extends StateNotifier<AsyncValue<List<Recipe>>> {
       });
 
       // 5. Clear optimistic state for this recipe
-      _ref.read(favoritesUIProvider.notifier).update((map) {
-        final copy = Map.of(map);
-        copy.remove(recipe.id);
-        return copy;
-      });
+      ref.read(favoritesUIProvider.notifier).removeFavorite(recipe.id);
 
       // 6. Invalidate only necessary providers
-      _ref.invalidate(recipeProvider(recipe.id));
-      _ref.invalidate(auth.userDataProvider);
-      _ref.invalidate(userRecipesProvider(recipe.userId));
+      ref.invalidate(recipeProvider(recipe.id));
+      ref.invalidate(auth.userDataProvider);
+      ref.invalidate(userRecipesProvider(recipe.userId));
       // Invalidate the main recipe state provider to update all recipe lists
-      _ref.invalidate(recipeStateProvider);
+      ref.invalidate(recipeStateProvider);
     } catch (e, st) {
       // 7. Revert optimistic update on error
-      _ref.read(favoritesUIProvider.notifier).update((map) {
-        final copy = Map.of(map);
-        copy.remove(recipe.id);
-        return copy;
-      });
+      ref.read(favoritesUIProvider.notifier).removeFavorite(recipe.id);
 
       developer.log(
         'Error toggling favorite: $e',
@@ -364,11 +390,9 @@ final firestoreProvider = Provider<FirebaseFirestore>((ref) {
 
 // Provider for the recipe state
 final recipeStateProvider =
-    StateNotifierProvider<RecipeNotifier, AsyncValue<List<Recipe>>>((ref) {
-      final recipeService = ref.watch(recipeServiceProvider);
-      final authService = AuthService();
-      return RecipeNotifier(recipeService, ref, authService);
-    });
+    NotifierProvider<RecipeNotifier, AsyncValue<List<Recipe>>>(
+      () => RecipeNotifier(),
+    );
 
 // Provider for a single recipe
 final recipeProvider = FutureProvider.family<Recipe?, String>((

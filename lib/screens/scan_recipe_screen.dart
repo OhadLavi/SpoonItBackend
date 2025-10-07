@@ -8,7 +8,9 @@ import 'package:recipe_keeper/models/recipe.dart';
 import 'package:recipe_keeper/widgets/recipe_form.dart';
 import 'package:recipe_keeper/widgets/app_header.dart';
 import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
+import 'package:recipe_keeper/utils/app_theme.dart';
 import 'package:go_router/go_router.dart';
+import 'package:recipe_keeper/config/env_config.dart';
 
 class ScanRecipeScreen extends ConsumerStatefulWidget {
   const ScanRecipeScreen({super.key});
@@ -25,7 +27,7 @@ class _ScanRecipeScreenState extends ConsumerState<ScanRecipeScreen> {
   bool get _hasImage => _selectedImage != null || _webImage != null;
 
   // API endpoint for image processing
-  final String apiUrl = 'http://localhost:8000/extract_recipe_from_image';
+  final String apiUrl = '${EnvConfig.apiBaseUrl}/extract_recipe_from_image';
 
   @override
   void didChangeDependencies() {
@@ -160,97 +162,120 @@ class _ScanRecipeScreenState extends ConsumerState<ScanRecipeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.backgroundColor,
       body: Column(
         children: [
           const AppHeader(title: 'סריקת מתכון'),
           Expanded(
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // Image preview area
-                  InkWell(
-                    onTap: _isProcessing ? null : _pickImage,
-                    child: Container(
-                      width: 300,
-                      height: 400,
-                      decoration: BoxDecoration(
-                        color: Colors.grey[300],
-                        borderRadius: BorderRadius.circular(12),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 100),
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const SizedBox(height: 40),
+                      // Image preview area
+                      InkWell(
+                        onTap: _isProcessing ? null : _pickImage,
+                        child: Container(
+                          width: 300,
+                          height: 400,
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryColor.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppTheme.primaryColor,
+                              width: 2,
+                              style: BorderStyle.solid,
+                            ),
+                          ),
+                          child:
+                              _hasImage
+                                  ? _buildImagePreview()
+                                  : Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.cloud_upload,
+                                        size: 60,
+                                        color: AppTheme.secondaryTextColor,
+                                      ),
+                                      const SizedBox(height: 16),
+                                      Text(
+                                        AppTranslations.getText(
+                                          ref,
+                                          'drop_image_here',
+                                        ),
+                                        style: TextStyle(
+                                          color: AppTheme.secondaryTextColor,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ],
+                                  ),
+                        ),
                       ),
-                      child:
-                          _hasImage
-                              ? _buildImagePreview()
-                              : Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.cloud_upload,
-                                    size: 60,
-                                    color: Colors.grey[600],
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    AppTranslations.getText(
-                                      ref,
-                                      'drop_image_here',
-                                    ),
-                                    style: TextStyle(color: Colors.grey[600]),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ],
-                              ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Text(_statusMessage, style: const TextStyle(fontSize: 18)),
-                  const SizedBox(height: 16),
-                  if (_isProcessing)
-                    const CircularProgressIndicator(color: Color(0xFFFF7E6B))
-                  else if (!_hasImage)
-                    ElevatedButton.icon(
-                      onPressed: _pickImage,
-                      icon: const Icon(Icons.add_photo_alternate),
-                      label: Text(AppTranslations.getText(ref, 'select_image')),
-                    )
-                  else
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        TextButton.icon(
-                          onPressed: _pickImage,
-                          icon: const Icon(Icons.refresh),
-                          label: Text(
-                            AppTranslations.getText(ref, 'change_image'),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
+                      const SizedBox(height: 24),
+                      Text(
+                        _statusMessage,
+                        style: const TextStyle(fontSize: 18),
+                      ),
+                      const SizedBox(height: 16),
+                      if (_isProcessing)
+                        const CircularProgressIndicator(
+                          color: AppTheme.primaryColor,
+                        )
+                      else if (!_hasImage)
                         ElevatedButton.icon(
-                          onPressed: _scanRecipe,
-                          icon: const Icon(Icons.document_scanner),
+                          onPressed: _pickImage,
+                          icon: const Icon(Icons.add_photo_alternate),
                           label: Text(
-                            AppTranslations.getText(ref, 'scan_image'),
+                            AppTranslations.getText(ref, 'select_image'),
                           ),
+                        )
+                      else
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            TextButton.icon(
+                              onPressed: _pickImage,
+                              icon: const Icon(Icons.refresh),
+                              label: Text(
+                                AppTranslations.getText(ref, 'change_image'),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            ElevatedButton.icon(
+                              onPressed: _scanRecipe,
+                              icon: const Icon(Icons.document_scanner),
+                              label: Text(
+                                AppTranslations.getText(ref, 'scan_image'),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  const SizedBox(height: 16),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: Text(
-                      AppTranslations.getText(ref, 'scan_recipe_instructions'),
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.grey),
-                    ),
+                      const SizedBox(height: 16),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Text(
+                          AppTranslations.getText(
+                            ref,
+                            'scan_recipe_instructions',
+                          ),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: AppTheme.secondaryTextColor),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ),
-          const AppBottomNav(currentIndex: -1),
         ],
       ),
+      bottomNavigationBar: const AppBottomNav(currentIndex: -1),
     );
   }
 
@@ -294,28 +319,31 @@ class _RecipeFormScreenState extends ConsumerState<_RecipeFormScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.backgroundColor,
       body: SafeArea(
         child: Column(
           children: [
             // Simple header bar
             Container(
               height: 60,
-              decoration: const BoxDecoration(color: Color(0xFFFF7E6B)),
+              decoration: const BoxDecoration(color: AppTheme.primaryColor),
               child: Row(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.arrow_forward, color: Colors.white),
+                    icon: Icon(
+                      Icons.arrow_forward,
+                      color: AppTheme.backgroundColor,
+                    ),
                     onPressed: () => Navigator.pop(context),
                   ),
                   Expanded(
                     child: Text(
                       'הוספת מתכון',
                       style: const TextStyle(
-                        color: Colors.white,
+                        color: AppTheme.backgroundColor,
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
-                        fontFamily: 'Heebo',
+                        fontFamily: AppTheme.primaryFontFamily,
                       ),
                       textAlign: TextAlign.center,
                     ),
@@ -335,11 +363,11 @@ class _RecipeFormScreenState extends ConsumerState<_RecipeFormScreen> {
                       content: Text(
                         'המתכון נשמר בהצלחה!',
                         style: TextStyle(
-                          fontFamily: 'Heebo',
-                          color: Colors.white,
+                          fontFamily: AppTheme.primaryFontFamily,
+                          color: AppTheme.backgroundColor,
                         ),
                       ),
-                      backgroundColor: Color(0xFFFF7E6B),
+                      backgroundColor: AppTheme.primaryColor,
                     ),
                   );
                   Navigator.pop(context);
@@ -347,11 +375,10 @@ class _RecipeFormScreenState extends ConsumerState<_RecipeFormScreen> {
                 },
               ),
             ),
-            // Bottom navigation
-            const AppBottomNav(currentIndex: -1),
           ],
         ),
       ),
+      bottomNavigationBar: const AppBottomNav(currentIndex: -1),
     );
   }
 }

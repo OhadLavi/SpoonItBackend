@@ -12,8 +12,13 @@ import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
 
 class CategoryRecipesScreen extends ConsumerStatefulWidget {
   final String categoryName;
+  final String categoryId;
 
-  const CategoryRecipesScreen({super.key, required this.categoryName});
+  const CategoryRecipesScreen({
+    super.key,
+    required this.categoryName,
+    required this.categoryId,
+  });
 
   @override
   ConsumerState<CategoryRecipesScreen> createState() =>
@@ -23,10 +28,107 @@ class CategoryRecipesScreen extends ConsumerStatefulWidget {
 class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
   List<Recipe> _getFilteredRecipes(List<Recipe> allRecipes) {
     return allRecipes.where((recipe) {
-      return recipe.tags.any(
-        (tag) => tag.toLowerCase() == widget.categoryName.toLowerCase(),
-      );
+      return recipe.categoryId == widget.categoryId;
     }).toList();
+  }
+
+  void _showRecipeContextMenu(BuildContext context, Recipe recipe) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder:
+          (context) => Container(
+            decoration: const BoxDecoration(
+              color: AppTheme.backgroundColor,
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(20),
+                topRight: Radius.circular(20),
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 12),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.secondaryTextColor,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                ListTile(
+                  leading: const Icon(Icons.edit, color: AppTheme.primaryColor),
+                  title: const Text('ערוך מתכון'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    context.push('/edit-recipe/${recipe.id}');
+                  },
+                ),
+                ListTile(
+                  leading: Icon(Icons.delete, color: AppTheme.errorColor),
+                  title: const Text('מחק מתכון'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showDeleteConfirmation(context, recipe);
+                  },
+                ),
+                const SizedBox(height: 20),
+              ],
+            ),
+          ),
+    );
+  }
+
+  void _showDeleteConfirmation(BuildContext context, Recipe recipe) {
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('מחק מתכון'),
+            content: Text(
+              'האם אתה בטוח שברצונך למחוק את המתכון "${recipe.title}"?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('ביטול'),
+              ),
+              TextButton(
+                onPressed: () async {
+                  Navigator.pop(context);
+                  try {
+                    await ref
+                        .read(recipeStateProvider.notifier)
+                        .deleteRecipe(recipe.id);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('המתכון נמחק בהצלחה'),
+                          backgroundColor: AppTheme.successColor,
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('שגיאה במחיקת המתכון: $e'),
+                          backgroundColor: AppTheme.errorColor,
+                        ),
+                      );
+                    }
+                  }
+                },
+                child: Text(
+                  'מחק',
+                  style: TextStyle(color: AppTheme.errorColor),
+                ),
+              ),
+            ],
+          ),
+    );
   }
 
   @override
@@ -46,7 +148,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
     );
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.backgroundColor,
       body: Column(
         children: [
           AppHeader(
@@ -58,7 +160,9 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
             child: recipesAsync.when(
               loading:
                   () => const Center(
-                    child: CircularProgressIndicator(color: Color(0xFFFF7E6B)),
+                    child: CircularProgressIndicator(
+                      color: AppTheme.primaryColor,
+                    ),
                   ),
               error:
                   (error, stack) => Center(
@@ -73,8 +177,8 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                         const SizedBox(height: 16),
                         Text(
                           'שגיאה בטעינת המתכונים',
-                          style: const TextStyle(
-                            fontFamily: 'Poppins',
+                          style: TextStyle(
+                            fontFamily: AppTheme.secondaryFontFamily,
                             fontSize: 18,
                             fontWeight: FontWeight.w500,
                             color: AppTheme.textColor,
@@ -99,8 +203,8 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                         const SizedBox(height: 16),
                         Text(
                           'אין מתכונים בקטגוריה זו',
-                          style: const TextStyle(
-                            fontFamily: 'Poppins',
+                          style: TextStyle(
+                            fontFamily: AppTheme.secondaryFontFamily,
                             fontSize: 18,
                             fontWeight: FontWeight.w500,
                             color: AppTheme.textColor,
@@ -109,8 +213,8 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                         const SizedBox(height: 8),
                         Text(
                           'הוסף מתכונים עם התווית "${widget.categoryName}"',
-                          style: const TextStyle(
-                            fontFamily: 'Poppins',
+                          style: TextStyle(
+                            fontFamily: AppTheme.secondaryFontFamily,
                             fontSize: 16,
                             color: AppTheme.secondaryTextColor,
                           ),
@@ -126,7 +230,12 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                     context,
                   ).copyWith(scrollbars: false),
                   child: ListView.builder(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.only(
+                      left: 16,
+                      right: 16,
+                      top: 16,
+                      bottom: 100,
+                    ),
                     itemCount: filteredRecipes.length,
                     itemBuilder: (context, index) {
                       final recipe = filteredRecipes[index];
@@ -134,12 +243,16 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                         onTap: () {
                           context.push('/recipe/${recipe.id}');
                         },
+                        onLongPress: () {
+                          _showRecipeContextMenu(context, recipe);
+                        },
                         child: Card(
                           margin: const EdgeInsets.only(bottom: 16),
+                          color: AppTheme.cardColor,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          elevation: 2,
+                          elevation: 0,
                           child: Padding(
                             padding: const EdgeInsets.all(16),
                             child: Row(
@@ -158,7 +271,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                                         placeholder:
                                             (context, url) => const Center(
                                               child: CircularProgressIndicator(
-                                                color: Color(0xFFFF7E6B),
+                                                color: AppTheme.primaryColor,
                                               ),
                                             ),
                                         errorWidget: (context, url, error) {
@@ -205,8 +318,9 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                                     children: [
                                       Text(
                                         recipe.title,
-                                        style: const TextStyle(
-                                          fontFamily: 'Poppins',
+                                        style: TextStyle(
+                                          fontFamily:
+                                              AppTheme.secondaryFontFamily,
                                           fontSize: 16,
                                           fontWeight: FontWeight.bold,
                                           color: AppTheme.textColor,
@@ -218,8 +332,9 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                                       if (recipe.description.isNotEmpty)
                                         Text(
                                           recipe.description,
-                                          style: const TextStyle(
-                                            fontFamily: 'Poppins',
+                                          style: TextStyle(
+                                            fontFamily:
+                                                AppTheme.secondaryFontFamily,
                                             fontSize: 14,
                                             color: AppTheme.secondaryTextColor,
                                           ),
@@ -238,8 +353,10 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                                             const SizedBox(width: 4),
                                             Text(
                                               '${recipe.prepTime} דק\'',
-                                              style: const TextStyle(
-                                                fontFamily: 'Poppins',
+                                              style: TextStyle(
+                                                fontFamily:
+                                                    AppTheme
+                                                        .secondaryFontFamily,
                                                 fontSize: 12,
                                                 color:
                                                     AppTheme.secondaryTextColor,
@@ -256,8 +373,10 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                                             const SizedBox(width: 4),
                                             Text(
                                               '${recipe.servings} מנות',
-                                              style: const TextStyle(
-                                                fontFamily: 'Poppins',
+                                              style: TextStyle(
+                                                fontFamily:
+                                                    AppTheme
+                                                        .secondaryFontFamily,
                                                 fontSize: 12,
                                                 color:
                                                     AppTheme.secondaryTextColor,
@@ -280,9 +399,9 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
               },
             ),
           ),
-          const AppBottomNav(currentIndex: -1),
         ],
       ),
+      bottomNavigationBar: const AppBottomNav(currentIndex: -1),
     );
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:recipe_keeper/services/firebase_service.dart';
+import 'package:recipe_keeper/utils/app_theme.dart';
 
 final connectivityProvider = StreamProvider<bool>((ref) {
   final controller = StreamController<bool>();
@@ -87,18 +88,18 @@ class ConnectivityWidget extends ConsumerWidget {
 
   Widget _buildOfflineBanner(BuildContext context) {
     return Container(
-      color: Colors.red.withOpacity(0.8),
+      color: AppTheme.errorColor.withOpacity(0.8),
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.cloud_off, color: Colors.white, size: 18),
+          Icon(Icons.cloud_off, color: AppTheme.backgroundColor, size: 18),
           const SizedBox(width: 8),
           Flexible(
             child: Text(
               'You are offline. Some features may be limited.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Colors.white,
+                color: AppTheme.backgroundColor,
                 fontWeight: FontWeight.bold,
               ),
               textAlign: TextAlign.center,

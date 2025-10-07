@@ -34,10 +34,10 @@ class RecipeCard extends ConsumerWidget {
         constraints: const BoxConstraints(maxWidth: 140), // Keep card small
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          color: isDark ? AppTheme.darkCardColor : Colors.white,
+          color: isDark ? AppTheme.darkCardColor : AppTheme.backgroundColor,
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: AppTheme.dividerColor.withOpacity(0.05),
               spreadRadius: 1,
               blurRadius: 3,
               offset: const Offset(0, 1),
@@ -111,11 +111,15 @@ class RecipeCard extends ConsumerWidget {
                     left: 4,
                     child: GestureDetector(
                       onTap: () {
-                        ref
-                            .read(favoritesUIProvider.notifier)
-                            .update(
-                              (state) => {...state, recipe.id: !isFavoriteUI},
-                            );
+                        if (!isFavoriteUI) {
+                          ref
+                              .read(favoritesUIProvider.notifier)
+                              .updateFavorite(recipe.id, true);
+                        } else {
+                          ref
+                              .read(favoritesUIProvider.notifier)
+                              .removeFavorite(recipe.id);
+                        }
                         final updatedRecipe = recipe.copyWith(
                           isFavorite: !isFavoriteUI,
                         );
@@ -126,13 +130,16 @@ class RecipeCard extends ConsumerWidget {
                       child: Container(
                         padding: const EdgeInsets.all(5),
                         decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.3),
+                          color: AppTheme.dividerColor.withOpacity(0.3),
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
                           isFavoriteUI ? Icons.favorite : Icons.favorite_border,
                           size: 16,
-                          color: isFavoriteUI ? Colors.red : Colors.white,
+                          color:
+                              isFavoriteUI
+                                  ? AppTheme.errorColor
+                                  : AppTheme.backgroundColor,
                         ),
                       ),
                     ),
@@ -151,10 +158,11 @@ class RecipeCard extends ConsumerWidget {
                   Text(
                     recipe.title,
                     style: TextStyle(
-                      fontFamily: 'Poppins',
+                      fontFamily: AppTheme.secondaryFontFamily,
                       fontSize: isCompact ? 16 : 18,
                       fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : Colors.black,
+                      color:
+                          isDark ? AppTheme.darkTextColor : AppTheme.textColor,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -174,9 +182,12 @@ class RecipeCard extends ConsumerWidget {
                           ref,
                         ),
                         style: TextStyle(
-                          fontFamily: 'Poppins',
+                          fontFamily: AppTheme.secondaryFontFamily,
                           fontSize: isCompact ? 13 : 15,
-                          color: isDark ? Colors.white70 : Colors.black87,
+                          color:
+                              isDark
+                                  ? AppTheme.darkSecondaryTextColor
+                                  : AppTheme.textColor.withOpacity(0.87),
                         ),
                       ),
                     ],

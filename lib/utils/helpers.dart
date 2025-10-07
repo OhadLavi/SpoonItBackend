@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart' as url_launcher;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:recipe_keeper/utils/translations.dart';
+import 'package:recipe_keeper/utils/app_theme.dart';
 
 class Helpers {
   // Format a DateTime to a readable string
@@ -63,12 +64,45 @@ class Helpers {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isError ? Colors.red : Colors.lightBlue,
+        backgroundColor: isError ? AppTheme.errorColor : AppTheme.infoColor,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         margin: const EdgeInsets.all(16),
       ),
     );
+  }
+
+  // Simplify authentication error messages for better UX
+  static String simplifyAuthError(String error) {
+    // Common Firebase Auth error patterns
+    if (error.contains('user-not-found')) {
+      return 'המשתמש לא נמצא. בדוק את כתובת האימייל';
+    } else if (error.contains('wrong-password')) {
+      return 'הסיסמה שגויה. נסה שוב';
+    } else if (error.contains('invalid-email')) {
+      return 'כתובת אימייל לא תקינה';
+    } else if (error.contains('user-disabled')) {
+      return 'החשבון הושבת. פנה לתמיכה';
+    } else if (error.contains('too-many-requests')) {
+      return 'יותר מדי ניסיונות. המתן רגע ונסה שוב';
+    } else if (error.contains('email-already-in-use')) {
+      return 'כתובת האימייל כבר בשימוש';
+    } else if (error.contains('weak-password')) {
+      return 'הסיסמה חלשה מדי. בחר סיסמה חזקה יותר';
+    } else if (error.contains('network-request-failed')) {
+      return 'בעיית חיבור לאינטרנט. בדוק את החיבור';
+    } else if (error.contains('invalid-credential')) {
+      return 'פרטי ההתחברות שגויים';
+    } else if (error.contains('account-exists-with-different-credential')) {
+      return 'החשבון קיים עם שיטת התחברות אחרת';
+    } else if (error.contains('operation-not-allowed')) {
+      return 'הפעולה לא מורשית';
+    } else if (error.contains('requires-recent-login')) {
+      return 'נדרש להתחבר מחדש לביטחון';
+    } else {
+      // For any other errors, show a generic message
+      return 'אירעה שגיאה. נסה שוב מאוחר יותר';
+    }
   }
 
   // Validate email format

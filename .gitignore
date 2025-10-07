@@ -46,3 +46,10 @@ app.*.map.json
 start_backend.bat
 BACKEND_SETUP.md
 start_backend.sh
+run_dev.bat
+run_dev.sh
+SHOPPING_LIST_FIX_SUMMARY.md
+COMPILATION_ERRORS_FIX.md
+AUTH_INITIALIZATION_FIX.md
+FIRESTORE_SCHEMA.md
+lib/providers/auth_provider.dart

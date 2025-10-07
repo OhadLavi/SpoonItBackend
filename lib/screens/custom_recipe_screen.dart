@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:recipe_keeper/widgets/app_header.dart';
 import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
+import 'package:recipe_keeper/config/env_config.dart';
 
 class CustomRecipeScreen extends ConsumerStatefulWidget {
   const CustomRecipeScreen({super.key});
@@ -24,7 +25,7 @@ class _CustomRecipeScreenState extends ConsumerState<CustomRecipeScreen> {
     setState(() {
       _loading = true;
     });
-    final url = 'http://localhost:8000/custom_recipe'; // adjust as needed
+    final url = '${EnvConfig.apiBaseUrl}/custom_recipe';
     final body = json.encode({
       'groceries': _groceriesController.text,
       'description': _descriptionController.text,
@@ -61,7 +62,7 @@ class _CustomRecipeScreenState extends ConsumerState<CustomRecipeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.backgroundColor,
       body: Column(
         children: [
           const AppHeader(title: 'מתכון מותאם'),
@@ -106,7 +107,7 @@ class _CustomRecipeScreenState extends ConsumerState<CustomRecipeScreen> {
                       child:
                           _loading
                               ? const CircularProgressIndicator(
-                                color: Color(0xFFFF7E6B),
+                                color: AppTheme.primaryColor,
                               )
                               : Text(
                                 AppTranslations.getText(ref, 'generate_recipe'),
@@ -120,7 +121,7 @@ class _CustomRecipeScreenState extends ConsumerState<CustomRecipeScreen> {
                         child: Text(
                           _generatedRecipe,
                           style: const TextStyle(
-                            fontFamily: 'Poppins',
+                            fontFamily: AppTheme.secondaryFontFamily,
                             fontSize: 14,
                           ),
                         ),
@@ -130,9 +131,9 @@ class _CustomRecipeScreenState extends ConsumerState<CustomRecipeScreen> {
               ),
             ),
           ),
-          const AppBottomNav(currentIndex: -1),
         ],
       ),
+      bottomNavigationBar: const AppBottomNav(currentIndex: -1),
     );
   }
 }

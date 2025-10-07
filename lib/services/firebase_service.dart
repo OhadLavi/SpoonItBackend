@@ -40,8 +40,7 @@ class FirebaseService {
         ignoreUndefinedProperties: true,
       );
 
-      // Enable offline persistence
-      await FirebaseFirestore.instance.enablePersistence();
+      // Offline persistence is enabled by default in newer versions
 
       // Add retry logic for initial connection
       int retryCount = 0;
@@ -128,8 +127,8 @@ class FirebaseService {
 
       // Listen for connectivity changes
       _connectivitySubscription = Connectivity().onConnectivityChanged.listen(
-        (ConnectivityResult result) {
-          _updateConnectionState(result);
+        (List<ConnectivityResult> results) {
+          _updateConnectionState(results);
         },
         onError: (error) {
           developer.log(
@@ -153,9 +152,9 @@ class FirebaseService {
     }
   }
 
-  static void _updateConnectionState(ConnectivityResult result) {
+  static void _updateConnectionState(List<ConnectivityResult> results) {
     final wasOnline = _isOnline;
-    _isOnline = result != ConnectivityResult.none;
+    _isOnline = !results.contains(ConnectivityResult.none);
 
     if (wasOnline != _isOnline) {
       developer.log(

@@ -19,15 +19,14 @@ class SettingsState {
   }
 }
 
-class SettingsNotifier extends StateNotifier<SettingsState> {
-  SettingsNotifier()
-    : super(
-        SettingsState(
-          language: AppLanguage.hebrew,
-          themeMode: ThemeMode.system,
-        ),
-      ) {
+class SettingsNotifier extends Notifier<SettingsState> {
+  @override
+  SettingsState build() {
     _loadPreferences();
+    return SettingsState(
+      language: AppLanguage.hebrew,
+      themeMode: ThemeMode.light,
+    );
   }
 
   static const String _languageKey = 'app_language';
@@ -47,9 +46,9 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
               )
               : AppLanguage.hebrew;
 
-      // Load theme mode preference, default to system if not set
+      // Load theme mode preference, default to light if not set
       final themeModeValue =
-          prefs.getInt(_themeModeKey) ?? ThemeMode.system.index;
+          prefs.getInt(_themeModeKey) ?? ThemeMode.light.index;
 
       state = SettingsState(
         language: language,
@@ -89,10 +88,8 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
   bool get isHebrew => state.language == AppLanguage.hebrew;
 }
 
-final settingsProvider = StateNotifierProvider<SettingsNotifier, SettingsState>(
-  (ref) {
-    return SettingsNotifier();
-  },
+final settingsProvider = NotifierProvider<SettingsNotifier, SettingsState>(
+  () => SettingsNotifier(),
 );
 
 // Convenience providers to access specific settings

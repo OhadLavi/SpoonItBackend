@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:recipe_keeper/widgets/settings_menu.dart';
+import 'package:recipe_keeper/utils/app_theme.dart';
 
 /// Shows the right-side settings panel used across the app.
 /// Can be invoked from any screen.
@@ -9,7 +10,7 @@ void showSettingsPanel(BuildContext context) {
     context: context,
     barrierDismissible: true,
     barrierLabel: '',
-    barrierColor: Colors.black54,
+    barrierColor: AppTheme.dividerColor.withOpacity(0.54),
     transitionDuration: const Duration(milliseconds: 300),
     pageBuilder: (_, __, ___) => const SizedBox.shrink(),
     transitionBuilder: (context, animation, __, ___) {
@@ -30,42 +31,40 @@ void showSettingsPanel(BuildContext context) {
               Container(
                 width: panelW,
                 height: h,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF3A3638),
-                  borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(20),
-                    bottomLeft: Radius.circular(20),
-                  ),
-                ),
+                decoration: const BoxDecoration(color: AppTheme.uiAccentColor),
                 child: Material(
                   color: Colors.transparent,
-                  child: Directionality(
-                    textDirection: TextDirection.rtl,
-                    child: SettingsMenu(hostContext: hostContext),
+                  child: Theme(
+                    data: Theme.of(context).copyWith(
+                      textTheme: Theme.of(context).textTheme.copyWith(
+                        bodyMedium: TextStyle(
+                          color: AppTheme.backgroundColor,
+                          fontFamily: AppTheme.primaryFontFamily,
+                        ),
+                      ),
+                    ),
+                    child: Directionality(
+                      textDirection: TextDirection.rtl,
+                      child: SettingsMenu(hostContext: hostContext),
+                    ),
                   ),
                 ),
               ),
               Positioned(
                 left: -18,
-                top: 12,
+                top: 44,
                 child: GestureDetector(
                   onTap: () => Navigator.pop(context),
-                  child: Container(
-                    width: 32,
-                    height: 32,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFFF7E6B),
-                      borderRadius: BorderRadius.horizontal(
-                        left: Radius.circular(12),
-                        right: Radius.circular(12),
+                  child: CustomPaint(
+                    size: const Size(32, 32),
+                    painter: WavyButtonPainter(),
+                    child: const Center(
+                      child: Icon(
+                        Icons.chevron_right,
+                        size: 20,
+                        color: AppTheme.primaryColor,
+                        textDirection: TextDirection.ltr,
                       ),
-                    ),
-                    alignment: Alignment.center,
-                    child: const Icon(
-                      Icons.chevron_right,
-                      size: 20,
-                      color: Colors.white,
-                      textDirection: TextDirection.ltr,
                     ),
                   ),
                 ),
@@ -76,4 +75,45 @@ void showSettingsPanel(BuildContext context) {
       );
     },
   );
+}
+
+class WavyButtonPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint =
+        Paint()
+          ..color = AppTheme.uiAccentColor
+          ..style = PaintingStyle.fill;
+
+    final path = Path();
+
+    // Start from top-left
+    path.moveTo(0, 0);
+
+    // Create concave curve on the left edge
+    path.cubicTo(
+      size.width * 0.1,
+      size.height * 0.2, // Control point 1
+      size.width * 0.1,
+      size.height * 0.8, // Control point 2
+      0,
+      size.height, // End at bottom-left
+    );
+
+    // Bottom edge (straight)
+    path.lineTo(size.width, size.height);
+
+    // Right edge (straight)
+    path.lineTo(size.width, 0);
+
+    // Top edge (straight)
+    path.lineTo(0, 0);
+
+    path.close();
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

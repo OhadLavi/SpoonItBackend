@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:recipe_keeper/widgets/app_header.dart';
 import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
+import 'package:recipe_keeper/utils/app_theme.dart';
 
 class SupportScreen extends ConsumerStatefulWidget {
   const SupportScreen({super.key});
@@ -26,7 +27,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.backgroundColor,
       body: Column(
         children: [
           const AppHeader(title: 'תמיכה'),
@@ -44,8 +45,8 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                 const Text(
                   'שאלות נפוצות',
                   style: TextStyle(
-                    color: Color(0xFF6E3C3F),
-                    fontFamily: 'Poppins',
+                    color: AppTheme.textColor,
+                    fontFamily: AppTheme.secondaryFontFamily,
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
@@ -78,9 +79,9 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
               ],
             ),
           ),
-          const AppBottomNav(currentIndex: -1),
         ],
       ),
+      bottomNavigationBar: const AppBottomNav(currentIndex: -1),
     );
   }
 
@@ -92,11 +93,11 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
   }) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFFF8F8F8),
+        color: AppTheme.cardColor,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: AppTheme.secondaryTextColor.withOpacity(0.1),
             spreadRadius: 1,
             blurRadius: 4,
             offset: const Offset(0, 2),
@@ -104,26 +105,26 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
         ],
       ),
       child: ListTile(
-        leading: Icon(icon, color: const Color(0xFFFF7E6B)),
+        leading: Icon(icon, color: AppTheme.primaryColor),
         title: Text(
           title,
           style: const TextStyle(
-            color: Color(0xFF6E3C3F),
-            fontFamily: 'Poppins',
+            color: AppTheme.textColor,
+            fontFamily: AppTheme.secondaryFontFamily,
             fontWeight: FontWeight.w500,
           ),
         ),
         subtitle: Text(
           subtitle,
           style: const TextStyle(
-            color: Color(0xFF6E3C3F),
-            fontFamily: 'Poppins',
+            color: AppTheme.textColor,
+            fontFamily: AppTheme.secondaryFontFamily,
             fontSize: 12,
           ),
         ),
         trailing: const Icon(
           Icons.arrow_forward_ios,
-          color: Color(0xFF6E3C3F),
+          color: AppTheme.textColor,
           size: 16,
         ),
         onTap: onTap,
@@ -138,15 +139,15 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
           (context) => StatefulBuilder(
             builder:
                 (context, setState) => AlertDialog(
-                  backgroundColor: Colors.white,
+                  backgroundColor: AppTheme.backgroundColor,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
                   title: const Text(
                     'צור קשר',
                     style: TextStyle(
-                      color: Color(0xFF6E3C3F),
-                      fontFamily: 'Poppins',
+                      color: AppTheme.textColor,
+                      fontFamily: AppTheme.secondaryFontFamily,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -163,8 +164,8 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                               'שלח לנו אימייל לתמיכה טכנית',
                               textAlign: TextAlign.center,
                               style: TextStyle(
-                                color: Color(0xFF6E3C3F).withOpacity(0.8),
-                                fontFamily: 'Poppins',
+                                color: AppTheme.textColor.withOpacity(0.8),
+                                fontFamily: AppTheme.secondaryFontFamily,
                                 fontSize: 16,
                                 fontWeight: FontWeight.w500,
                               ),
@@ -174,7 +175,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                           // Title field
                           Container(
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF8F8F8),
+                              color: AppTheme.cardColor,
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: TextField(
@@ -182,8 +183,8 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                               decoration: InputDecoration(
                                 labelText: 'כותרת',
                                 labelStyle: const TextStyle(
-                                  color: Color(0xFF6E3C3F),
-                                  fontFamily: 'Poppins',
+                                  color: AppTheme.textColor,
+                                  fontFamily: AppTheme.secondaryFontFamily,
                                 ),
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(8),
@@ -192,14 +193,14 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(8),
                                   borderSide: BorderSide(
-                                    color: Color(0xFF6E3C3F).withOpacity(0.2),
+                                    color: AppTheme.textColor.withOpacity(0.2),
                                     width: 1,
                                   ),
                                 ),
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(8),
                                   borderSide: const BorderSide(
-                                    color: Color(0xFFFF7E6B),
+                                    color: AppTheme.primaryColor,
                                     width: 2,
                                   ),
                                 ),
@@ -208,8 +209,8 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                                 contentPadding: const EdgeInsets.all(12),
                               ),
                               style: const TextStyle(
-                                color: Color(0xFF6E3C3F),
-                                fontFamily: 'Poppins',
+                                color: AppTheme.textColor,
+                                fontFamily: AppTheme.secondaryFontFamily,
                               ),
                             ),
                           ),
@@ -217,7 +218,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                           // Message field
                           Container(
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF8F8F8),
+                              color: AppTheme.cardColor,
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: TextField(
@@ -225,8 +226,8 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                               decoration: InputDecoration(
                                 labelText: 'הודעה',
                                 labelStyle: const TextStyle(
-                                  color: Color(0xFF6E3C3F),
-                                  fontFamily: 'Poppins',
+                                  color: AppTheme.textColor,
+                                  fontFamily: AppTheme.secondaryFontFamily,
                                 ),
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(8),
@@ -235,14 +236,14 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(8),
                                   borderSide: BorderSide(
-                                    color: Color(0xFF6E3C3F).withOpacity(0.2),
+                                    color: AppTheme.textColor.withOpacity(0.2),
                                     width: 1,
                                   ),
                                 ),
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(8),
                                   borderSide: const BorderSide(
-                                    color: Color(0xFFFF7E6B),
+                                    color: AppTheme.primaryColor,
                                     width: 2,
                                   ),
                                 ),
@@ -251,8 +252,8 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                                 contentPadding: const EdgeInsets.all(12),
                               ),
                               style: const TextStyle(
-                                color: Color(0xFF6E3C3F),
-                                fontFamily: 'Poppins',
+                                color: AppTheme.textColor,
+                                fontFamily: AppTheme.secondaryFontFamily,
                               ),
                               maxLines: 4,
                             ),
@@ -268,12 +269,12 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                             title: const Text(
                               'אני לא רובוט',
                               style: TextStyle(
-                                color: Color(0xFF6E3C3F),
-                                fontFamily: 'Poppins',
+                                color: AppTheme.textColor,
+                                fontFamily: AppTheme.secondaryFontFamily,
                                 fontSize: 14,
                               ),
                             ),
-                            activeColor: const Color(0xFFFF7E6B),
+                            activeColor: AppTheme.primaryColor,
                             controlAffinity: ListTileControlAffinity.leading,
                           ),
                         ],
@@ -286,8 +287,8 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                       child: const Text(
                         'ביטול',
                         style: TextStyle(
-                          color: Color(0xFF6E3C3F),
-                          fontFamily: 'Poppins',
+                          color: AppTheme.textColor,
+                          fontFamily: AppTheme.secondaryFontFamily,
                         ),
                       ),
                     ),
@@ -301,11 +302,10 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                               ? () => _launchEmail(context)
                               : null,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFF7E6B),
-                        foregroundColor: Colors.white,
-                        disabledBackgroundColor: const Color(
-                          0xFFFF7E6B,
-                        ).withOpacity(0.3),
+                        backgroundColor: AppTheme.primaryColor,
+                        foregroundColor: AppTheme.backgroundColor,
+                        disabledBackgroundColor: AppTheme.dividerColor
+                            .withOpacity(0.3),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
@@ -313,7 +313,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                       child: const Text(
                         'שלח אימייל',
                         style: TextStyle(
-                          fontFamily: 'Poppins',
+                          fontFamily: AppTheme.secondaryFontFamily,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -353,7 +353,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('לא ניתן לפתוח אפליקציית אימייל'),
-          backgroundColor: Color(0xFFFF7E6B),
+          backgroundColor: AppTheme.primaryColor,
         ),
       );
     }
@@ -362,11 +362,11 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
   Widget _buildFAQItem({required String question, required String answer}) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFFF8F8F8),
+        color: AppTheme.cardColor,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: AppTheme.secondaryTextColor.withOpacity(0.1),
             spreadRadius: 1,
             blurRadius: 4,
             offset: const Offset(0, 2),
@@ -385,7 +385,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                   transform: Matrix4.identity()..scale(-1.0, 1.0),
                   child: const Icon(
                     Icons.help_outline,
-                    color: Color(0xFFFF7E6B),
+                    color: AppTheme.primaryColor,
                     size: 20,
                   ),
                 ),
@@ -394,8 +394,8 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                   child: Text(
                     question,
                     style: const TextStyle(
-                      color: Color(0xFF6E3C3F),
-                      fontFamily: 'Poppins',
+                      color: AppTheme.textColor,
+                      fontFamily: AppTheme.secondaryFontFamily,
                       fontWeight: FontWeight.bold,
                       fontSize: 14,
                     ),
@@ -409,8 +409,8 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
               child: Text(
                 answer,
                 style: const TextStyle(
-                  color: Color(0xFF6E3C3F),
-                  fontFamily: 'Poppins',
+                  color: AppTheme.textColor,
+                  fontFamily: AppTheme.secondaryFontFamily,
                   fontSize: 13,
                 ),
               ),

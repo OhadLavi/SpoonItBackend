@@ -44,6 +44,11 @@ service cloud.firestore {
       );
     }
     
+    // Allow users to read and write their own shopping list
+    match /users/{userId}/shoppingList/{itemId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+    
     // Default deny all other access
     match /{document=**} {
       allow read, write: if false;

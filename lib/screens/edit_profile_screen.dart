@@ -11,6 +11,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:recipe_keeper/widgets/app_header.dart';
 import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
 import 'package:go_router/go_router.dart';
+import 'package:recipe_keeper/utils/app_theme.dart';
 
 class EditProfileScreen extends ConsumerStatefulWidget {
   final AppUser user;
@@ -102,10 +103,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 if (_imageFile != null ||
                     (_currentImageUrl != null && _currentImageUrl!.isNotEmpty))
                   ListTile(
-                    leading: const Icon(Icons.delete, color: Colors.red),
+                    leading: Icon(Icons.delete, color: AppTheme.errorColor),
                     title: Text(
                       AppTranslations.getText(ref, 'remove_image'),
-                      style: const TextStyle(color: Colors.red),
+                      style: TextStyle(color: AppTheme.errorColor),
                     ),
                     onTap: () {
                       setState(() {
@@ -151,12 +152,11 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       // Handle password change if new password is provided
       if (_newPasswordController.text.isNotEmpty) {
         try {
-          await ref
-              .read(authServiceProvider)
-              .changePassword(
-                currentPassword: _currentPasswordController.text,
-                newPassword: _newPasswordController.text,
-              );
+          final authService = await ref.read(authServiceProvider.future);
+          await authService.changePassword(
+            currentPassword: _currentPasswordController.text,
+            newPassword: _newPasswordController.text,
+          );
         } catch (e) {
           if (mounted) {
             setState(() {
@@ -167,7 +167,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 content: Text(
                   '${AppTranslations.getText(ref, 'error_changing_password')}: $e',
                 ),
-                backgroundColor: Colors.red,
+                backgroundColor: AppTheme.errorColor,
               ),
             );
             return; // Don't update profile if password change fails
@@ -176,13 +176,12 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       }
 
       // Update profile
-      await ref
-          .read(authServiceProvider)
-          .updateUserProfile(
-            displayName: _displayNameController.text.trim(),
-            photoURL: newPhotoUrl, // Pass the potentially updated URL
-            preferences: widget.user.preferences, // Keep existing preferences
-          );
+      final authService = await ref.read(authServiceProvider.future);
+      await authService.updateUserProfile(
+        displayName: _displayNameController.text.trim(),
+        photoURL: newPhotoUrl, // Pass the potentially updated URL
+        preferences: widget.user.preferences, // Keep existing preferences
+      );
 
       // Refresh user data locally - invalidation triggers refetch
       ref.invalidate(userDataProvider);
@@ -193,7 +192,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
             content: Text(
               AppTranslations.getText(ref, 'profile_updated_successfully'),
             ),
-            backgroundColor: Colors.green,
+            backgroundColor: AppTheme.successColor,
           ),
         );
         Navigator.of(context).pop();
@@ -205,7 +204,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
             content: Text(
               '${AppTranslations.getText(ref, 'error_updating_profile')}: $e',
             ),
-            backgroundColor: Colors.red,
+            backgroundColor: AppTheme.errorColor,
           ),
         );
       }
@@ -221,7 +220,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.backgroundColor,
       body: Column(
         children: [
           AppHeader(
@@ -261,7 +260,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                                     ? const Icon(
                                       Icons.person,
                                       size: 60,
-                                      color: Color(0xFFFF7E6B),
+                                      color: AppTheme.primaryColor,
                                     )
                                     : null,
                           ),
@@ -269,12 +268,12 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                             bottom: 0,
                             right: 0,
                             child: CircleAvatar(
-                              backgroundColor: const Color(0xFFFF7E6B),
+                              backgroundColor: AppTheme.primaryColor,
                               radius: 20,
                               child: IconButton(
                                 icon: const Icon(
                                   Icons.camera_alt,
-                                  color: Colors.white,
+                                  color: AppTheme.backgroundColor,
                                   size: 20,
                                 ),
                                 onPressed: _showImageSourceActionSheet,
@@ -287,11 +286,11 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                     const SizedBox(height: 24),
                     Container(
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8F8F8),
+                        color: AppTheme.cardColor,
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.grey.withOpacity(0.1),
+                            color: AppTheme.secondaryTextColor.withOpacity(0.1),
                             spreadRadius: 1,
                             blurRadius: 4,
                             offset: const Offset(0, 2),
@@ -302,7 +301,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                         controller: _displayNameController,
                         decoration: InputDecoration(
                           labelText: AppTranslations.getText(ref, 'name'),
-                          labelStyle: const TextStyle(color: Color(0xFF6E3C3F)),
+                          labelStyle: TextStyle(color: AppTheme.textColor),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide.none,
@@ -312,8 +311,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                           contentPadding: const EdgeInsets.all(16),
                         ),
                         style: const TextStyle(
-                          color: Color(0xFF6E3C3F),
-                          fontFamily: 'Poppins',
+                          color: AppTheme.textColor,
+                          fontFamily: AppTheme.secondaryFontFamily,
                         ),
                         validator: (value) {
                           if (value == null || value.trim().isEmpty) {
@@ -330,11 +329,11 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                     // Current Password Field
                     Container(
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8F8F8),
+                        color: AppTheme.cardColor,
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.grey.withOpacity(0.1),
+                            color: AppTheme.secondaryTextColor.withOpacity(0.1),
                             spreadRadius: 1,
                             blurRadius: 4,
                             offset: const Offset(0, 2),
@@ -348,7 +347,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                             ref,
                             'current_password',
                           ),
-                          labelStyle: const TextStyle(color: Color(0xFF6E3C3F)),
+                          labelStyle: TextStyle(color: AppTheme.textColor),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide.none,
@@ -361,7 +360,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                               _obscureCurrentPassword
                                   ? Icons.visibility_off
                                   : Icons.visibility,
-                              color: const Color(0xFF6E3C3F),
+                              color: AppTheme.textColor,
                             ),
                             onPressed: () {
                               setState(() {
@@ -372,8 +371,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                           ),
                         ),
                         style: const TextStyle(
-                          color: Color(0xFF6E3C3F),
-                          fontFamily: 'Poppins',
+                          color: AppTheme.textColor,
+                          fontFamily: AppTheme.secondaryFontFamily,
                         ),
                         obscureText: _obscureCurrentPassword,
                         validator: (value) {
@@ -392,11 +391,11 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                     // New Password Field
                     Container(
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8F8F8),
+                        color: AppTheme.cardColor,
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.grey.withOpacity(0.1),
+                            color: AppTheme.secondaryTextColor.withOpacity(0.1),
                             spreadRadius: 1,
                             blurRadius: 4,
                             offset: const Offset(0, 2),
@@ -410,7 +409,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                             ref,
                             'new_password',
                           ),
-                          labelStyle: const TextStyle(color: Color(0xFF6E3C3F)),
+                          labelStyle: TextStyle(color: AppTheme.textColor),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide.none,
@@ -423,7 +422,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                               _obscureNewPassword
                                   ? Icons.visibility_off
                                   : Icons.visibility,
-                              color: const Color(0xFF6E3C3F),
+                              color: AppTheme.textColor,
                             ),
                             onPressed: () {
                               setState(() {
@@ -433,8 +432,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                           ),
                         ),
                         style: const TextStyle(
-                          color: Color(0xFF6E3C3F),
-                          fontFamily: 'Poppins',
+                          color: AppTheme.textColor,
+                          fontFamily: AppTheme.secondaryFontFamily,
                         ),
                         obscureText: _obscureNewPassword,
                         validator: (value) {
@@ -454,11 +453,11 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                     // Confirm Password Field
                     Container(
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8F8F8),
+                        color: AppTheme.cardColor,
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.grey.withOpacity(0.1),
+                            color: AppTheme.secondaryTextColor.withOpacity(0.1),
                             spreadRadius: 1,
                             blurRadius: 4,
                             offset: const Offset(0, 2),
@@ -472,7 +471,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                             ref,
                             'confirm_new_password',
                           ),
-                          labelStyle: const TextStyle(color: Color(0xFF6E3C3F)),
+                          labelStyle: TextStyle(color: AppTheme.textColor),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide.none,
@@ -485,7 +484,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                               _obscureConfirmPassword
                                   ? Icons.visibility_off
                                   : Icons.visibility,
-                              color: const Color(0xFF6E3C3F),
+                              color: AppTheme.textColor,
                             ),
                             onPressed: () {
                               setState(() {
@@ -496,8 +495,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                           ),
                         ),
                         style: const TextStyle(
-                          color: Color(0xFF6E3C3F),
-                          fontFamily: 'Poppins',
+                          color: AppTheme.textColor,
+                          fontFamily: AppTheme.secondaryFontFamily,
                         ),
                         obscureText: _obscureConfirmPassword,
                         validator: (value) {
@@ -518,11 +517,11 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                       width: double.infinity,
                       height: 50,
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFF7E6B),
+                        color: AppTheme.primaryColor,
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFFFF7E6B).withOpacity(0.3),
+                            color: AppTheme.primaryColor.withOpacity(0.3),
                             spreadRadius: 1,
                             blurRadius: 4,
                             offset: const Offset(0, 2),
@@ -532,54 +531,25 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                       child: ElevatedButton(
                         onPressed: _isLoading ? null : _saveProfile,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF7E6B),
-                          foregroundColor: Colors.white,
-                          disabledBackgroundColor: const Color(
-                            0xFFFF7E6B,
-                          ).withOpacity(0.6),
-                          disabledForegroundColor: Colors.white.withOpacity(
-                            0.7,
-                          ),
+                          backgroundColor: AppTheme.primaryColor,
+                          foregroundColor: AppTheme.backgroundColor,
+                          disabledBackgroundColor: AppTheme.primaryColor,
+                          disabledForegroundColor: AppTheme.backgroundColor,
                           shadowColor: Colors.transparent,
                           elevation: 0,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                        child:
-                            _isLoading
-                                ? Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    const SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                        color: Colors.white,
-                                        strokeWidth: 2,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Text(
-                                      AppTranslations.getText(ref, 'saving'),
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                        fontFamily: 'Poppins',
-                                      ),
-                                    ),
-                                  ],
-                                )
-                                : Text(
-                                  AppTranslations.getText(ref, 'save_changes'),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    fontFamily: 'Poppins',
-                                  ),
-                                ),
+                        child: Text(
+                          AppTranslations.getText(ref, 'save_changes'),
+                          style: const TextStyle(
+                            color: AppTheme.backgroundColor,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            fontFamily: AppTheme.secondaryFontFamily,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -587,9 +557,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
               ),
             ),
           ),
-          const AppBottomNav(currentIndex: -1),
         ],
       ),
+      bottomNavigationBar: const AppBottomNav(currentIndex: -1),
     );
   }
 }

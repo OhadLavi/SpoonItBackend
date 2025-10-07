@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:recipe_keeper/widgets/app_header.dart';
 import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
+import 'package:recipe_keeper/utils/app_theme.dart';
 
 class TermsPrivacyScreen extends ConsumerWidget {
   const TermsPrivacyScreen({super.key});
@@ -9,7 +10,7 @@ class TermsPrivacyScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppTheme.backgroundColor,
       body: Column(
         children: [
           const AppHeader(title: 'תנאים והגנת פרטיות'),
@@ -63,16 +64,19 @@ class TermsPrivacyScreen extends ConsumerWidget {
                   Center(
                     child: Text(
                       'עודכן לאחרונה: ${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}',
-                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.secondaryTextColor,
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
           ),
-          const AppBottomNav(currentIndex: -1),
         ],
       ),
+      bottomNavigationBar: const AppBottomNav(currentIndex: -1),
     );
   }
 
@@ -85,7 +89,7 @@ class TermsPrivacyScreen extends ConsumerWidget {
           style: const TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.bold,
-            color: Color(0xFFFF7E6B),
+            color: AppTheme.primaryColor,
           ),
         ),
         const SizedBox(height: 8),

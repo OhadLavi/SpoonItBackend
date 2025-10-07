@@ -19,6 +19,7 @@ class Recipe {
   final String notes;
   final String source;
   final DateTime updatedAt;
+  final String? categoryId;
 
   Recipe({
     String? id,
@@ -38,6 +39,7 @@ class Recipe {
     this.isFavorite = false,
     this.notes = '',
     this.source = '',
+    this.categoryId,
   }) : id = id ?? const Uuid().v4(),
        createdAt = createdAt ?? DateTime.now(),
        updatedAt = updatedAt ?? DateTime.now();
@@ -60,6 +62,7 @@ class Recipe {
     bool? isFavorite,
     String? notes,
     String? source,
+    String? categoryId,
   }) {
     return Recipe(
       id: id ?? this.id,
@@ -79,6 +82,7 @@ class Recipe {
       isFavorite: isFavorite ?? this.isFavorite,
       notes: notes ?? this.notes,
       source: source ?? this.source,
+      categoryId: categoryId ?? this.categoryId,
     );
   }
 
@@ -101,6 +105,7 @@ class Recipe {
       'isFavorite': isFavorite,
       'notes': notes,
       'source': source,
+      'categoryId': categoryId,
     };
   }
 
@@ -123,6 +128,7 @@ class Recipe {
       isFavorite: map['isFavorite'] as bool? ?? false,
       notes: map['notes'] as String? ?? '',
       source: map['source'] as String? ?? '',
+      categoryId: map['categoryId'] as String?,
     );
   }
 
@@ -152,6 +158,7 @@ class Recipe {
       isFavorite: data['isFavorite'] ?? false,
       notes: data['notes'] ?? '',
       source: data['source'] ?? '',
+      categoryId: data['categoryId'] as String?,
     );
   }
 
@@ -175,6 +182,7 @@ class Recipe {
       'isFavorite': isFavorite,
       'notes': notes,
       'source': source,
+      'categoryId': categoryId,
     };
   }
 }

@@ -1,16 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:recipe_keeper/providers/auth_provider.dart';
+import 'package:recipe_keeper/utils/app_theme.dart';
+import 'dart:developer' as developer;
 
 class SettingsMenu extends ConsumerWidget {
   const SettingsMenu({super.key, required this.hostContext});
   final BuildContext hostContext;
 
+  // MUST match your menu's background EXACTLY.
+  // If your panel uses a different shade, update this hex.
+  static const Color kMenuBg = AppTheme.uiAccentColor;
+  static const Color kAccent = AppTheme.primaryColor; // chevron color
+
   void _closeAndGo(String route) {
-    // Close the dialog from the root navigator, then navigate using a stable context
     Navigator.of(hostContext, rootNavigator: true).pop();
-    GoRouter.of(hostContext).go(route); // use go() for tab-like routes
+    GoRouter.of(hostContext).go(route);
   }
 
   @override
@@ -18,10 +25,14 @@ class SettingsMenu extends ConsumerWidget {
     return Column(
       children: [
         _buildSettingsHeader(context, ref),
-        const Divider(
-          color: Colors.white24,
-          height: 1,
-        ), // <- remove if you don't want the line
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Divider(
+            color: AppTheme.lightAccentColor,
+            thickness: 0.5,
+            height: 4,
+          ),
+        ),
         Expanded(child: _buildSettingsMenu(context, ref)),
       ],
     );
@@ -32,19 +43,37 @@ class SettingsMenu extends ConsumerWidget {
     final name = authState.user?.displayName.trim();
     final email = authState.user?.email.trim();
 
+    // Debug logging
+    developer.log(
+      'SettingsMenu: Auth State: ${authState.status}',
+      name: 'SettingsMenu',
+    );
+    developer.log(
+      'SettingsMenu: User: ${authState.user}',
+      name: 'SettingsMenu',
+    );
+    developer.log('SettingsMenu: Name: $name', name: 'SettingsMenu');
+    developer.log('SettingsMenu: Email: $email', name: 'SettingsMenu');
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 18, 32, 24),
+      padding: const EdgeInsets.fromLTRB(20, 28, 28, 32),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            (name?.isNotEmpty ?? false) ? name! : 'משתמש',
-            textAlign: TextAlign.right,
-            style: const TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w600,
-              fontFamily: 'Heebo',
-              color: Colors.white,
+          GestureDetector(
+            onTap: () => _closeAndGo('/profile'),
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: Text(
+                (name?.isNotEmpty ?? false) ? name! : 'משתמש',
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                  fontSize: 34.58,
+                  fontWeight: FontWeight.w600,
+                  fontFamily: AppTheme.primaryFontFamily,
+                  color: AppTheme.lightAccentColor,
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 2),
@@ -52,9 +81,9 @@ class SettingsMenu extends ConsumerWidget {
             email ?? '',
             textAlign: TextAlign.right,
             style: const TextStyle(
-              fontSize: 12.5,
-              fontFamily: 'Heebo',
-              color: Color(0xFFFF7E6B),
+              fontSize: 17.29,
+              fontFamily: AppTheme.primaryFontFamily,
+              color: kAccent,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -65,48 +94,58 @@ class SettingsMenu extends ConsumerWidget {
 
   Widget _buildSettingsMenu(BuildContext context, WidgetRef ref) {
     return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
         _buildSettingsMenuItem(
-          icon: Icons.person_outline,
+          svgAsset: 'assets/images/profile.svg',
           title: 'החשבון שלי',
           onTap: () => _closeAndGo('/profile'),
         ),
         _buildSettingsMenuItem(
-          icon: Icons.restaurant_menu,
+          svgAsset: 'assets/images/home.svg',
           title: 'המתכונים שלי',
           onTap: () => _closeAndGo('/my-recipes'),
         ),
         _buildSettingsMenuItem(
-          icon: Icons.list_alt,
+          svgAsset: 'assets/images/list_alt.svg',
           title: 'רשימת הקניות',
           onTap: () => _closeAndGo('/shopping-list'),
         ),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-          child: Divider(color: Colors.white24, height: 1),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 28, 12),
+          child: Divider(
+            color: AppTheme.lightAccentColor.withValues(alpha: 0.24),
+            thickness: 0.5,
+            height: 4,
+          ),
         ),
         _buildSettingsMenuItem(
-          icon: Icons.help_outline,
+          svgAsset: 'assets/images/help_outline.svg',
           title: 'תמיכה',
           onTap: () => _closeAndGo('/support'),
         ),
         _buildSettingsMenuItem(
-          icon: Icons.article_outlined,
+          svgAsset: 'assets/images/article_outline.svg',
           title: 'תנאים והגנת פרטיות',
           onTap: () => _closeAndGo('/terms-privacy'),
         ),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-          child: Divider(color: Colors.white24, height: 1),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 28, 12),
+          child: Divider(
+            color: AppTheme.lightAccentColor.withValues(alpha: 0.24),
+            thickness: 0.5,
+            height: 4,
+          ),
         ),
         _buildSettingsMenuItem(
-          icon: Icons.logout,
+          svgAsset: 'assets/images/logout.svg',
           title: 'התנתקות',
           onTap: () async {
-            Navigator.of(hostContext, rootNavigator: true).pop();
+            final navigator = Navigator.of(hostContext, rootNavigator: true);
+            final router = GoRouter.of(hostContext);
+            navigator.pop();
             await ref.read(authProvider.notifier).signOut();
-            GoRouter.of(hostContext).go('/login');
+            router.go('/login');
           },
         ),
         const SizedBox(height: 10),
@@ -115,32 +154,47 @@ class SettingsMenu extends ConsumerWidget {
   }
 
   Widget _buildSettingsMenuItem({
-    required IconData icon,
+    IconData? icon,
+    String? svgAsset,
     required String title,
     required VoidCallback onTap,
   }) {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        padding: const EdgeInsets.fromLTRB(20, 32, 28, 32),
         child: Row(
           children: [
-            Icon(
-              icon,
-              size: 20,
-              color: Colors.white60, // thinner/lighter
-              textDirection: TextDirection.ltr, // prevent RTL mirroring
-            ),
+            if (svgAsset != null)
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: SvgPicture.asset(
+                  svgAsset,
+                  colorFilter: ColorFilter.mode(
+                    AppTheme.lightAccentColor.withValues(alpha: 0.6),
+                    BlendMode.srcIn,
+                  ),
+                  fit: BoxFit.contain,
+                ),
+              )
+            else if (icon != null)
+              Icon(
+                icon,
+                size: 20,
+                color: AppTheme.lightAccentColor,
+                textDirection: TextDirection.ltr,
+              ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
                 title,
                 textAlign: TextAlign.right,
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: Colors.white70, // thinner/lighter
+                style: TextStyle(
+                  fontSize: 18,
+                  color: AppTheme.lightAccentColor,
                   fontWeight: FontWeight.w400,
-                  fontFamily: 'Heebo',
+                  fontFamily: AppTheme.primaryFontFamily,
                 ),
               ),
             ),

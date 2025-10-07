@@ -146,10 +146,10 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                 ),
                 if (_imageFile != null || _imageUrlController.text.isNotEmpty)
                   ListTile(
-                    leading: const Icon(Icons.delete, color: Colors.red),
+                    leading: Icon(Icons.delete, color: AppTheme.errorColor),
                     title: Text(
                       AppTranslations.getText(ref, 'remove_image'),
-                      style: const TextStyle(color: Colors.red),
+                      style: TextStyle(color: AppTheme.errorColor),
                     ),
                     onTap: () {
                       Navigator.of(context).pop();
@@ -230,7 +230,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
             content: Text(
               AppTranslations.getText(ref, 'user_not_authenticated'),
             ),
-            backgroundColor: Colors.red,
+            backgroundColor: AppTheme.errorColor,
           ),
         );
       }
@@ -297,7 +297,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
               content: Text(
                 '${AppTranslations.getText(ref, 'error_uploading_image')}: $e',
               ),
-              backgroundColor: Colors.red, // Added background color
+              backgroundColor: AppTheme.errorColor, // Added background color
             ),
           );
           setState(() {
@@ -363,7 +363,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                   ? AppTranslations.getText(ref, 'recipe_updated_successfully')
                   : AppTranslations.getText(ref, 'recipe_saved_successfully'),
             ),
-            backgroundColor: Colors.green,
+            backgroundColor: AppTheme.successColor,
           ),
         );
         if (widget.isEditing) {
@@ -379,7 +379,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
             content: Text(
               '${AppTranslations.getText(ref, 'error_saving_recipe')}: $e',
             ),
-            backgroundColor: Colors.red,
+            backgroundColor: AppTheme.errorColor,
           ),
         );
       }
@@ -399,7 +399,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(AppTranslations.getText(ref, 'please_fix_errors')),
-          backgroundColor: Colors.orange,
+          backgroundColor: AppTheme.warningColor,
         ),
       );
       return;
@@ -411,7 +411,6 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final List<String> tabTitles = [
       AppTranslations.getText(ref, 'basic_information'),
       AppTranslations.getText(ref, 'cooking_details'),
@@ -461,7 +460,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                 children: [
                   // Tab Bar on top
                   Material(
-                    color: const Color(0xFFFF7E6B),
+                    color: AppTheme.primaryColor,
                     child: TabBar(
                       isScrollable: true,
                       tabs:
@@ -471,16 +470,17 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                                   child: Text(
                                     title,
                                     style: const TextStyle(
-                                      fontFamily: 'Poppins',
+                                      fontFamily: AppTheme.secondaryFontFamily,
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
                                 ),
                               )
                               .toList(),
-                      labelColor: Colors.white,
-                      unselectedLabelColor: Colors.white70,
-                      indicatorColor: Colors.white,
+                      labelColor: AppTheme.backgroundColor,
+                      unselectedLabelColor: AppTheme.backgroundColor
+                          .withOpacity(0.7),
+                      indicatorColor: AppTheme.backgroundColor,
                       controller: tabController,
                     ),
                   ),
@@ -539,7 +539,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                                 ),
                                 child: const Icon(
                                   Icons.arrow_back_ios,
-                                  color: Colors.white,
+                                  color: AppTheme.backgroundColor,
                                   size: 24,
                                 ),
                               ),
@@ -575,7 +575,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                                 ),
                                 child: const Icon(
                                   Icons.arrow_forward_ios,
-                                  color: Colors.white,
+                                  color: AppTheme.backgroundColor,
                                   size: 24,
                                 ),
                               ),
@@ -590,7 +590,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                   Container(
                     padding: const EdgeInsets.all(16),
                     width: double.infinity,
-                    color: Colors.grey[50],
+                    color: AppTheme.cardColor,
                     child: SizedBox(
                       height: 56,
                       child: ElevatedButton(
@@ -603,8 +603,8 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                                   }
                                 },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF7E6B),
-                          foregroundColor: Colors.white,
+                          backgroundColor: AppTheme.primaryColor,
+                          foregroundColor: AppTheme.backgroundColor,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -616,8 +616,8 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                               ? AppTranslations.getText(ref, 'update_recipe')
                               : AppTranslations.getText(ref, 'save_recipe'),
                           style: const TextStyle(
-                            color: Colors.white,
-                            fontFamily: 'Poppins',
+                            color: AppTheme.backgroundColor,
+                            fontFamily: AppTheme.secondaryFontFamily,
                             fontWeight: FontWeight.w600,
                             fontSize: 16,
                           ),
@@ -647,7 +647,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
             decoration: InputDecoration(
               labelText: AppTranslations.getText(ref, 'recipe_title'),
               labelStyle: const TextStyle(
-                fontFamily: 'Poppins',
+                fontFamily: AppTheme.secondaryFontFamily,
                 color: AppTheme.textColor,
               ),
               border: OutlineInputBorder(
@@ -661,15 +661,15 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(
-                  color: Color(0xFFFF7E6B),
+                  color: AppTheme.primaryColor,
                   width: 2,
                 ),
               ),
               filled: true,
-              fillColor: Colors.white,
+              fillColor: AppTheme.backgroundColor,
             ),
             style: const TextStyle(
-              fontFamily: 'Poppins',
+              fontFamily: AppTheme.secondaryFontFamily,
               color: AppTheme.textColor,
             ),
             validator: (value) {
@@ -688,10 +688,10 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
               height: 180,
               width: double.infinity,
               decoration: BoxDecoration(
-                color: Colors.grey[100],
+                color: AppTheme.cardColor,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: const Color(0xFFFF7E6B).withOpacity(0.3),
+                  color: AppTheme.primaryColor.withOpacity(0.3),
                   width: 2,
                 ),
               ),
@@ -741,13 +741,13 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                             Icon(
                               Icons.add_photo_alternate,
                               size: 50,
-                              color: const Color(0xFFFF7E6B),
+                              color: AppTheme.primaryColor,
                             ),
                             const SizedBox(height: 8),
                             Text(
                               AppTranslations.getText(ref, 'add_image'),
                               style: const TextStyle(
-                                fontFamily: 'Poppins',
+                                fontFamily: AppTheme.secondaryFontFamily,
                                 fontSize: 16,
                                 fontWeight: FontWeight.w500,
                                 color: AppTheme.textColor,
@@ -768,7 +768,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
               labelText: AppTranslations.getText(ref, 'image_url'),
               hintText: AppTranslations.getText(ref, 'enter_image_url'),
               labelStyle: const TextStyle(
-                fontFamily: 'Poppins',
+                fontFamily: AppTheme.secondaryFontFamily,
                 color: AppTheme.textColor,
               ),
               border: OutlineInputBorder(
@@ -782,23 +782,23 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(
-                  color: Color(0xFFFF7E6B),
+                  color: AppTheme.primaryColor,
                   width: 2,
                 ),
               ),
               filled: true,
-              fillColor: Colors.white,
+              fillColor: AppTheme.backgroundColor,
               helperText: AppTranslations.getText(
                 ref,
                 'image_url_will_be_used',
               ),
               helperStyle: const TextStyle(
-                fontFamily: 'Poppins',
+                fontFamily: AppTheme.secondaryFontFamily,
                 color: AppTheme.secondaryTextColor,
               ),
             ),
             style: const TextStyle(
-              fontFamily: 'Poppins',
+              fontFamily: AppTheme.secondaryFontFamily,
               color: AppTheme.textColor,
             ),
             onChanged: (value) {
@@ -816,7 +816,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                 'enter_recipe_description',
               ),
               labelStyle: const TextStyle(
-                fontFamily: 'Poppins',
+                fontFamily: AppTheme.secondaryFontFamily,
                 color: AppTheme.textColor,
               ),
               border: OutlineInputBorder(
@@ -830,19 +830,19 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(
-                  color: Color(0xFFFF7E6B),
+                  color: AppTheme.primaryColor,
                   width: 2,
                 ),
               ),
               filled: true,
-              fillColor: Colors.white,
+              fillColor: AppTheme.backgroundColor,
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 16,
                 vertical: 16,
               ),
             ),
             style: const TextStyle(
-              fontFamily: 'Poppins',
+              fontFamily: AppTheme.secondaryFontFamily,
               color: AppTheme.textColor,
             ),
             maxLines: 3,
@@ -1019,7 +1019,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
           padding: const EdgeInsets.symmetric(vertical: 16.0),
           child: Text(
             AppTranslations.getText(ref, 'add_ingredients'),
-            style: TextStyle(color: Colors.grey[600], fontSize: 16),
+            style: TextStyle(color: AppTheme.secondaryTextColor, fontSize: 16),
           ),
         ),
       );
@@ -1054,7 +1054,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
               IconButton(
                 icon: const Icon(
                   Icons.remove_circle_outline,
-                  color: Colors.red,
+                  color: AppTheme.errorColor,
                   size: 28,
                 ),
                 padding: const EdgeInsets.all(8.0),
@@ -1083,7 +1083,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
           padding: const EdgeInsets.symmetric(vertical: 16.0),
           child: Text(
             AppTranslations.getText(ref, 'add_instructions'),
-            style: TextStyle(color: Colors.grey[600], fontSize: 16),
+            style: TextStyle(color: AppTheme.secondaryTextColor, fontSize: 16),
           ),
         ),
       );
@@ -1105,14 +1105,14 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                     width: 32,
                     height: 32,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFF7E6B),
+                      color: AppTheme.primaryColor,
                       shape: BoxShape.circle,
                     ),
                     child: Center(
                       child: Text(
                         '${index + 1}',
                         style: const TextStyle(
-                          color: Colors.white,
+                          color: AppTheme.backgroundColor,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -1130,7 +1130,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                   IconButton(
                     icon: const Icon(
                       Icons.remove_circle_outline,
-                      color: Colors.red,
+                      color: AppTheme.errorColor,
                       size: 28,
                     ),
                     padding: const EdgeInsets.all(8.0),

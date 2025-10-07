@@ -19,6 +19,7 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="A new Flutter project.">
+  <meta name="theme-color" content="#FC7562">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
@@ -76,22 +77,234 @@
         overflow: hidden;
       }
     }
+    
+    /* Custom Flutter loader colors - Peach theme */
+    .flutter-loader {
+      background-color: #FC7562 !important;
+    }
+    
+    /* Override all loading indicator colors */
+    flt-glass-pane::before,
+    flt-glass-pane::after {
+      background-color: #FC7562 !important;
+    }
+    
+    /* Override progress bar colors */
+    .loading-indicator,
+    .progress-bar {
+      background-color: #FC7562 !important;
+      color: #FC7562 !important;
+    }
+    
+    /* Override Flutter's default blue loading spinner */
+    .loading-spinner,
+    .spinner,
+    .loading,
+    .loader {
+      border-color: #FC7562 !important;
+      border-top-color: #FC7562 !important;
+      background-color: #FC7562 !important;
+    }
+    
+    /* Override all possible loading elements */
+    [class*="loading"],
+    [class*="spinner"],
+    [class*="loader"],
+    [class*="progress"] {
+      background-color: #FC7562 !important;
+      border-color: #FC7562 !important;
+      color: #FC7562 !important;
+    }
+    
+    /* Override Flutter's built-in loading animations */
+    @keyframes flutter-loader {
+      from {
+        background-color: #FC7562;
+        border-color: #FC7562;
+      }
+      to {
+        background-color: #FC7562;
+        border-color: #FC7562;
+      }
+    }
+    
+    /* Override specific blue loading elements only */
+    .loading, .spinner, .progress, .indicator {
+      --loading-color: #FC7562 !important;
+      --spinner-color: #FC7562 !important;
+      --progress-color: #FC7562 !important;
+    }
+    
+    /* Target Flutter's specific loading animations */
+    @keyframes flutter-loading {
+      0% { background-color: #FC7562; }
+      100% { background-color: #FC7562; }
+    }
+    
+    /* Override any animated elements that might be blue */
+    [style*="animation"], [style*="keyframes"] {
+      background-color: #FC7562 !important;
+    }
+    
+    /* Target specific Flutter loading classes */
+    .flutter-loading, .flutter-spinner, .flutter-progress {
+      background-color: #FC7562 !important;
+      border-color: #FC7562 !important;
+    }
+    
+    /* Override SVG elements (for animated stripes) */
+    svg *, svg rect, svg circle, svg path, svg line, svg polyline, svg polygon {
+      fill: #FC7562 !important;
+      stroke: #FC7562 !important;
+    }
+    
+    /* Target any blue fills or strokes */
+    [fill="blue"], [fill="#2196F3"], [fill="#1976D2"],
+    [stroke="blue"], [stroke="#2196F3"], [stroke="#1976D2"] {
+      fill: #FC7562 !important;
+      stroke: #FC7562 !important;
+    }
+    
+    /* Override all possible blue color variations */
+    [style*="fill:blue"], [style*="fill:#2196F3"], [style*="fill:#1976D2"],
+    [style*="stroke:blue"], [style*="stroke:#2196F3"], [style*="stroke:#1976D2"] {
+      fill: #FC7562 !important;
+      stroke: #FC7562 !important;
+    }
   </style>
   
   <script>
     // The value below is injected by flutter build, do not touch.
-    const serviceWorkerVersion = null;
+    const serviceWorkerVersion = "{{flutter_service_worker_version}}";
   </script>
   <!-- This script adds the flutter initialization JS code -->
   <script src="flutter.js" defer></script>
 </head>
 <body>
   <script>
+    // Override only loading-related blue colors
+    function overrideBlueColors() {
+      const style = document.createElement('style');
+      style.textContent = `
+        .loading, .spinner, .progress, .indicator,
+        [class*="loading"], [class*="spinner"], [class*="progress"],
+        [class*="flutter"], [class*="loading"] {
+          background-color: #FC7562 !important;
+          border-color: #FC7562 !important;
+          color: #FC7562 !important;
+        }
+        [style*="blue"], [style*="#2196F3"], [style*="#1976D2"],
+        [style*="rgb(33, 150, 243)"], [style*="rgb(25, 118, 210)"] {
+          background-color: #FC7562 !important;
+          border-color: #FC7562 !important;
+          color: #FC7562 !important;
+        }
+        /* Target any element with animation that might be blue */
+        *[style*="animation"] {
+          background-color: #FC7562 !important;
+        }
+      `;
+      document.head.appendChild(style);
+      
+      // Also try to find and override any blue elements dynamically
+      const observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+          mutation.addedNodes.forEach(function(node) {
+            if (node.nodeType === 1) { // Element node
+              // Check background color
+              if (node.style && (node.style.backgroundColor === 'blue' || 
+                  node.style.backgroundColor === '#2196F3' || 
+                  node.style.backgroundColor === '#1976D2')) {
+                node.style.backgroundColor = '#FC7562';
+              }
+              
+              // Check SVG fill and stroke
+              if (node.tagName === 'svg' || node.tagName === 'SVG' || 
+                  node.tagName === 'path' || node.tagName === 'PATH' ||
+                  node.tagName === 'rect' || node.tagName === 'RECT' ||
+                  node.tagName === 'circle' || node.tagName === 'CIRCLE') {
+                if (node.getAttribute('fill') === 'blue' || 
+                    node.getAttribute('fill') === '#2196F3' || 
+                    node.getAttribute('fill') === '#1976D2') {
+                  node.setAttribute('fill', '#FC7562');
+                }
+                if (node.getAttribute('stroke') === 'blue' || 
+                    node.getAttribute('stroke') === '#2196F3' || 
+                    node.getAttribute('stroke') === '#1976D2') {
+                  node.setAttribute('stroke', '#FC7562');
+                }
+              }
+              
+              // Check all child SVG elements
+              const svgChildren = node.querySelectorAll('svg, path, rect, circle, line, polyline, polygon');
+              svgChildren.forEach(function(child) {
+                const fill = child.getAttribute('fill');
+                const stroke = child.getAttribute('stroke');
+                if (fill === 'blue' || fill === '#2196F3' || fill === '#1976D2') {
+                  child.setAttribute('fill', '#FC7562');
+                }
+                if (stroke === 'blue' || stroke === '#2196F3' || stroke === '#1976D2') {
+                  child.setAttribute('stroke', '#FC7562');
+                }
+              });
+            }
+          });
+        });
+      });
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['fill', 'stroke', 'style'] });
+    }
+    
+    // Function to scan and override any blue elements
+    function scanAndOverrideBlue() {
+      // Override all SVG elements
+      const allSvgElements = document.querySelectorAll('svg, path, rect, circle, line, polyline, polygon');
+      allSvgElements.forEach(function(el) {
+        const fill = el.getAttribute('fill');
+        const stroke = el.getAttribute('stroke');
+        if (fill && (fill.includes('blue') || fill.includes('#2196F3') || fill.includes('#1976D2'))) {
+          el.setAttribute('fill', '#FC7562');
+        }
+        if (stroke && (stroke.includes('blue') || stroke.includes('#2196F3') || stroke.includes('#1976D2'))) {
+          el.setAttribute('stroke', '#FC7562');
+        }
+        // Also check inline styles
+        if (el.style.fill && (el.style.fill.includes('blue') || el.style.fill.includes('#2196F3') || el.style.fill.includes('#1976D2'))) {
+          el.style.fill = '#FC7562';
+        }
+        if (el.style.stroke && (el.style.stroke.includes('blue') || el.style.stroke.includes('#2196F3') || el.style.stroke.includes('#1976D2'))) {
+          el.style.stroke = '#FC7562';
+        }
+      });
+      
+      // Override all elements with blue background
+      const allElements = document.querySelectorAll('*');
+      allElements.forEach(function(el) {
+        if (el.style.backgroundColor && (el.style.backgroundColor.includes('blue') || 
+            el.style.backgroundColor.includes('#2196F3') || 
+            el.style.backgroundColor.includes('#1976D2') ||
+            el.style.backgroundColor.includes('rgb(33, 150, 243)') ||
+            el.style.backgroundColor.includes('rgb(25, 118, 210)'))) {
+          el.style.backgroundColor = '#FC7562';
+        }
+      });
+    }
+    
+    // Apply color overrides immediately
+    overrideBlueColors();
+    
+    // Scan for blue elements periodically during loading
+    const scanInterval = setInterval(scanAndOverrideBlue, 100);
+    
+    // Stop scanning after 5 seconds (app should be loaded by then)
+    setTimeout(function() {
+      clearInterval(scanInterval);
+    }, 5000);
+    
     window.addEventListener('load', function(ev) {
       // Detect if we're running in a desktop browser
       var isDesktop = window.innerWidth >= 768;
       
-      // Download main.dart.js
+      // Use the more compatible loadEntrypoint method
       _flutter.loader.loadEntrypoint({
         serviceWorker: {
           serviceWorkerVersion: serviceWorkerVersion,
