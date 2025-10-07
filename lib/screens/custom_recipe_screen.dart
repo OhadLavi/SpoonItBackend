@@ -65,7 +65,7 @@ class _CustomRecipeScreenState extends ConsumerState<CustomRecipeScreen> {
       backgroundColor: AppTheme.backgroundColor,
       body: Column(
         children: [
-          const AppHeader(title: 'מתכון מותאם'),
+          AppHeader(title: AppTranslations.getText(ref, 'custom_recipe')),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.all(16),

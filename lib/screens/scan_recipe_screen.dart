@@ -165,7 +165,7 @@ class _ScanRecipeScreenState extends ConsumerState<ScanRecipeScreen> {
       backgroundColor: AppTheme.backgroundColor,
       body: Column(
         children: [
-          const AppHeader(title: 'סריקת מתכון'),
+          AppHeader(title: AppTranslations.getText(ref, 'scan_recipe_title')),
           Expanded(
             child: SingleChildScrollView(
               child: Padding(
@@ -332,15 +332,15 @@ class _RecipeFormScreenState extends ConsumerState<_RecipeFormScreen> {
                   IconButton(
                     icon: Icon(
                       Icons.arrow_forward,
-                      color: AppTheme.backgroundColor,
+                      color: AppTheme.lightAccentColor,
                     ),
                     onPressed: () => Navigator.pop(context),
                   ),
                   Expanded(
                     child: Text(
-                      'הוספת מתכון',
+                      AppTranslations.getText(ref, 'add_recipe_title'),
                       style: const TextStyle(
-                        color: AppTheme.backgroundColor,
+                        color: AppTheme.lightAccentColor,
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
                         fontFamily: AppTheme.primaryFontFamily,
@@ -359,12 +359,15 @@ class _RecipeFormScreenState extends ConsumerState<_RecipeFormScreen> {
                 isEditing: false,
                 onSubmit: () {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
+                    SnackBar(
                       content: Text(
-                        'המתכון נשמר בהצלחה!',
+                        AppTranslations.getText(
+                          ref,
+                          'recipe_saved_successfully',
+                        ),
                         style: TextStyle(
                           fontFamily: AppTheme.primaryFontFamily,
-                          color: AppTheme.backgroundColor,
+                          color: AppTheme.lightAccentColor,
                         ),
                       ),
                       backgroundColor: AppTheme.primaryColor,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:recipe_keeper/utils/translations.dart';
 import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
 import 'package:recipe_keeper/widgets/recipe_form_base.dart';
 
@@ -14,7 +15,7 @@ class CreateRecipeScreen extends ConsumerWidget {
       backgroundColor: AppTheme.backgroundColor,
       body: SafeArea(
         child: RecipeFormBase(
-          title: 'יצירת מתכון',
+          title: AppTranslations.getText(ref, 'create_recipe'),
           onSuccess: () => context.go('/home'),
         ),
       ),

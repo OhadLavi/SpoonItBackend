@@ -22,11 +22,14 @@ class SettingsState {
 class SettingsNotifier extends Notifier<SettingsState> {
   @override
   SettingsState build() {
-    _loadPreferences();
-    return SettingsState(
+    // Initialize with default values first
+    state = SettingsState(
       language: AppLanguage.hebrew,
       themeMode: ThemeMode.light,
     );
+    // Load preferences asynchronously
+    _loadPreferences();
+    return state;
   }
 
   static const String _languageKey = 'app_language';
@@ -46,7 +49,7 @@ class SettingsNotifier extends Notifier<SettingsState> {
               )
               : AppLanguage.hebrew;
 
-      // Load theme mode preference, default to light if not set
+      // Load theme mode preference, default to dark if not set
       final themeModeValue =
           prefs.getInt(_themeModeKey) ?? ThemeMode.light.index;
 

@@ -236,8 +236,14 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
                               child: DropdownButtonFormField<String>(
                                 value: _selectedCategoryId,
                                 decoration: InputDecoration(
-                                  labelText: 'קטגוריה',
-                                  hintText: 'בחר קטגוריה',
+                                  labelText: AppTranslations.getText(
+                                    ref,
+                                    'category',
+                                  ),
+                                  hintText: AppTranslations.getText(
+                                    ref,
+                                    'select_category',
+                                  ),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12),
                                     borderSide: const BorderSide(
@@ -590,7 +596,7 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
               if (_isUploadingImage)
                 const Center(
                   child: CircularProgressIndicator(
-                    color: AppTheme.backgroundColor,
+                    color: AppTheme.lightAccentColor,
                   ),
                 )
               else
@@ -600,18 +606,18 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
                     padding: const EdgeInsets.all(24),
                     child: CustomPaint(
                       painter: DashedBorderPainter(
-                        color: AppTheme.backgroundColor,
+                        color: AppTheme.lightAccentColor,
                         strokeWidth: 3,
                         dashWidth: 6,
                         dashSpace: 3,
                       ),
-                      child: const Center(
+                      child: Center(
                         child: Text(
-                          'החלף תמונה',
+                          AppTranslations.getText(ref, 'change_image'),
                           style: TextStyle(
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
-                            color: AppTheme.backgroundColor,
+                            color: AppTheme.lightAccentColor,
                             fontFamily: AppTheme.primaryFontFamily,
                           ),
                           textAlign: TextAlign.center,
@@ -981,7 +987,7 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'בחר תמונה',
+                  AppTranslations.getText(ref, 'select_image'),
                   style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -995,8 +1001,8 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
                     Icons.camera_alt,
                     color: AppTheme.primaryColor,
                   ),
-                  title: const Text(
-                    'מצלמה',
+                  title: Text(
+                    AppTranslations.getText(ref, 'camera'),
                     style: TextStyle(
                       fontFamily: AppTheme.primaryFontFamily,
                       color: AppTheme.textColor,
@@ -1012,8 +1018,8 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
                     Icons.photo_library,
                     color: AppTheme.primaryColor,
                   ),
-                  title: const Text(
-                    'גלריה / בחר קובץ',
+                  title: Text(
+                    AppTranslations.getText(ref, 'gallery'),
                     style: TextStyle(
                       fontFamily: AppTheme.primaryFontFamily,
                       color: AppTheme.textColor,
@@ -1026,8 +1032,8 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
                 ),
                 ListTile(
                   leading: const Icon(Icons.link, color: AppTheme.primaryColor),
-                  title: const Text(
-                    'הוסף קישור',
+                  title: Text(
+                    AppTranslations.getText(ref, 'add_image'),
                     style: TextStyle(
                       fontFamily: AppTheme.primaryFontFamily,
                       color: AppTheme.textColor,
@@ -1063,7 +1069,8 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
       if (mounted) {
         ValidationService.showErrorSnackBar(
           context,
-          'שגיאה בבחירת תמונה: ${e.toString()}',
+          AppTranslations.getText(ref, 'error_selecting_image') +
+              ': ${e.toString()}',
         );
       }
     }
@@ -1088,7 +1095,8 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
       if (mounted) {
         ValidationService.showErrorSnackBar(
           context,
-          'שגיאה בבחירת תמונה: ${e.toString()}',
+          AppTranslations.getText(ref, 'error_selecting_image') +
+              ': ${e.toString()}',
         );
       }
     }
@@ -1102,8 +1110,8 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
       builder:
           (context) => AlertDialog(
             backgroundColor: AppTheme.backgroundColor,
-            title: const Text(
-              'הוסף קישור לתמונה',
+            title: Text(
+              AppTranslations.getText(ref, 'add_image'),
               style: TextStyle(
                 fontFamily: AppTheme.primaryFontFamily,
                 color: AppTheme.textColor,
@@ -1111,8 +1119,8 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
             ),
             content: TextField(
               controller: urlController,
-              decoration: const InputDecoration(
-                hintText: 'הדבק קישור...',
+              decoration: InputDecoration(
+                hintText: AppTranslations.getText(ref, 'paste_recipe_url'),
                 hintStyle: TextStyle(
                   fontFamily: AppTheme.primaryFontFamily,
                   color: AppTheme.textColor,
@@ -1138,8 +1146,8 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text(
-                  'ביטול',
+                child: Text(
+                  AppTranslations.getText(ref, 'cancel'),
                   style: TextStyle(
                     fontFamily: AppTheme.primaryFontFamily,
                     color: AppTheme.textColor,
@@ -1163,11 +1171,11 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
                   shadowColor: Colors.transparent,
                   elevation: 0,
                 ),
-                child: const Text(
-                  'אישור',
+                child: Text(
+                  AppTranslations.getText(ref, 'ok'),
                   style: TextStyle(
                     fontFamily: AppTheme.primaryFontFamily,
-                    color: AppTheme.backgroundColor,
+                    color: AppTheme.lightAccentColor,
                   ),
                 ),
               ),
@@ -1203,7 +1211,10 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
       });
 
       if (mounted) {
-        ValidationService.showSuccessSnackBar(context, 'התמונה הועלתה בהצלחה');
+        ValidationService.showSuccessSnackBar(
+          context,
+          AppTranslations.getText(ref, 'image_selected'),
+        );
       }
     } catch (e) {
       setState(() {
@@ -1213,7 +1224,8 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
       if (mounted) {
         ValidationService.showErrorSnackBar(
           context,
-          'שגיאה בהעלאת התמונה: ${e.toString()}',
+          AppTranslations.getText(ref, 'error_uploading_image') +
+              ': ${e.toString()}',
         );
       }
     }

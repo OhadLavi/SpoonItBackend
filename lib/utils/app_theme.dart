@@ -35,11 +35,54 @@ class AppTheme {
   // Dark Theme Colors - Updated to match new app style
   static const Color darkPrimaryColor = Color(0xFFFC7562); // New Peach
   static const Color darkAccentColor = Color(0xFFFC7562); // New Peach
-  static const Color darkBackgroundColor = Color(0xFF121212);
-  static const Color darkCardColor = Color(0xFF1E1E1E);
-  static const Color darkTextColor = Color(0xFFEEEEEE);
-  static const Color darkSecondaryTextColor = Color(0xFFB0B0B0);
+  static const Color darkBackgroundColor = Color(
+    0xFF171A21,
+  ); // New dark background
+  static const Color darkCardColor = Color(
+    0xFF1e2027,
+  ); // New dark color for inputs
+  static const Color darkInputHoverColor = Color(
+    0xFF2C2E36,
+  ); // Input hover color
+  static const Color darkTextColor = Color(0xFFdbc0a4);
+  static const Color darkSecondaryTextColor = Color(0xFFdbc0a4);
   static const Color darkDividerColor = Color(0xFF424242);
+
+  // Dynamic colors that automatically choose based on theme
+  static Color getBackgroundColor(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark ? darkBackgroundColor : backgroundColor;
+  }
+
+  static Color getCardColor(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark ? darkCardColor : cardColor;
+  }
+
+  static Color getTextColor(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark ? darkTextColor : textColor;
+  }
+
+  static Color getSecondaryTextColor(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark ? darkSecondaryTextColor : secondaryTextColor;
+  }
+
+  static Color getDividerColor(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark ? darkDividerColor : dividerColor;
+  }
+
+  static Color getInputHoverColor(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark ? darkInputHoverColor : cardColor;
+  }
+
+  static Color getLightAccentColor(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark ? primaryColor : lightAccentColor;
+  }
 
   // Get text style based on current theme brightness
   static TextStyle getHeadingStyle(BuildContext context) {
@@ -110,7 +153,7 @@ class AppTheme {
   // Button Styles
   static final ButtonStyle primaryButtonStyle = ElevatedButton.styleFrom(
     backgroundColor: primaryColor,
-    foregroundColor: Colors.white,
+    foregroundColor: lightAccentColor,
     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
     textStyle: TextStyle(
@@ -136,7 +179,7 @@ class AppTheme {
   static BoxDecoration getCardDecoration(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return BoxDecoration(
-      color: isDark ? darkCardColor : cardColor,
+      color: getCardColor(context),
       borderRadius: BorderRadius.circular(12),
       boxShadow: [
         BoxShadow(
@@ -265,14 +308,14 @@ class AppTheme {
     ),
     appBarTheme: AppBarTheme(
       backgroundColor: primaryColor,
-      foregroundColor: Colors.white,
+      foregroundColor: lightAccentColor,
       elevation: 0,
       centerTitle: true,
       titleTextStyle: TextStyle(
         fontFamily: primaryFontFamily,
         fontSize: 20,
         fontWeight: FontWeight.w600,
-        color: Colors.white,
+        color: lightAccentColor,
       ),
     ),
     bottomNavigationBarTheme: const BottomNavigationBarThemeData(
@@ -330,7 +373,7 @@ class AppTheme {
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
         backgroundColor: darkPrimaryColor,
-        foregroundColor: Colors.white,
+        foregroundColor: lightAccentColor,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         textStyle: TextStyle(
@@ -354,6 +397,8 @@ class AppTheme {
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: darkCardColor,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide: const BorderSide(color: darkDividerColor),

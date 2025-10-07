@@ -55,6 +55,7 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
     final userData = ref.watch(userDataProvider).value;
 
     return Scaffold(
+      extendBody: true,
       backgroundColor: AppTheme.backgroundColor,
       body: Column(
         children: [
@@ -71,6 +72,7 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
                     context,
                   ).copyWith(scrollbars: false),
                   child: SingleChildScrollView(
+                    padding: const EdgeInsets.only(bottom: 100),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
@@ -87,7 +89,7 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
                                     ? CachedNetworkImage(
                                       imageUrl: ImageService()
                                           .getCorsProxiedUrl(recipe.imageUrl),
-                                      fit: BoxFit.cover,
+                                      fit: BoxFit.contain,
                                       placeholder:
                                           (context, url) => const Center(
                                             child: CircularProgressIndicator(
@@ -146,7 +148,7 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
                               IconButton(
                                 icon: const Icon(
                                   Icons.share,
-                                  color: AppTheme.textColor,
+                                  color: AppTheme.secondaryTextColor,
                                 ),
                                 onPressed: () => _shareRecipe(recipe),
                               ),
@@ -180,17 +182,37 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
                                 children: [
                                   if (recipe.prepTime > 0)
                                     _detailTile(
-                                      'זמן הכנה: ${recipe.prepTime} דק׳',
+                                      AppTranslations.getText(
+                                        ref,
+                                        'prep_time_minutes',
+                                      ).replaceAll(
+                                        '{time}',
+                                        recipe.prepTime.toString(),
+                                      ),
                                     ),
                                   if (recipe.cookTime > 0) ...[
                                     const SizedBox(width: 10),
                                     _detailTile(
-                                      'זמן בישול: ${recipe.cookTime} דק׳',
+                                      AppTranslations.getText(
+                                        ref,
+                                        'cook_time_minutes',
+                                      ).replaceAll(
+                                        '{time}',
+                                        recipe.cookTime.toString(),
+                                      ),
                                     ),
                                   ],
                                   if (recipe.servings > 0) ...[
                                     const SizedBox(width: 10),
-                                    _detailTile('מנות: ${recipe.servings}'),
+                                    _detailTile(
+                                      AppTranslations.getText(
+                                        ref,
+                                        'servings_count',
+                                      ).replaceAll(
+                                        '{count}',
+                                        recipe.servings.toString(),
+                                      ),
+                                    ),
                                   ],
                                 ],
                               ),
@@ -335,9 +357,9 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
                           ),
 
                         const SizedBox(height: 24),
-                        const Center(
+                        Center(
                           child: Text(
-                            'בתיאבון!',
+                            AppTranslations.getText(ref, 'bon_appetit'),
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontFamily: AppTheme.primaryFontFamily,
@@ -485,22 +507,39 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
 
     // Cooking details
     if (recipe.prepTime > 0 || recipe.cookTime > 0 || recipe.servings > 0) {
-      shareText.writeln('⏱️ פרטים:');
+      shareText.writeln('⏱️ ${AppTranslations.getText(ref, 'details')}:');
       if (recipe.prepTime > 0) {
-        shareText.writeln('זמן הכנה: ${recipe.prepTime} דק׳');
+        shareText.writeln(
+          AppTranslations.getText(
+            ref,
+            'prep_time_minutes',
+          ).replaceAll('{time}', recipe.prepTime.toString()),
+        );
       }
       if (recipe.cookTime > 0) {
-        shareText.writeln('זמן בישול: ${recipe.cookTime} דק׳');
+        shareText.writeln(
+          AppTranslations.getText(
+            ref,
+            'cook_time_minutes',
+          ).replaceAll('{time}', recipe.cookTime.toString()),
+        );
       }
       if (recipe.servings > 0) {
-        shareText.writeln('מנות: ${recipe.servings}');
+        shareText.writeln(
+          AppTranslations.getText(
+            ref,
+            'servings_count',
+          ).replaceAll('{count}', recipe.servings.toString()),
+        );
       }
       shareText.writeln();
     }
 
     // Ingredients
     if (recipe.ingredients.isNotEmpty) {
-      shareText.writeln('🥘 רכיבים:');
+      shareText.writeln(
+        '🥘 ${AppTranslations.getText(ref, 'ingredients_section')}:',
+      );
       for (int i = 0; i < recipe.ingredients.length; i++) {
         shareText.writeln('${i + 1}. ${recipe.ingredients[i]}');
       }
@@ -509,7 +548,9 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
 
     // Instructions
     if (recipe.instructions.isNotEmpty) {
-      shareText.writeln('👨‍🍳 הוראות הכנה:');
+      shareText.writeln(
+        '👨‍🍳 ${AppTranslations.getText(ref, 'instructions_section')}:',
+      );
       for (int i = 0; i < recipe.instructions.length; i++) {
         shareText.writeln('${i + 1}. ${recipe.instructions[i]}');
       }
@@ -518,20 +559,24 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
 
     // Notes
     if (recipe.notes.isNotEmpty) {
-      shareText.writeln('📝 הערות:');
+      shareText.writeln('📝 ${AppTranslations.getText(ref, 'notes_section')}:');
       shareText.writeln(recipe.notes);
       shareText.writeln();
     }
 
     // Tags
     if (recipe.tags.isNotEmpty) {
-      shareText.writeln('🏷️ תגיות: ${recipe.tags.join(', ')}');
+      shareText.writeln(
+        '🏷️ ${AppTranslations.getText(ref, 'tags_section')}: ${recipe.tags.join(', ')}',
+      );
       shareText.writeln();
     }
 
-    shareText.writeln('בתיאבון! 🍽️');
+    shareText.writeln('${AppTranslations.getText(ref, 'bon_appetit')} 🍽️');
     shareText.writeln();
-    shareText.writeln('שיתוף מ-Recipe Keeper');
+    shareText.writeln(
+      AppTranslations.getText(ref, 'shared_from_recipe_keeper'),
+    );
 
     return shareText.toString();
   }
@@ -546,9 +591,9 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
     if (userId == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              'יש להתחבר כדי להוסיף לרשימת קניות',
+              AppTranslations.getText(ref, 'login_to_add_to_shopping_list'),
               textAlign: TextAlign.right,
               style: TextStyle(fontFamily: AppTheme.primaryFontFamily),
             ),
@@ -567,8 +612,8 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: const Text(
-                'הפריט כבר קיים ברשימת הקניות',
+              content: Text(
+                AppTranslations.getText(ref, 'item_already_in_shopping_list'),
                 textAlign: TextAlign.right,
                 style: TextStyle(fontFamily: AppTheme.primaryFontFamily),
               ),
@@ -586,15 +631,15 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text(
-              'הפריט נוסף לרשימת הקניות',
+            content: Text(
+              AppTranslations.getText(ref, 'item_added_to_shopping_list'),
               textAlign: TextAlign.right,
               style: TextStyle(fontFamily: AppTheme.primaryFontFamily),
             ),
             backgroundColor: AppTheme.primaryColor,
             duration: const Duration(seconds: 2),
             action: SnackBarAction(
-              label: 'לרשימה',
+              label: AppTranslations.getText(ref, 'to_list'),
               textColor: AppTheme.lightAccentColor,
               onPressed: () {
                 context.go('/shopping-list');
@@ -605,14 +650,35 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
       }
     } catch (e) {
       if (mounted) {
+        String errorMessage;
+        Color backgroundColor;
+
+        if (e.toString().contains('Shopping list limit reached')) {
+          errorMessage = AppTranslations.getText(ref, 'shopping_list_full');
+          backgroundColor = AppTheme.warningColor;
+        } else if (e.toString().contains('Item already exists')) {
+          errorMessage = AppTranslations.getText(
+            ref,
+            'item_already_in_shopping_list',
+          );
+          backgroundColor = AppTheme.primaryColor.withOpacity(0.8);
+        } else {
+          errorMessage = AppTranslations.getText(
+            ref,
+            'error_adding_item',
+          ).replaceAll('{error}', e.toString());
+          backgroundColor = AppTheme.errorColor;
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'שגיאה בהוספת הפריט: ${e.toString()}',
+              errorMessage,
               textAlign: TextAlign.right,
               style: const TextStyle(fontFamily: AppTheme.primaryFontFamily),
             ),
-            backgroundColor: AppTheme.errorColor,
+            backgroundColor: backgroundColor,
+            duration: const Duration(seconds: 3),
           ),
         );
       }

@@ -71,7 +71,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       child: Scaffold(
         body: Column(
           children: [
-            const AppHeader(title: 'צ\'אט'),
+            AppHeader(title: AppTranslations.getText(ref, 'chat')),
             Expanded(
               child:
                   _messages.isEmpty
@@ -191,7 +191,7 @@ class MessageBubble extends StatelessWidget {
         child: Text(
           message.text,
           style: TextStyle(
-            color: message.isUser ? AppTheme.backgroundColor : null,
+            color: message.isUser ? AppTheme.lightAccentColor : null,
             fontFamily: isHebrew ? 'Heebo' : null,
             fontSize: 16,
           ),

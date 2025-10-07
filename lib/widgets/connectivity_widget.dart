@@ -93,13 +93,13 @@ class ConnectivityWidget extends ConsumerWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.cloud_off, color: AppTheme.backgroundColor, size: 18),
+          Icon(Icons.cloud_off, color: AppTheme.lightAccentColor, size: 18),
           const SizedBox(width: 8),
           Flexible(
             child: Text(
               'You are offline. Some features may be limited.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: AppTheme.backgroundColor,
+                color: AppTheme.lightAccentColor,
                 fontWeight: FontWeight.bold,
               ),
               textAlign: TextAlign.center,

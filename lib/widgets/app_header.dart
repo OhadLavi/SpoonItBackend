@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:recipe_keeper/widgets/settings_panel.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:recipe_keeper/utils/translations.dart';
 
-class AppHeader extends StatefulWidget {
+class AppHeader extends ConsumerWidget {
   final String? title;
   final Widget? customContent;
   final VoidCallback? onProfileTap;
@@ -21,12 +23,7 @@ class AppHeader extends StatefulWidget {
   });
 
   @override
-  State<AppHeader> createState() => _AppHeaderState();
-}
-
-class _AppHeaderState extends State<AppHeader> {
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return ClipRRect(
       borderRadius: const BorderRadius.only(
         bottomLeft: Radius.circular(24),
@@ -48,18 +45,39 @@ class _AppHeaderState extends State<AppHeader> {
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
-                      // Left: back (optional)
-                      if (widget.showBackButton)
+                      // Left: back (optional) or profile (for English)
+                      if (showBackButton)
                         Align(
                           alignment: Alignment.centerLeft,
                           child: SizedBox(
                             width: 40,
                             height: 32,
                             child: _TopIconButton(
-                              icon: Icons.arrow_back,
+                              icon:
+                                  AppTranslations.getText(ref, 'home') == 'Home'
+                                      ? Icons.arrow_forward
+                                      : Icons.arrow_back,
                               onTap:
-                                  widget.onBackPressed ??
+                                  onBackPressed ??
                                   () => Navigator.of(context).pop(),
+                            ),
+                          ),
+                        )
+                      else if (AppTranslations.getText(ref, 'home') ==
+                          'Home') // English
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: SizedBox(
+                            width: 40,
+                            height: 32,
+                            child: Transform.translate(
+                              // Adjust vertical alignment to match logo text baseline
+                              offset: const Offset(0, 2),
+                              child: _TopProfileButton(
+                                onTap:
+                                    onProfileTap ??
+                                    () => showSettingsPanel(context),
+                              ),
                             ),
                           ),
                         ),
@@ -89,23 +107,25 @@ class _AppHeaderState extends State<AppHeader> {
                         ),
                       ),
 
-                      // Right: profile
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: SizedBox(
-                          width: 40,
-                          height: 32,
-                          child: Transform.translate(
-                            // Match logo's down-nudge for visual alignment
-                            offset: const Offset(0, 1),
-                            child: _TopProfileButton(
-                              onTap:
-                                  widget.onProfileTap ??
-                                  () => showSettingsPanel(context),
+                      // Right: profile (for Hebrew) or empty space (for English)
+                      if (AppTranslations.getText(ref, 'home') !=
+                          'Home') // Hebrew
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: SizedBox(
+                            width: 40,
+                            height: 32,
+                            child: Transform.translate(
+                              // Adjust vertical alignment to match logo text baseline
+                              offset: const Offset(0, 2),
+                              child: _TopProfileButton(
+                                onTap:
+                                    onProfileTap ??
+                                    () => showSettingsPanel(context),
+                              ),
                             ),
                           ),
                         ),
-                      ),
                     ],
                   ),
                 ),
@@ -113,13 +133,13 @@ class _AppHeaderState extends State<AppHeader> {
                 const SizedBox(height: 16),
 
                 // Search or title
-                if (widget.customContent != null)
-                  widget.customContent!
-                else if (widget.title != null)
+                if (customContent != null)
+                  customContent!
+                else if (title != null)
                   Text(
-                    widget.title!,
+                    title!,
                     style: const TextStyle(
-                      color: AppTheme.backgroundColor,
+                      color: AppTheme.lightAccentColor,
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
                       fontFamily: AppTheme.primaryFontFamily,
@@ -148,7 +168,7 @@ class _TopIconButton extends StatelessWidget {
       child: Padding(
         // 4 + 24 icon = 32 row height
         padding: const EdgeInsets.all(4),
-        child: Icon(icon, size: 24, color: AppTheme.backgroundColor),
+        child: Icon(icon, size: 24, color: AppTheme.lightAccentColor),
       ),
     );
   }
@@ -165,12 +185,12 @@ class _TopProfileButton extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        // 4 + 24 icon = 32 row height
-        padding: const EdgeInsets.all(4),
+        // 6 + 20 icon = 32 row height (adjusted for smaller icon)
+        padding: const EdgeInsets.all(6),
         child: SvgPicture.asset(
           'assets/images/profile.svg',
-          width: 24,
-          height: 24,
+          width: 20,
+          height: 20,
           colorFilter: const ColorFilter.mode(
             AppTheme.backgroundColor,
             BlendMode.srcIn,

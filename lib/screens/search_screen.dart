@@ -59,7 +59,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 const SizedBox(height: 20),
                 ListTile(
                   leading: const Icon(Icons.edit, color: AppTheme.primaryColor),
-                  title: const Text('ערוך מתכון'),
+                  title: Text(AppTranslations.getText(ref, 'edit_recipe')),
                   onTap: () {
                     Navigator.pop(context);
                     context.push('/edit-recipe/${recipe.id}');
@@ -67,7 +67,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 ),
                 ListTile(
                   leading: Icon(Icons.delete, color: AppTheme.errorColor),
-                  title: const Text('מחק מתכון'),
+                  title: Text(AppTranslations.getText(ref, 'delete_recipe')),
                   onTap: () {
                     Navigator.pop(context);
                     _showDeleteConfirmation(context, recipe);
@@ -85,14 +85,17 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       context: context,
       builder:
           (context) => AlertDialog(
-            title: const Text('מחק מתכון'),
+            title: Text(AppTranslations.getText(ref, 'delete_recipe')),
             content: Text(
-              'האם אתה בטוח שברצונך למחוק את המתכון "${recipe.title}"?',
+              AppTranslations.getText(
+                ref,
+                'delete_recipe_confirmation',
+              ).replaceAll('{recipe}', recipe.title),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('ביטול'),
+                child: Text(AppTranslations.getText(ref, 'cancel')),
               ),
               TextButton(
                 onPressed: () async {
@@ -103,8 +106,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                         .deleteRecipe(recipe.id);
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('המתכון נמחק בהצלחה'),
+                        SnackBar(
+                          content: Text(
+                            AppTranslations.getText(
+                              ref,
+                              'recipe_deleted_successfully',
+                            ),
+                          ),
                           backgroundColor: AppTheme.successColor,
                         ),
                       );
@@ -113,7 +121,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('שגיאה במחיקת המתכון: $e'),
+                          content: Text(
+                            AppTranslations.getText(
+                              ref,
+                              'error_deleting_recipe',
+                            ).replaceAll('{error}', e.toString()),
+                          ),
                           backgroundColor: AppTheme.errorColor,
                         ),
                       );
@@ -121,7 +134,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   }
                 },
                 child: Text(
-                  'מחק',
+                  AppTranslations.getText(ref, 'delete'),
                   style: TextStyle(color: AppTheme.errorColor),
                 ),
               ),
@@ -185,10 +198,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final recipesState = ref.watch(recipeStateProvider);
 
     return Scaffold(
+      extendBody: true,
       backgroundColor: AppTheme.backgroundColor,
       body: Column(
         children: [
-          const AppHeader(title: 'חיפוש'),
+          AppHeader(title: AppTranslations.getText(ref, 'search')),
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: TextField(
@@ -309,7 +323,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               } else {
                 return Expanded(
                   child: ListView.builder(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
                     itemCount: _searchResults.length,
                     itemBuilder: (context, index) {
                       final recipe = _searchResults[index];

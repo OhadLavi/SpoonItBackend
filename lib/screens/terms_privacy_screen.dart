@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:recipe_keeper/widgets/app_header.dart';
 import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:recipe_keeper/utils/translations.dart';
 
 class TermsPrivacyScreen extends ConsumerWidget {
   const TermsPrivacyScreen({super.key});
@@ -13,7 +14,7 @@ class TermsPrivacyScreen extends ConsumerWidget {
       backgroundColor: AppTheme.backgroundColor,
       body: Column(
         children: [
-          const AppHeader(title: 'תנאים והגנת פרטיות'),
+          AppHeader(title: AppTranslations.getText(ref, 'terms_privacy')),
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
@@ -21,49 +22,31 @@ class TermsPrivacyScreen extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildSection(
-                    title: 'תנאי שימוש',
-                    content: '''
-1. השימוש באפליקציה מותנה בקבלת תנאים אלו
-2. האפליקציה מיועדת לשימוש אישי בלבד
-3. אסור להפיץ תוכן פוגעני או בלתי חוקי
-4. אנו שומרים לעצמנו את הזכות לשנות תנאים אלו
-5. השימוש באפליקציה על אחריות המשתמש בלבד
-              ''',
+                    title: AppTranslations.getText(ref, 'terms_of_use'),
+                    content: AppTranslations.getText(ref, 'terms_content'),
                   ),
                   const SizedBox(height: 24),
                   _buildSection(
-                    title: 'מדיניות פרטיות',
-                    content: '''
-1. אנו אוספים מידע אישי לצורך מתן השירות
-2. המידע נשמר בצורה מאובטחת
-3. לא נמכור או נחלוק מידע עם צדדים שלישיים
-4. ניתן לבקש מחיקת המידע בכל עת
-5. אנו משתמשים בעוגיות לשיפור החוויה
-              ''',
+                    title: AppTranslations.getText(ref, 'privacy_policy'),
+                    content: AppTranslations.getText(ref, 'privacy_content'),
                   ),
                   const SizedBox(height: 24),
                   _buildSection(
-                    title: 'זכויות יוצרים',
-                    content: '''
-1. כל התוכן באפליקציה מוגן בזכויות יוצרים
-2. אסור להעתיק או להפיץ תוכן ללא רשות
-3. המשתמשים שומרים על זכויותיהם לתוכן שהם יוצרים
-4. אנו מכבדים זכויות יוצרים של אחרים
-              ''',
+                    title: AppTranslations.getText(ref, 'copyright'),
+                    content: AppTranslations.getText(ref, 'copyright_content'),
                   ),
                   const SizedBox(height: 24),
                   _buildSection(
-                    title: 'צור קשר',
-                    content: '''
-לשאלות בנושא תנאי השימוש והפרטיות:
-אימייל: privacy@recipekeeper.com
-טלפון: +972-50-123-4567
-              ''',
+                    title: AppTranslations.getText(ref, 'contact'),
+                    content: AppTranslations.getText(ref, 'contact_content'),
                   ),
                   const SizedBox(height: 32),
                   Center(
                     child: Text(
-                      'עודכן לאחרונה: ${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}',
+                      AppTranslations.getText(ref, 'last_updated').replaceAll(
+                        '{date}',
+                        '${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}',
+                      ),
                       style: TextStyle(
                         fontSize: 12,
                         color: AppTheme.secondaryTextColor,

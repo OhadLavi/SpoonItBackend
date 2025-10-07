@@ -76,7 +76,7 @@ class _ImportRecipeScreenState extends ConsumerState<ImportRecipeScreen> {
       body: Column(
         children: [
           // Header with coral background
-          const AppHeader(title: 'הוספת מתכון'),
+          AppHeader(title: AppTranslations.getText(ref, 'add_recipe_title')),
           // Main content area
           Expanded(
             child: Container(
@@ -107,7 +107,10 @@ class _ImportRecipeScreenState extends ConsumerState<ImportRecipeScreen> {
                         child: TextField(
                           controller: _urlController,
                           decoration: InputDecoration(
-                            hintText: 'הדבק לינק',
+                            hintText: AppTranslations.getText(
+                              ref,
+                              'paste_link',
+                            ),
                             errorText: _error,
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
@@ -174,8 +177,8 @@ class _ImportRecipeScreenState extends ConsumerState<ImportRecipeScreen> {
                       if (_isLoading) ...[
                         const SizedBox(height: 32),
                         // Loading state with cooking pot icon
-                        const Text(
-                          'טוען מתכון',
+                        Text(
+                          AppTranslations.getText(ref, 'loading_recipe'),
                           style: TextStyle(
                             color: AppTheme.textColor,
                             fontSize: 18,
@@ -230,7 +233,7 @@ class _RecipeFormScreenState extends ConsumerState<_RecipeFormScreen> {
       body: SafeArea(
         child: RecipeFormBase(
           initialRecipe: widget.recipe,
-          title: 'הוספת מתכון',
+          title: AppTranslations.getText(ref, 'add_recipe_title'),
           isEditing: false,
           onSuccess: () {
             Navigator.pop(context);

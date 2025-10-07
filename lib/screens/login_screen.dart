@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:recipe_keeper/providers/auth_provider.dart';
+import 'package:recipe_keeper/providers/settings_provider.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
 import 'package:recipe_keeper/utils/helpers.dart';
+import 'package:recipe_keeper/utils/translations.dart';
 import 'package:recipe_keeper/widgets/auth_widgets.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
@@ -47,9 +49,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         final authState = ref.read(authProvider);
 
         if (authState.status == AuthStatus.authenticated) {
-          if (mounted) {
-            context.go('/home');
-          }
+          if (mounted) context.go('/home');
         } else if (authState.status == AuthStatus.error) {
           if (mounted) {
             setState(() {
@@ -83,13 +83,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     try {
       await ref.read(authProvider.notifier).signInWithGoogle();
-
       final authState = ref.read(authProvider);
 
       if (authState.status == AuthStatus.authenticated) {
-        if (mounted) {
-          context.go('/home');
-        }
+        if (mounted) context.go('/home');
       } else if (authState.status == AuthStatus.error) {
         if (mounted) {
           setState(() {
@@ -116,73 +113,103 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const coralColor = AppTheme.primaryColor;
-    const mainTextColor = AppTheme.textColor;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mainTextColor = isDark ? AppTheme.darkTextColor : AppTheme.textColor;
+
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isWeb = screenWidth > 700;
+    final panelWidth = isWeb ? 500.0 : screenWidth;
+
+    final isHebrew = ref.watch(settingsProvider).language == AppLanguage.hebrew;
 
     return Scaffold(
-      backgroundColor: AppTheme.cardColor,
       body: Stack(
         children: [
-          // AuthHeader with welcome text
-          AuthHeader(
-            height: 320,
-            child: Padding(
-              padding: EdgeInsets.only(top: 100, right: 32, left: 32),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.start,
-                children: [
-                  Text(
-                    'שלום!',
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      fontFamily: AppTheme.primaryFontFamily,
-                      fontSize: 48,
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.backgroundColor,
-                      shadows: [
-                        Shadow(
-                          color: AppTheme.dividerColor.withValues(alpha: 0.26),
-                          blurRadius: 4,
-                          offset: Offset(0, 2),
-                        ),
-                      ],
-                    ),
+          // Background header band
+          const AuthHeader(height: 320, showGraphic: false),
+
+          // Icon aligned to the card's left (Hebrew) / right (English)
+          Align(
+            alignment: Alignment.topCenter,
+            child: Container(
+              width: panelWidth, // match the card width
+              margin: const EdgeInsets.only(top: 0),
+              // If you want a little inset from the card edge, uncomment the next line:
+              // padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Align(
+                alignment: isHebrew ? Alignment.topLeft : Alignment.topRight,
+                child: SvgPicture.asset(
+                  'assets/images/login.svg',
+                  width: 250,
+                  height: 250,
+                  colorFilter: ColorFilter.mode(
+                    isDark ? AppTheme.darkPrimaryColor : AppTheme.textColor,
+                    BlendMode.srcIn,
                   ),
-                  SizedBox(height: 2),
-                  Text(
-                    'ברוכים הבאים ל-SpoonIt',
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      fontFamily: AppTheme.primaryFontFamily,
-                      fontSize: 18,
-                      color: AppTheme.backgroundColor,
-                      shadows: [
-                        Shadow(
-                          color: AppTheme.dividerColor.withValues(alpha: 0.12),
-                          blurRadius: 2,
-                          offset: Offset(0, 1),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
-          // AuthPanel for the login form
+
+          // Hello text pinned to the top of the card
+          Align(
+            alignment: Alignment.topCenter,
+            child: Container(
+              width: panelWidth,
+              margin: const EdgeInsets.only(
+                top: 240 - 120,
+              ), // 240 = AuthPanel top
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Align(
+                alignment: isHebrew ? Alignment.topRight : Alignment.topLeft,
+                child: Column(
+                  crossAxisAlignment:
+                      isHebrew
+                          ? CrossAxisAlignment.start
+                          : CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      AppTranslations.getText(ref, 'hello'),
+                      style: TextStyle(
+                        fontFamily: AppTheme.primaryFontFamily,
+                        fontSize: 48,
+                        fontWeight: FontWeight.bold,
+                        color:
+                            isDark
+                                ? AppTheme.darkPrimaryColor
+                                : AppTheme.lightAccentColor,
+                      ),
+                    ),
+                    const SizedBox(height: 0),
+                    Text(
+                      AppTranslations.getText(ref, 'welcome_to_spoonit'),
+                      style: TextStyle(
+                        fontFamily: AppTheme.primaryFontFamily,
+                        fontSize: 18,
+                        color:
+                            isDark
+                                ? AppTheme.darkPrimaryColor
+                                : AppTheme.lightAccentColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // Panel with the form
           AuthPanel(
-            topMargin: 220,
+            topMargin: 240,
             child: Form(
               key: _formKey,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Title
-                  const Align(
+                  Align(
                     alignment: Alignment.centerRight,
                     child: Text(
-                      'התחברות',
+                      AppTranslations.getText(ref, 'login_title'),
                       textAlign: TextAlign.right,
                       style: TextStyle(
                         fontFamily: AppTheme.primaryFontFamily,
@@ -193,12 +220,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  // Email Field
+
+                  // Email
                   Container(
                     margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
-                      color: AppTheme.backgroundColor,
+                      color:
+                          isDark
+                              ? AppTheme.darkCardColor
+                              : AppTheme.backgroundColor,
                       borderRadius: BorderRadius.circular(24),
+                      border: Border.all(
+                        color:
+                            isDark
+                                ? AppTheme.darkDividerColor
+                                : AppTheme.dividerColor,
+                        width: 1,
+                      ),
                       boxShadow: [
                         BoxShadow(
                           color: AppTheme.dividerColor.withValues(alpha: 0.04),
@@ -218,19 +256,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           _emailController.text.isEmpty
                               ? TextDirection.rtl
                               : TextDirection.ltr,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: mainTextColor,
                         fontWeight: FontWeight.w300,
                       ),
                       onChanged: (value) => setState(() {}),
                       decoration: InputDecoration(
-                        hintText: 'אימייל',
+                        hintText: AppTranslations.getText(ref, 'email_hint'),
                         hintStyle: TextStyle(
                           color: mainTextColor,
                           fontWeight: FontWeight.w300,
                         ),
                         prefixIcon: Padding(
-                          padding: EdgeInsets.all(12.0),
+                          padding: const EdgeInsets.all(12.0),
                           child: SvgPicture.asset(
                             'assets/images/email.svg',
                             width: 18,
@@ -241,31 +279,63 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ),
                           ),
                         ),
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        errorBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedErrorBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        disabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
                           horizontal: 20,
                           vertical: 18,
                         ),
                       ),
                       validator: (value) {
                         if (value == null || value.isEmpty) {
-                          return 'יש להזין אימייל';
+                          return AppTranslations.getText(ref, 'email_required');
                         }
                         if (!Helpers.isValidEmail(value)) {
-                          return 'אימייל לא תקין';
+                          return AppTranslations.getText(ref, 'invalid_email');
                         }
                         return null;
                       },
                     ),
                   ),
-                  // Password Field
+
+                  // Password
                   Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     decoration: BoxDecoration(
-                      color: AppTheme.backgroundColor,
+                      color:
+                          isDark
+                              ? AppTheme.darkCardColor
+                              : AppTheme.backgroundColor,
                       borderRadius: BorderRadius.circular(24),
+                      border: Border.all(
+                        color:
+                            isDark
+                                ? AppTheme.darkDividerColor
+                                : AppTheme.dividerColor,
+                        width: 1,
+                      ),
                       boxShadow: [
                         BoxShadow(
                           color: AppTheme.dividerColor.withValues(alpha: 0.04),
@@ -285,19 +355,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           _passwordController.text.isEmpty
                               ? TextDirection.rtl
                               : TextDirection.ltr,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: mainTextColor,
                         fontWeight: FontWeight.w300,
                       ),
                       onChanged: (value) => setState(() {}),
                       decoration: InputDecoration(
-                        hintText: 'סיסמה',
+                        hintText: AppTranslations.getText(ref, 'password_hint'),
                         hintStyle: TextStyle(
                           color: mainTextColor,
                           fontWeight: FontWeight.w300,
                         ),
                         prefixIcon: Padding(
-                          padding: EdgeInsets.all(12.0),
+                          padding: const EdgeInsets.all(12.0),
                           child: SvgPicture.asset(
                             'assets/images/password.svg',
                             width: 18,
@@ -322,9 +392,30 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             });
                           },
                         ),
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        errorBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedErrorBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        disabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 20,
                           vertical: 18,
@@ -332,13 +423,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                       validator: (value) {
                         if (value == null || value.isEmpty) {
-                          return 'יש להזין סיסמה';
+                          return AppTranslations.getText(
+                            ref,
+                            'password_required',
+                          );
                         }
                         return null;
                       },
                     ),
                   ),
-                  // Error Message Display
+
+                  // Error
                   if (_errorMessage != null) ...[
                     const SizedBox(height: 8),
                     Container(
@@ -372,30 +467,32 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                     ),
                   ],
-                  // Forgot Password Link (left)
+
+                  // Forgot
                   Align(
                     alignment: Alignment.centerLeft,
                     child: TextButton(
                       onPressed: () {
                         // TODO: Implement password reset
                       },
-                      child: const Text(
-                        'שכחתי סיסמה',
+                      child: Text(
+                        AppTranslations.getText(ref, 'forgot_password_link'),
                         style: TextStyle(color: mainTextColor, fontSize: 14),
                       ),
                     ),
                   ),
                   const SizedBox(height: 8),
-                  // Login Button
+
+                  // Login button
                   SizedBox(
                     height: 44,
                     child: ElevatedButton(
                       onPressed:
                           _isLoading ? null : _signInWithEmailAndPassword,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: coralColor,
+                        backgroundColor: AppTheme.primaryColor,
                         foregroundColor: AppTheme.backgroundColor,
-                        disabledBackgroundColor: coralColor,
+                        disabledBackgroundColor: AppTheme.primaryColor,
                         disabledForegroundColor: AppTheme.backgroundColor,
                         shadowColor: Colors.transparent,
                         elevation: 0,
@@ -408,18 +505,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           fontSize: 18,
                         ),
                       ),
-                      child: const Text('התחבר'),
+                      child: Text(AppTranslations.getText(ref, 'login_button')),
                     ),
                   ),
                   const SizedBox(height: 16),
+
                   // Divider with text
                   Row(
                     children: [
                       const Expanded(child: Divider()),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 8),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
                         child: Text(
-                          'אפשר להתחבר גם עם',
+                          AppTranslations.getText(ref, 'login_with'),
                           style: TextStyle(
                             fontFamily: AppTheme.primaryFontFamily,
                             color: mainTextColor,
@@ -431,11 +529,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  // Social Login Buttons
+
+                  // Socials
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // Facebook
+                      // Facebook (stub)
                       InkWell(
                         onTap: () {
                           // TODO: Implement Facebook login
@@ -467,6 +566,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ),
                       ),
                       const SizedBox(width: 16),
+
                       // Google
                       InkWell(
                         onTap: _isLoading ? null : _signInWithGoogle,
@@ -499,12 +599,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  // Register Link
+
+                  // Register link
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Text(
-                        'רוצה לשמור מתכונים? ',
+                      Text(
+                        AppTranslations.getText(ref, 'want_to_save_recipes'),
                         style: TextStyle(
                           color: mainTextColor,
                           fontFamily: AppTheme.primaryFontFamily,
@@ -512,13 +613,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ),
                       ),
                       GestureDetector(
-                        onTap: () {
-                          context.go('/register');
-                        },
-                        child: const Text(
-                          'הרשמה בכיף',
+                        onTap: () => context.go('/register'),
+                        child: Text(
+                          AppTranslations.getText(ref, 'register_fun'),
                           style: TextStyle(
-                            color: coralColor,
+                            color: AppTheme.primaryColor,
                             fontWeight: FontWeight.bold,
                             fontFamily: AppTheme.primaryFontFamily,
                             fontSize: 14,

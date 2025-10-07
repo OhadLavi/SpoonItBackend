@@ -4,6 +4,7 @@ import 'package:recipe_keeper/services/category_service.dart';
 import 'package:recipe_keeper/models/category.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:recipe_keeper/utils/translations.dart';
 import 'package:recipe_keeper/services/category_icon_service.dart';
 
 class AddCategoryDialog extends ConsumerStatefulWidget {
@@ -22,14 +23,14 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
   String? _errorMessage;
 
   // Available SVG icons for categories - only these 7 icons
-  final List<Map<String, dynamic>> _availableIcons = const [
-    {'name': 'bread', 'label': 'לחמים'},
-    {'name': 'cookies', 'label': 'עוגיות'},
-    {'name': 'cakes', 'label': 'עוגות'},
-    {'name': 'salads', 'label': 'סלטים'},
-    {'name': 'sides', 'label': 'תוספות'},
-    {'name': 'main', 'label': 'מנה עיקרית'},
-    {'name': 'pastries', 'label': 'מאפים'},
+  List<Map<String, dynamic>> _availableIcons(WidgetRef ref) => [
+    {'name': 'bread', 'label': AppTranslations.getText(ref, 'bread')},
+    {'name': 'cookies', 'label': AppTranslations.getText(ref, 'cookies')},
+    {'name': 'cakes', 'label': AppTranslations.getText(ref, 'cakes')},
+    {'name': 'salads', 'label': AppTranslations.getText(ref, 'salads')},
+    {'name': 'sides', 'label': AppTranslations.getText(ref, 'sides')},
+    {'name': 'main', 'label': AppTranslations.getText(ref, 'main_dish')},
+    {'name': 'pastries', 'label': AppTranslations.getText(ref, 'pastries')},
   ];
 
   @override
@@ -68,7 +69,9 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
       backgroundColor: AppTheme.backgroundColor,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: Text(
-        widget.categoryToEdit != null ? 'ערוך קטגוריה' : 'הוסף קטגוריה חדשה',
+        widget.categoryToEdit != null
+            ? AppTranslations.getText(ref, 'edit_category')
+            : AppTranslations.getText(ref, 'add_new_category'),
         style: const TextStyle(
           color: AppTheme.textColor,
           fontFamily: AppTheme.secondaryFontFamily,
@@ -93,8 +96,11 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
                 child: TextField(
                   controller: _nameController,
                   decoration: InputDecoration(
-                    labelText: 'שם הקטגוריה',
-                    hintText: 'הכנס שם לקטגוריה',
+                    labelText: AppTranslations.getText(ref, 'category_name'),
+                    hintText: AppTranslations.getText(
+                      ref,
+                      'enter_category_name',
+                    ),
                     labelStyle: const TextStyle(
                       color: AppTheme.textColor,
                       fontFamily: AppTheme.secondaryFontFamily,
@@ -168,8 +174,8 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
                 const SizedBox(height: 12),
               ],
 
-              const Text(
-                'בחר אייקון',
+              Text(
+                AppTranslations.getText(ref, 'select_icon'),
                 style: TextStyle(
                   color: AppTheme.textColor,
                   fontFamily: AppTheme.secondaryFontFamily,
@@ -189,9 +195,9 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
                   crossAxisSpacing: 8,
                   mainAxisSpacing: 8,
                 ),
-                itemCount: _availableIcons.length,
+                itemCount: _availableIcons(ref).length,
                 itemBuilder: (context, index) {
-                  final iconData = _availableIcons[index];
+                  final iconData = _availableIcons(ref)[index];
                   final bool isSelected = _selectedIcon == iconData['name'];
 
                   return GestureDetector(
@@ -237,8 +243,8 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
       actions: [
         TextButton(
           onPressed: _isLoading ? null : () => Navigator.pop(context),
-          child: const Text(
-            'ביטול',
+          child: Text(
+            AppTranslations.getText(ref, 'cancel'),
             style: TextStyle(
               color: AppTheme.textColor,
               fontFamily: AppTheme.secondaryFontFamily,
@@ -268,7 +274,9 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
                     ),
                   )
                   : Text(
-                    widget.categoryToEdit != null ? 'עדכן' : 'הוסף',
+                    widget.categoryToEdit != null
+                        ? AppTranslations.getText(ref, 'update')
+                        : AppTranslations.getText(ref, 'add'),
                     style: const TextStyle(
                       fontFamily: AppTheme.secondaryFontFamily,
                       fontWeight: FontWeight.bold,
@@ -282,7 +290,10 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
   Future<void> _createCategory() async {
     if (_nameController.text.trim().isEmpty) {
       setState(() {
-        _errorMessage = 'אנא הכנס שם לקטגוריה';
+        _errorMessage = AppTranslations.getText(
+          ref,
+          'please_enter_category_name',
+        );
       });
       return;
     }
@@ -295,7 +306,7 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        throw Exception('משתמש לא מחובר');
+        throw Exception(AppTranslations.getText(ref, 'user_not_logged_in'));
       }
 
       final categoryService = CategoryService();
@@ -314,8 +325,8 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
           Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: const Text(
-                'הקטגוריה עודכנה בהצלחה!',
+              content: Text(
+                AppTranslations.getText(ref, 'category_updated_successfully'),
                 style: TextStyle(fontFamily: AppTheme.secondaryFontFamily),
               ),
               backgroundColor: AppTheme.primaryColor,
@@ -336,8 +347,8 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
           Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: const Text(
-                'הקטגוריה נוספה בהצלחה!',
+              content: Text(
+                AppTranslations.getText(ref, 'category_added_successfully'),
                 style: TextStyle(fontFamily: AppTheme.secondaryFontFamily),
               ),
               backgroundColor: AppTheme.primaryColor,
@@ -350,8 +361,14 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
         setState(() {
           _errorMessage =
               widget.categoryToEdit != null
-                  ? 'שגיאה בעדכון הקטגוריה: ${e.toString()}'
-                  : 'שגיאה בהוספת הקטגוריה: ${e.toString()}';
+                  ? AppTranslations.getText(
+                    ref,
+                    'error_updating_category',
+                  ).replaceAll('{error}', e.toString())
+                  : AppTranslations.getText(
+                    ref,
+                    'error_adding_category',
+                  ).replaceAll('{error}', e.toString());
         });
       }
     } finally {

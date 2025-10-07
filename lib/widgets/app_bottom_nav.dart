@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:recipe_keeper/utils/translations.dart';
+import 'package:recipe_keeper/providers/settings_provider.dart';
 
-class AppBottomNav extends StatelessWidget {
+class AppBottomNav extends ConsumerWidget {
   final int currentIndex;
 
   const AppBottomNav({super.key, this.currentIndex = -1});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return SafeArea(
       top: false,
       child: SizedBox(
@@ -29,11 +32,17 @@ class AppBottomNav extends StatelessWidget {
                     children: [
                       // Home
                       Expanded(
-                        child: _navBarItem(null, 'בית', currentIndex == 0, () {
-                          if (currentIndex != 0) {
-                            context.go('/home');
-                          }
-                        }),
+                        child: _navBarItem(
+                          null,
+                          AppTranslations.getText(ref, 'home'),
+                          currentIndex == 0,
+                          () {
+                            if (currentIndex != 0) {
+                              context.go('/home');
+                            }
+                          },
+                          ref,
+                        ),
                       ),
                       // Empty space for FAB
                       const SizedBox(width: 80),
@@ -41,13 +50,14 @@ class AppBottomNav extends StatelessWidget {
                       Expanded(
                         child: _navBarItem(
                           null,
-                          'רשימת קניות',
+                          AppTranslations.getText(ref, 'shopping_list_nav'),
                           currentIndex == 1,
                           () {
                             if (currentIndex != 1) {
                               context.go('/shopping-list');
                             }
                           },
+                          ref,
                         ),
                       ),
                     ],
@@ -65,7 +75,7 @@ class AppBottomNav extends StatelessWidget {
                 child: MouseRegion(
                   cursor: SystemMouseCursors.click,
                   child: GestureDetector(
-                    onTap: () => _showAddRecipeOptions(context),
+                    onTap: () => _showAddRecipeOptions(context, ref),
                     child: Container(
                       height: 56,
                       width: 56,
@@ -83,7 +93,7 @@ class AppBottomNav extends StatelessWidget {
                       child: const Center(
                         child: Icon(
                           Icons.add,
-                          color: AppTheme.backgroundColor,
+                          color: AppTheme.lightAccentColor,
                           size: 30,
                         ),
                       ),
@@ -103,6 +113,7 @@ class AppBottomNav extends StatelessWidget {
     String label,
     bool selected,
     VoidCallback onTap,
+    WidgetRef ref,
   ) {
     return InkWell(
       onTap: onTap,
@@ -120,7 +131,7 @@ class AppBottomNav extends StatelessWidget {
                 width: 20,
                 height: 20,
                 child: SvgPicture.asset(
-                  label == 'בית'
+                  label == AppTranslations.getText(ref, 'home')
                       ? 'assets/images/home.svg'
                       : 'assets/images/list_alt.svg',
                   colorFilter: const ColorFilter.mode(
@@ -145,7 +156,11 @@ class AppBottomNav extends StatelessWidget {
     );
   }
 
-  void _showAddRecipeOptions(BuildContext context) {
+  void _showAddRecipeOptions(BuildContext context, WidgetRef ref) {
+    // Check if we're in English mode
+    final isEnglish =
+        ref.read(settingsProvider).language == AppLanguage.english;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.backgroundColor,
@@ -154,7 +169,7 @@ class AppBottomNav extends StatelessWidget {
       ),
       builder:
           (context) => Directionality(
-            textDirection: TextDirection.rtl,
+            textDirection: isEnglish ? TextDirection.ltr : TextDirection.rtl,
             child: Container(
               decoration: const BoxDecoration(
                 color: AppTheme.backgroundColor,
@@ -165,9 +180,9 @@ class AppBottomNav extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text(
-                      'הוסף מתכון',
-                      style: TextStyle(
+                    Text(
+                      AppTranslations.getText(ref, 'add_recipe'),
+                      style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
                         fontFamily: AppTheme.primaryFontFamily,
@@ -180,9 +195,9 @@ class AppBottomNav extends StatelessWidget {
                         Icons.edit,
                         color: AppTheme.primaryColor,
                       ),
-                      title: const Text(
-                        'צור מתכון חדש',
-                        style: TextStyle(
+                      title: Text(
+                        AppTranslations.getText(ref, 'create_new_recipe'),
+                        style: const TextStyle(
                           fontFamily: AppTheme.primaryFontFamily,
                           color: AppTheme.textColor,
                         ),
@@ -197,9 +212,9 @@ class AppBottomNav extends StatelessWidget {
                         Icons.link,
                         color: AppTheme.primaryColor,
                       ),
-                      title: const Text(
-                        'ייבא מקישור',
-                        style: TextStyle(
+                      title: Text(
+                        AppTranslations.getText(ref, 'import_recipe'),
+                        style: const TextStyle(
                           fontFamily: AppTheme.primaryFontFamily,
                           color: AppTheme.textColor,
                         ),
@@ -214,9 +229,9 @@ class AppBottomNav extends StatelessWidget {
                         Icons.camera_alt,
                         color: AppTheme.primaryColor,
                       ),
-                      title: const Text(
-                        'סרוק מתכון',
-                        style: TextStyle(
+                      title: Text(
+                        AppTranslations.getText(ref, 'scan_recipe'),
+                        style: const TextStyle(
                           fontFamily: AppTheme.primaryFontFamily,
                           color: AppTheme.textColor,
                         ),

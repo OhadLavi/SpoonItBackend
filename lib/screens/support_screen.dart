@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:recipe_keeper/widgets/app_header.dart';
 import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:recipe_keeper/utils/translations.dart';
 
 class SupportScreen extends ConsumerStatefulWidget {
   const SupportScreen({super.key});
@@ -30,20 +31,20 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
       backgroundColor: AppTheme.backgroundColor,
       body: Column(
         children: [
-          const AppHeader(title: 'תמיכה'),
+          AppHeader(title: AppTranslations.getText(ref, 'support_title')),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
                 _buildSupportCard(
                   icon: Icons.email,
-                  title: 'צור קשר',
-                  subtitle: 'שלח לנו אימייל',
+                  title: AppTranslations.getText(ref, 'contact_us'),
+                  subtitle: AppTranslations.getText(ref, 'send_us_email'),
                   onTap: () => _showEmailDialog(context),
                 ),
                 const SizedBox(height: 24),
-                const Text(
-                  'שאלות נפוצות',
+                Text(
+                  AppTranslations.getText(ref, 'frequently_asked_questions'),
                   style: TextStyle(
                     color: AppTheme.textColor,
                     fontFamily: AppTheme.secondaryFontFamily,
@@ -53,28 +54,55 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                 ),
                 const SizedBox(height: 16),
                 _buildFAQItem(
-                  question: 'איך מוסיפים מתכון חדש?',
-                  answer: 'לחץ על הכפתור + בתחתית המסך ובחר "צור מתכון חדש"',
+                  question: AppTranslations.getText(
+                    ref,
+                    'how_to_add_new_recipe',
+                  ),
+                  answer: AppTranslations.getText(
+                    ref,
+                    'how_to_add_new_recipe_answer',
+                  ),
                 ),
                 const SizedBox(height: 16),
                 _buildFAQItem(
-                  question: 'איך שומרים מתכון כמועדף?',
-                  answer: 'לחץ על הלב במתכון כדי להוסיף אותו למועדפים',
+                  question: AppTranslations.getText(
+                    ref,
+                    'how_to_save_favorite',
+                  ),
+                  answer: AppTranslations.getText(
+                    ref,
+                    'how_to_save_favorite_answer',
+                  ),
                 ),
                 const SizedBox(height: 16),
                 _buildFAQItem(
-                  question: 'איך מחפשים מתכונים?',
-                  answer: 'השתמש בשדה החיפוש בראש המסך הראשי',
+                  question: AppTranslations.getText(
+                    ref,
+                    'how_to_search_recipes',
+                  ),
+                  answer: AppTranslations.getText(
+                    ref,
+                    'how_to_search_recipes_answer',
+                  ),
                 ),
                 const SizedBox(height: 16),
                 _buildFAQItem(
-                  question: 'איך מייבאים מתכון מקישור?',
-                  answer: 'לחץ על הכפתור + ובחר "ייבא מקישור"',
+                  question: AppTranslations.getText(
+                    ref,
+                    'how_to_import_from_url',
+                  ),
+                  answer: AppTranslations.getText(
+                    ref,
+                    'how_to_import_from_url_answer',
+                  ),
                 ),
                 const SizedBox(height: 16),
                 _buildFAQItem(
-                  question: 'איך סורקים מתכון מתמונה?',
-                  answer: 'לחץ על הכפתור + ובחר "סרוק מתכון"',
+                  question: AppTranslations.getText(ref, 'how_to_scan_recipe'),
+                  answer: AppTranslations.getText(
+                    ref,
+                    'how_to_scan_recipe_answer',
+                  ),
                 ),
               ],
             ),
@@ -143,8 +171,8 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  title: const Text(
-                    'צור קשר',
+                  title: Text(
+                    AppTranslations.getText(ref, 'contact_us_title'),
                     style: TextStyle(
                       color: AppTheme.textColor,
                       fontFamily: AppTheme.secondaryFontFamily,
@@ -161,7 +189,10 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                             width: double.infinity,
                             padding: const EdgeInsets.symmetric(vertical: 8),
                             child: Text(
-                              'שלח לנו אימייל לתמיכה טכנית',
+                              AppTranslations.getText(
+                                ref,
+                                'send_technical_support_email',
+                              ),
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 color: AppTheme.textColor.withOpacity(0.8),
@@ -181,7 +212,10 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                             child: TextField(
                               controller: _titleController,
                               decoration: InputDecoration(
-                                labelText: 'כותרת',
+                                labelText: AppTranslations.getText(
+                                  ref,
+                                  'title',
+                                ),
                                 labelStyle: const TextStyle(
                                   color: AppTheme.textColor,
                                   fontFamily: AppTheme.secondaryFontFamily,
@@ -224,7 +258,10 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                             child: TextField(
                               controller: _messageController,
                               decoration: InputDecoration(
-                                labelText: 'הודעה',
+                                labelText: AppTranslations.getText(
+                                  ref,
+                                  'message',
+                                ),
                                 labelStyle: const TextStyle(
                                   color: AppTheme.textColor,
                                   fontFamily: AppTheme.secondaryFontFamily,
@@ -266,8 +303,8 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                                 _isNotRobot = value ?? false;
                               });
                             },
-                            title: const Text(
-                              'אני לא רובוט',
+                            title: Text(
+                              AppTranslations.getText(ref, 'i_am_not_robot'),
                               style: TextStyle(
                                 color: AppTheme.textColor,
                                 fontFamily: AppTheme.secondaryFontFamily,
@@ -284,8 +321,8 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                   actions: [
                     TextButton(
                       onPressed: () => Navigator.pop(context),
-                      child: const Text(
-                        'ביטול',
+                      child: Text(
+                        AppTranslations.getText(ref, 'cancel'),
                         style: TextStyle(
                           color: AppTheme.textColor,
                           fontFamily: AppTheme.secondaryFontFamily,
@@ -310,8 +347,8 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
-                      child: const Text(
-                        'שלח אימייל',
+                      child: Text(
+                        AppTranslations.getText(ref, 'send_email'),
                         style: TextStyle(
                           fontFamily: AppTheme.secondaryFontFamily,
                           fontWeight: FontWeight.bold,
@@ -330,7 +367,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
     final String title = _titleController.text.trim();
     final String message = _messageController.text.trim();
 
-    String subject = 'תמיכה טכנית - Recipe Keeper';
+    String subject = AppTranslations.getText(ref, 'technical_support_subject');
     if (title.isNotEmpty) {
       subject = title;
     }
@@ -338,7 +375,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
     String body =
         message.isNotEmpty
             ? message
-            : 'שלום,\n\nאני זקוק לתמיכה טכנית.\n\nתודה!';
+            : AppTranslations.getText(ref, 'default_support_message');
 
     final Uri emailUri = Uri(
       scheme: 'mailto',
@@ -351,8 +388,8 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
       await launchUrl(emailUri);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('לא ניתן לפתוח אפליקציית אימייל'),
+        SnackBar(
+          content: Text(AppTranslations.getText(ref, 'cannot_open_email_app')),
           backgroundColor: AppTheme.primaryColor,
         ),
       );

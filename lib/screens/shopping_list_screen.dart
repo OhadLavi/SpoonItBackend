@@ -6,6 +6,7 @@ import 'package:recipe_keeper/utils/app_theme.dart';
 import 'package:recipe_keeper/services/shopping_list_service.dart';
 import 'package:recipe_keeper/providers/auth_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:recipe_keeper/utils/translations.dart';
 
 class ShoppingListScreen extends ConsumerStatefulWidget {
   const ShoppingListScreen({super.key});
@@ -40,10 +41,33 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
     }
 
     return Scaffold(
+      extendBody: true,
       backgroundColor: AppTheme.backgroundColor,
       body: Column(
         children: [
-          const AppHeader(title: 'רשימת הקניות'),
+          StreamBuilder<List<ShoppingItem>>(
+            stream: _shoppingListService.getShoppingList(userId),
+            builder: (context, snapshot) {
+              final itemCount = snapshot.hasData ? snapshot.data!.length : 0;
+              return AppHeader(
+                title: AppTranslations.getText(ref, 'shopping_list_title'),
+                customContent:
+                    itemCount > 0
+                        ? Text(
+                          AppTranslations.getText(
+                            ref,
+                            'items_count',
+                          ).replaceAll('{count}', itemCount.toString()),
+                          style: const TextStyle(
+                            color: AppTheme.lightAccentColor,
+                            fontSize: 14,
+                            fontFamily: AppTheme.primaryFontFamily,
+                          ),
+                        )
+                        : null,
+              );
+            },
+          ),
           // Action buttons row
           StreamBuilder<List<ShoppingItem>>(
             stream: _shoppingListService.getShoppingList(userId),
@@ -63,14 +87,14 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
                     TextButton.icon(
                       onPressed: () => _clearCheckedItems(userId),
                       icon: const Icon(Icons.clear_all, size: 20),
-                      label: const Text(
-                        'נקה פריטים שסומנו',
+                      label: Text(
+                        AppTranslations.getText(ref, 'clear_checked_items'),
                         style: TextStyle(
                           fontFamily: AppTheme.primaryFontFamily,
                         ),
                       ),
                       style: TextButton.styleFrom(
-                        foregroundColor: AppTheme.primaryColor,
+                        foregroundColor: AppTheme.secondaryTextColor,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -78,10 +102,10 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
                     IconButton(
                       icon: const Icon(
                         Icons.share,
-                        color: AppTheme.primaryColor,
+                        color: AppTheme.secondaryTextColor,
                       ),
                       onPressed: () => _shareShoppingList(snapshot.data!),
-                      tooltip: 'שתף רשימה',
+                      tooltip: AppTranslations.getText(ref, 'share_list'),
                     ),
                   ],
                 ),
@@ -97,8 +121,11 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
                   child: TextField(
                     controller: _itemController,
                     textDirection: TextDirection.rtl,
-                    decoration: const InputDecoration(
-                      hintText: 'הוסף פריט לרשימה',
+                    decoration: InputDecoration(
+                      hintText: AppTranslations.getText(
+                        ref,
+                        'add_item_to_list',
+                      ),
                       border: OutlineInputBorder(),
                     ),
                     onSubmitted:
@@ -134,7 +161,7 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
                 final items = snapshot.data ?? [];
 
                 if (items.isEmpty) {
-                  return const Center(
+                  return Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -145,7 +172,7 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
                         ),
                         SizedBox(height: 16),
                         Text(
-                          'הרשימה ריקה',
+                          AppTranslations.getText(ref, 'list_is_empty'),
                           style: TextStyle(
                             fontSize: 18,
                             color: AppTheme.secondaryTextColor,
@@ -153,7 +180,10 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
                           ),
                         ),
                         Text(
-                          'הוסף פריטים לרשימת הקניות',
+                          AppTranslations.getText(
+                            ref,
+                            'add_items_to_shopping_list',
+                          ),
                           style: TextStyle(
                             fontSize: 14,
                             color: AppTheme.secondaryTextColor,
@@ -223,7 +253,7 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'הפריט נוסף לרשימה',
+              AppTranslations.getText(ref, 'item_added_to_list'),
               textAlign: TextAlign.right,
               style: const TextStyle(fontFamily: AppTheme.primaryFontFamily),
             ),
@@ -234,17 +264,32 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
       }
     } catch (e) {
       if (mounted) {
+        String errorMessage;
+        Color backgroundColor;
+
+        if (e.toString().contains('Shopping list limit reached')) {
+          errorMessage = AppTranslations.getText(ref, 'shopping_list_full');
+          backgroundColor = AppTheme.warningColor;
+        } else if (e.toString().contains('already exists')) {
+          errorMessage = AppTranslations.getText(ref, 'item_already_in_list');
+          backgroundColor = AppTheme.primaryColor.withOpacity(0.8);
+        } else {
+          errorMessage = AppTranslations.getText(
+            ref,
+            'error_adding_item_generic',
+          );
+          backgroundColor = AppTheme.errorColor;
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              e.toString().contains('already exists')
-                  ? 'הפריט כבר קיים ברשימה'
-                  : 'שגיאה בהוספת הפריט',
+              errorMessage,
               textAlign: TextAlign.right,
               style: const TextStyle(fontFamily: AppTheme.primaryFontFamily),
             ),
-            backgroundColor: AppTheme.errorColor,
-            duration: const Duration(seconds: 2),
+            backgroundColor: backgroundColor,
+            duration: const Duration(seconds: 3),
           ),
         );
       }
@@ -259,7 +304,7 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'שגיאה בעדכון הפריט',
+              AppTranslations.getText(ref, 'error_updating_item'),
               textAlign: TextAlign.right,
               style: const TextStyle(fontFamily: AppTheme.primaryFontFamily),
             ),
@@ -278,7 +323,7 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'שגיאה במחיקת הפריט',
+              AppTranslations.getText(ref, 'error_deleting_item'),
               textAlign: TextAlign.right,
               style: const TextStyle(fontFamily: AppTheme.primaryFontFamily),
             ),
@@ -295,8 +340,8 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text(
-              'הפריטים שסומנו נמחקו',
+            content: Text(
+              AppTranslations.getText(ref, 'checked_items_deleted'),
               textAlign: TextAlign.right,
               style: TextStyle(fontFamily: AppTheme.primaryFontFamily),
             ),
@@ -310,7 +355,7 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'שגיאה במחיקת הפריטים',
+              AppTranslations.getText(ref, 'error_deleting_items'),
               textAlign: TextAlign.right,
               style: const TextStyle(fontFamily: AppTheme.primaryFontFamily),
             ),
@@ -323,14 +368,16 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
 
   void _shareShoppingList(List<ShoppingItem> items) {
     final StringBuffer shareText = StringBuffer();
-    shareText.writeln('🛒 רשימת קניות');
+    shareText.writeln(
+      '🛒 ${AppTranslations.getText(ref, 'shopping_list_share_title')}',
+    );
     shareText.writeln();
 
     final uncheckedItems = items.where((item) => !item.isChecked).toList();
     final checkedItems = items.where((item) => item.isChecked).toList();
 
     if (uncheckedItems.isNotEmpty) {
-      shareText.writeln('פריטים לקנות:');
+      shareText.writeln('${AppTranslations.getText(ref, 'items_to_buy')}:');
       for (int i = 0; i < uncheckedItems.length; i++) {
         shareText.writeln('☐ ${uncheckedItems[i].name}');
       }
@@ -338,14 +385,16 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
     }
 
     if (checkedItems.isNotEmpty) {
-      shareText.writeln('פריטים שנקנו:');
+      shareText.writeln('${AppTranslations.getText(ref, 'items_bought')}:');
       for (int i = 0; i < checkedItems.length; i++) {
         shareText.writeln('☑ ${checkedItems[i].name}');
       }
       shareText.writeln();
     }
 
-    shareText.writeln('שיתוף מ-Recipe Keeper');
+    shareText.writeln(
+      AppTranslations.getText(ref, 'shared_from_recipe_keeper'),
+    );
 
     Share.share(shareText.toString());
   }

@@ -128,7 +128,7 @@ class ValidationService {
           message,
           style: TextStyle(
             fontFamily: AppTheme.primaryFontFamily,
-            color: AppTheme.backgroundColor,
+            color: AppTheme.lightAccentColor,
           ),
         ),
         backgroundColor: AppTheme.errorColor,
@@ -147,7 +147,7 @@ class ValidationService {
           message,
           style: TextStyle(
             fontFamily: AppTheme.primaryFontFamily,
-            color: AppTheme.backgroundColor,
+            color: AppTheme.lightAccentColor,
           ),
         ),
         backgroundColor: AppTheme.successColor,

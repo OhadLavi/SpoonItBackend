@@ -3,8 +3,10 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:recipe_keeper/providers/auth_provider.dart';
+import 'package:recipe_keeper/providers/settings_provider.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
 import 'dart:developer' as developer;
+import 'package:recipe_keeper/utils/translations.dart';
 
 class SettingsMenu extends ConsumerWidget {
   const SettingsMenu({super.key, required this.hostContext});
@@ -43,6 +45,10 @@ class SettingsMenu extends ConsumerWidget {
     final name = authState.user?.displayName.trim();
     final email = authState.user?.email.trim();
 
+    // Check if we're in English mode
+    final isEnglish =
+        ref.read(settingsProvider).language == AppLanguage.english;
+
     // Debug logging
     developer.log(
       'SettingsMenu: Auth State: ${authState.status}',
@@ -65,8 +71,10 @@ class SettingsMenu extends ConsumerWidget {
             child: MouseRegion(
               cursor: SystemMouseCursors.click,
               child: Text(
-                (name?.isNotEmpty ?? false) ? name! : 'משתמש',
-                textAlign: TextAlign.right,
+                (name?.isNotEmpty ?? false)
+                    ? name!
+                    : AppTranslations.getText(ref, 'user'),
+                textAlign: isEnglish ? TextAlign.left : TextAlign.right,
                 style: const TextStyle(
                   fontSize: 34.58,
                   fontWeight: FontWeight.w600,
@@ -79,7 +87,7 @@ class SettingsMenu extends ConsumerWidget {
           const SizedBox(height: 2),
           Text(
             email ?? '',
-            textAlign: TextAlign.right,
+            textAlign: isEnglish ? TextAlign.left : TextAlign.right,
             style: const TextStyle(
               fontSize: 17.29,
               fontFamily: AppTheme.primaryFontFamily,
@@ -98,18 +106,21 @@ class SettingsMenu extends ConsumerWidget {
       children: [
         _buildSettingsMenuItem(
           svgAsset: 'assets/images/profile.svg',
-          title: 'החשבון שלי',
+          title: AppTranslations.getText(ref, 'my_account'),
           onTap: () => _closeAndGo('/profile'),
+          ref: ref,
         ),
         _buildSettingsMenuItem(
           svgAsset: 'assets/images/home.svg',
-          title: 'המתכונים שלי',
+          title: AppTranslations.getText(ref, 'my_recipes'),
           onTap: () => _closeAndGo('/my-recipes'),
+          ref: ref,
         ),
         _buildSettingsMenuItem(
           svgAsset: 'assets/images/list_alt.svg',
-          title: 'רשימת הקניות',
+          title: AppTranslations.getText(ref, 'shopping_list'),
           onTap: () => _closeAndGo('/shopping-list'),
+          ref: ref,
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 28, 12),
@@ -121,13 +132,15 @@ class SettingsMenu extends ConsumerWidget {
         ),
         _buildSettingsMenuItem(
           svgAsset: 'assets/images/help_outline.svg',
-          title: 'תמיכה',
+          title: AppTranslations.getText(ref, 'support'),
           onTap: () => _closeAndGo('/support'),
+          ref: ref,
         ),
         _buildSettingsMenuItem(
           svgAsset: 'assets/images/article_outline.svg',
-          title: 'תנאים והגנת פרטיות',
+          title: AppTranslations.getText(ref, 'terms_and_privacy'),
           onTap: () => _closeAndGo('/terms-privacy'),
+          ref: ref,
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 28, 12),
@@ -139,7 +152,7 @@ class SettingsMenu extends ConsumerWidget {
         ),
         _buildSettingsMenuItem(
           svgAsset: 'assets/images/logout.svg',
-          title: 'התנתקות',
+          title: AppTranslations.getText(ref, 'logout'),
           onTap: () async {
             final navigator = Navigator.of(hostContext, rootNavigator: true);
             final router = GoRouter.of(hostContext);
@@ -147,6 +160,7 @@ class SettingsMenu extends ConsumerWidget {
             await ref.read(authProvider.notifier).signOut();
             router.go('/login');
           },
+          ref: ref,
         ),
         const SizedBox(height: 10),
       ],
@@ -158,7 +172,13 @@ class SettingsMenu extends ConsumerWidget {
     String? svgAsset,
     required String title,
     required VoidCallback onTap,
+    WidgetRef? ref,
   }) {
+    // Check if we're in English mode
+    final isEnglish =
+        ref != null &&
+        ref.read(settingsProvider).language == AppLanguage.english;
+
     return InkWell(
       onTap: onTap,
       child: Padding(
@@ -169,13 +189,21 @@ class SettingsMenu extends ConsumerWidget {
               SizedBox(
                 width: 20,
                 height: 20,
-                child: SvgPicture.asset(
-                  svgAsset,
-                  colorFilter: ColorFilter.mode(
-                    AppTheme.lightAccentColor.withValues(alpha: 0.6),
-                    BlendMode.srcIn,
+                child: Transform(
+                  alignment: Alignment.center,
+                  transform:
+                      svgAsset == 'assets/images/logout.svg' && isEnglish
+                          ? (Matrix4.identity()
+                            ..scale(-1.0, 1.0)) // Flip logout icon for English
+                          : Matrix4.identity(),
+                  child: SvgPicture.asset(
+                    svgAsset,
+                    colorFilter: ColorFilter.mode(
+                      AppTheme.lightAccentColor.withValues(alpha: 0.6),
+                      BlendMode.srcIn,
+                    ),
+                    fit: BoxFit.contain,
                   ),
-                  fit: BoxFit.contain,
                 ),
               )
             else if (icon != null)
@@ -189,7 +217,7 @@ class SettingsMenu extends ConsumerWidget {
             Expanded(
               child: Text(
                 title,
-                textAlign: TextAlign.right,
+                textAlign: isEnglish ? TextAlign.left : TextAlign.right,
                 style: TextStyle(
                   fontSize: 18,
                   color: AppTheme.lightAccentColor,

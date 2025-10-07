@@ -9,6 +9,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:recipe_keeper/services/image_service.dart';
 import 'package:recipe_keeper/widgets/app_header.dart';
 import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
+import 'package:recipe_keeper/utils/translations.dart';
 
 class CategoryRecipesScreen extends ConsumerStatefulWidget {
   final String categoryName;
@@ -60,7 +61,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                 const SizedBox(height: 20),
                 ListTile(
                   leading: const Icon(Icons.edit, color: AppTheme.primaryColor),
-                  title: const Text('ערוך מתכון'),
+                  title: Text(AppTranslations.getText(ref, 'edit_recipe')),
                   onTap: () {
                     Navigator.pop(context);
                     context.push('/edit-recipe/${recipe.id}');
@@ -68,7 +69,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                 ),
                 ListTile(
                   leading: Icon(Icons.delete, color: AppTheme.errorColor),
-                  title: const Text('מחק מתכון'),
+                  title: Text(AppTranslations.getText(ref, 'delete_recipe')),
                   onTap: () {
                     Navigator.pop(context);
                     _showDeleteConfirmation(context, recipe);
@@ -86,14 +87,17 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
       context: context,
       builder:
           (context) => AlertDialog(
-            title: const Text('מחק מתכון'),
+            title: Text(AppTranslations.getText(ref, 'delete_recipe')),
             content: Text(
-              'האם אתה בטוח שברצונך למחוק את המתכון "${recipe.title}"?',
+              AppTranslations.getText(
+                ref,
+                'delete_recipe_confirmation_with_name',
+              ).replaceAll('{recipeName}', recipe.title),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('ביטול'),
+                child: Text(AppTranslations.getText(ref, 'cancel')),
               ),
               TextButton(
                 onPressed: () async {
@@ -104,8 +108,13 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                         .deleteRecipe(recipe.id);
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('המתכון נמחק בהצלחה'),
+                        SnackBar(
+                          content: Text(
+                            AppTranslations.getText(
+                              ref,
+                              'recipe_deleted_successfully',
+                            ),
+                          ),
                           backgroundColor: AppTheme.successColor,
                         ),
                       );
@@ -114,7 +123,12 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('שגיאה במחיקת המתכון: $e'),
+                          content: Text(
+                            AppTranslations.getText(
+                              ref,
+                              'error_deleting_recipe',
+                            ).replaceAll('{error}', e.toString()),
+                          ),
                           backgroundColor: AppTheme.errorColor,
                         ),
                       );
@@ -122,7 +136,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                   }
                 },
                 child: Text(
-                  'מחק',
+                  AppTranslations.getText(ref, 'delete'),
                   style: TextStyle(color: AppTheme.errorColor),
                 ),
               ),
@@ -176,7 +190,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'שגיאה בטעינת המתכונים',
+                          AppTranslations.getText(ref, 'error_loading_recipes'),
                           style: TextStyle(
                             fontFamily: AppTheme.secondaryFontFamily,
                             fontSize: 18,
@@ -202,7 +216,10 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'אין מתכונים בקטגוריה זו',
+                          AppTranslations.getText(
+                            ref,
+                            'no_recipes_in_category',
+                          ),
                           style: TextStyle(
                             fontFamily: AppTheme.secondaryFontFamily,
                             fontSize: 18,
@@ -212,7 +229,10 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'הוסף מתכונים עם התווית "${widget.categoryName}"',
+                          AppTranslations.getText(
+                            ref,
+                            'add_recipes_with_tag',
+                          ).replaceAll('{tag}', widget.categoryName),
                           style: TextStyle(
                             fontFamily: AppTheme.secondaryFontFamily,
                             fontSize: 16,
@@ -267,7 +287,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                                       child: CachedNetworkImage(
                                         imageUrl: ImageService()
                                             .getCorsProxiedUrl(recipe.imageUrl),
-                                        fit: BoxFit.cover,
+                                        fit: BoxFit.contain,
                                         placeholder:
                                             (context, url) => const Center(
                                               child: CircularProgressIndicator(
@@ -352,7 +372,13 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                                             ),
                                             const SizedBox(width: 4),
                                             Text(
-                                              '${recipe.prepTime} דק\'',
+                                              AppTranslations.getText(
+                                                ref,
+                                                'prep_time_short',
+                                              ).replaceAll(
+                                                '{time}',
+                                                recipe.prepTime.toString(),
+                                              ),
                                               style: TextStyle(
                                                 fontFamily:
                                                     AppTheme
@@ -372,7 +398,13 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                                             ),
                                             const SizedBox(width: 4),
                                             Text(
-                                              '${recipe.servings} מנות',
+                                              AppTranslations.getText(
+                                                ref,
+                                                'servings_short',
+                                              ).replaceAll(
+                                                '{count}',
+                                                recipe.servings.toString(),
+                                              ),
                                               style: TextStyle(
                                                 fontFamily:
                                                     AppTheme

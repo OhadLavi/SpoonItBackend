@@ -20,10 +20,11 @@ class ProfileScreen extends ConsumerWidget {
     final userDataAsync = ref.watch(userDataProvider);
 
     return Scaffold(
+      extendBody: true,
       backgroundColor: AppTheme.backgroundColor,
       body: Column(
         children: [
-          const AppHeader(title: 'פרופיל'),
+          AppHeader(title: AppTranslations.getText(ref, 'profile')),
           Expanded(
             child: authState.when(
               initial:
@@ -112,7 +113,7 @@ class ProfileScreen extends ConsumerWidget {
     AppUser userData,
   ) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -206,7 +207,7 @@ class ProfileScreen extends ConsumerWidget {
                 _buildStatItem(
                   context: context,
                   icon: Icons.restaurant_menu,
-                  label: 'המתכונים שלי',
+                  label: AppTranslations.getText(ref, 'my_recipes'),
                   value: userData.recipeCount.toString(),
                 ),
                 _buildStatItem(

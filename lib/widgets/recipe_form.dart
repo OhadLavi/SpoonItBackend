@@ -539,7 +539,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                                 ),
                                 child: const Icon(
                                   Icons.arrow_back_ios,
-                                  color: AppTheme.backgroundColor,
+                                  color: AppTheme.lightAccentColor,
                                   size: 24,
                                 ),
                               ),
@@ -575,7 +575,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                                 ),
                                 child: const Icon(
                                   Icons.arrow_forward_ios,
-                                  color: AppTheme.backgroundColor,
+                                  color: AppTheme.lightAccentColor,
                                   size: 24,
                                 ),
                               ),
@@ -616,7 +616,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                               ? AppTranslations.getText(ref, 'update_recipe')
                               : AppTranslations.getText(ref, 'save_recipe'),
                           style: const TextStyle(
-                            color: AppTheme.backgroundColor,
+                            color: AppTheme.lightAccentColor,
                             fontFamily: AppTheme.secondaryFontFamily,
                             fontWeight: FontWeight.w600,
                             fontSize: 16,
@@ -1112,7 +1112,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                       child: Text(
                         '${index + 1}',
                         style: const TextStyle(
-                          color: AppTheme.backgroundColor,
+                          color: AppTheme.lightAccentColor,
                           fontWeight: FontWeight.bold,
                         ),
                       ),

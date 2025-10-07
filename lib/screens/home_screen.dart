@@ -12,6 +12,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
 import 'package:recipe_keeper/services/category_icon_service.dart';
 import 'dart:ui';
+import 'package:recipe_keeper/utils/translations.dart';
 
 final gridViewProvider = Provider<bool>((ref) => false);
 final favoritesUIProvider = Provider<Set<String>>((ref) => <String>{});
@@ -38,13 +39,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   // Default categories for new users using SVG icons
   final List<Map<String, dynamic>> _defaultCategories = [
-    {'label': 'מאפים', 'iconKey': 'pastries'},
-    {'label': 'עיקריות', 'iconKey': 'main'},
-    {'label': 'תוספות', 'iconKey': 'sides'},
-    {'label': 'עוגיות', 'iconKey': 'cookies'},
-    {'label': 'עוגות', 'iconKey': 'cakes'},
-    {'label': 'סלטים', 'iconKey': 'salads'},
-    {'label': 'לחמים', 'iconKey': 'bread'},
+    {'label': 'pastries', 'iconKey': 'pastries'},
+    {'label': 'main_dishes', 'iconKey': 'main'},
+    {'label': 'sides', 'iconKey': 'sides'},
+    {'label': 'cookies', 'iconKey': 'cookies'},
+    {'label': 'cakes', 'iconKey': 'cakes'},
+    {'label': 'salads', 'iconKey': 'salads'},
+    {'label': 'breads', 'iconKey': 'bread'},
   ];
 
   @override
@@ -74,10 +75,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       child: Column(
                         children: [
                           const SizedBox(height: 12),
-                          const Padding(
+                          Padding(
                             padding: EdgeInsets.symmetric(horizontal: 16),
                             child: Text(
-                              'קטגוריות',
+                              AppTranslations.getText(ref, 'categories'),
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 28,
@@ -145,7 +146,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       data: Theme.of(context).copyWith(
                         textTheme: Theme.of(context).textTheme.copyWith(
                           bodyMedium: TextStyle(
-                            color: AppTheme.backgroundColor,
+                            color: AppTheme.lightAccentColor,
                             fontFamily: AppTheme.primaryFontFamily,
                           ),
                         ),
@@ -228,12 +229,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     color: AppTheme.primaryColor,
                   ),
                   cursorColor: AppTheme.primaryColor,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     contentPadding: EdgeInsets.symmetric(vertical: 14),
                     border: InputBorder.none,
                     enabledBorder: InputBorder.none,
                     focusedBorder: InputBorder.none,
-                    hintText: 'חיפוש',
+                    hintText: AppTranslations.getText(ref, 'search_hint'),
                     hintStyle: TextStyle(
                       color: AppTheme.secondaryTextColor,
                       fontSize: 16,
@@ -273,7 +274,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       error:
           (error, stack) => Center(
             child: Text(
-              'שגיאה בטעינת הקטגוריות',
+              AppTranslations.getText(ref, 'error_loading_categories'),
               style: TextStyle(
                 color: AppTheme.textColor,
                 fontFamily: AppTheme.secondaryFontFamily,
@@ -328,7 +329,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                       SizedBox(height: iconSize * 0.2),
                       Text(
-                        'הוסף קטגוריה',
+                        AppTranslations.getText(ref, 'add_category'),
                         style: TextStyle(
                           fontSize: fontSize,
                           color: AppTheme.secondaryTextColor,
@@ -394,7 +395,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         ),
                     SizedBox(height: iconSize * 0.1),
                     Text(
-                      isDynamic ? category.name : category['label'] as String,
+                      isDynamic
+                          ? category.name
+                          : AppTranslations.getText(
+                            ref,
+                            category['label'] as String,
+                          ),
                       style: TextStyle(
                         fontSize: fontSize,
                         fontWeight: FontWeight.w500,

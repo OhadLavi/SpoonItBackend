@@ -70,6 +70,26 @@ class ShoppingListService {
         });
   }
 
+  // Get current item count
+  Future<int> getItemCount(String userId) async {
+    try {
+      final snapshot =
+          await _firestore
+              .collection('users')
+              .doc(userId)
+              .collection('shoppingList')
+              .get();
+
+      return snapshot.docs.length;
+    } catch (e) {
+      developer.log(
+        'Error getting item count: $e',
+        name: 'ShoppingListService',
+      );
+      return 0;
+    }
+  }
+
   // Add item to shopping list
   Future<void> addItem(String userId, String itemName) async {
     try {
@@ -77,6 +97,16 @@ class ShoppingListService {
         'Adding item to shopping list: $itemName',
         name: 'ShoppingListService',
       );
+
+      // Check current item count
+      final currentCount = await getItemCount(userId);
+      if (currentCount >= 100) {
+        developer.log(
+          'Shopping list limit reached (100 items)',
+          name: 'ShoppingListService',
+        );
+        throw Exception('Shopping list limit reached (100 items)');
+      }
 
       // Check if item already exists
       final existingItems =

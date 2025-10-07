@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:recipe_keeper/widgets/settings_menu.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:recipe_keeper/providers/settings_provider.dart';
 
-/// Shows the right-side settings panel used across the app.
-/// Can be invoked from any screen.
+/// Shows the settings panel used across the app.
+/// Slides from right in Hebrew, left in English.
 void showSettingsPanel(BuildContext context) {
   final hostContext = context; // stable parent context
   showGeneralDialog(
@@ -18,13 +20,18 @@ void showSettingsPanel(BuildContext context) {
       final h = MediaQuery.of(context).size.height;
       final panelW = w < 520 ? 320.0 : 380.0;
 
+      // Check if we're in English mode
+      final isEnglish =
+          ProviderScope.containerOf(context).read(settingsProvider).language ==
+          AppLanguage.english;
+
       return SlideTransition(
         position: Tween<Offset>(
-          begin: const Offset(1, 0),
+          begin: isEnglish ? const Offset(-1, 0) : const Offset(1, 0),
           end: Offset.zero,
         ).animate(CurvedAnimation(parent: animation, curve: Curves.easeInOut)),
         child: Align(
-          alignment: Alignment.centerRight,
+          alignment: isEnglish ? Alignment.centerLeft : Alignment.centerRight,
           child: Stack(
             clipBehavior: Clip.none,
             children: [
@@ -38,13 +45,14 @@ void showSettingsPanel(BuildContext context) {
                     data: Theme.of(context).copyWith(
                       textTheme: Theme.of(context).textTheme.copyWith(
                         bodyMedium: TextStyle(
-                          color: AppTheme.backgroundColor,
+                          color: AppTheme.lightAccentColor,
                           fontFamily: AppTheme.primaryFontFamily,
                         ),
                       ),
                     ),
                     child: Directionality(
-                      textDirection: TextDirection.rtl,
+                      textDirection:
+                          isEnglish ? TextDirection.ltr : TextDirection.rtl,
                       child: SettingsMenu(hostContext: hostContext),
                     ),
                   ),

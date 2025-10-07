@@ -273,7 +273,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                               child: IconButton(
                                 icon: const Icon(
                                   Icons.camera_alt,
-                                  color: AppTheme.backgroundColor,
+                                  color: AppTheme.lightAccentColor,
                                   size: 20,
                                 ),
                                 onPressed: _showImageSourceActionSheet,
@@ -544,7 +544,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                         child: Text(
                           AppTranslations.getText(ref, 'save_changes'),
                           style: const TextStyle(
-                            color: AppTheme.backgroundColor,
+                            color: AppTheme.lightAccentColor,
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
                             fontFamily: AppTheme.secondaryFontFamily,

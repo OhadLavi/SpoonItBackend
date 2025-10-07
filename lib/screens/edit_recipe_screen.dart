@@ -6,6 +6,7 @@ import 'package:recipe_keeper/widgets/recipe_form_base.dart';
 import 'package:recipe_keeper/widgets/app_header.dart';
 import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:recipe_keeper/utils/translations.dart';
 
 class EditRecipeScreen extends ConsumerStatefulWidget {
   final String recipeId;
@@ -29,7 +30,7 @@ class _EditRecipeScreenState extends ConsumerState<EditRecipeScreen> {
             body: Column(
               children: [
                 AppHeader(
-                  title: 'עריכת מתכון',
+                  title: AppTranslations.getText(ref, 'edit_recipe_title'),
                   showBackButton: true,
                   onBackPressed: () => context.pop(),
                 ),
@@ -45,7 +46,7 @@ class _EditRecipeScreenState extends ConsumerState<EditRecipeScreen> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'המתכון לא נמצא',
+                          AppTranslations.getText(ref, 'recipe_not_found'),
                           style: const TextStyle(
                             fontFamily: AppTheme.secondaryFontFamily,
                             fontSize: 18,
@@ -68,7 +69,7 @@ class _EditRecipeScreenState extends ConsumerState<EditRecipeScreen> {
           body: SafeArea(
             child: RecipeFormBase(
               initialRecipe: recipe,
-              title: 'עריכת מתכון',
+              title: AppTranslations.getText(ref, 'edit_recipe_title'),
               isEditing: true,
               onSuccess: () => context.go('/recipe/${recipe.id}'),
             ),
@@ -82,7 +83,7 @@ class _EditRecipeScreenState extends ConsumerState<EditRecipeScreen> {
             body: Column(
               children: [
                 AppHeader(
-                  title: 'עריכת מתכון',
+                  title: AppTranslations.getText(ref, 'edit_recipe_title'),
                   showBackButton: true,
                   onBackPressed: () => context.pop(),
                 ),
@@ -103,7 +104,7 @@ class _EditRecipeScreenState extends ConsumerState<EditRecipeScreen> {
             body: Column(
               children: [
                 AppHeader(
-                  title: 'עריכת מתכון',
+                  title: AppTranslations.getText(ref, 'edit_recipe_title'),
                   showBackButton: true,
                   onBackPressed: () => context.pop(),
                 ),
@@ -119,7 +120,7 @@ class _EditRecipeScreenState extends ConsumerState<EditRecipeScreen> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'שגיאה בטעינת המתכון',
+                          AppTranslations.getText(ref, 'error_loading_recipe'),
                           style: const TextStyle(
                             fontFamily: AppTheme.secondaryFontFamily,
                             fontSize: 18,
