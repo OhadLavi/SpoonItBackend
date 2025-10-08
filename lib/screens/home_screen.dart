@@ -11,6 +11,7 @@ import 'package:recipe_keeper/widgets/add_category_dialog.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
 import 'package:recipe_keeper/services/category_icon_service.dart';
+import 'package:recipe_keeper/providers/settings_provider.dart';
 import 'dart:ui';
 import 'package:recipe_keeper/utils/translations.dart';
 
@@ -109,6 +110,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   void _showSettings(BuildContext context) {
     final hostContext = context; // <-- stable parent context
+    final isHebrew = ref.watch(settingsProvider).language == AppLanguage.hebrew;
+
     showGeneralDialog(
       context: context,
       barrierDismissible: true,
@@ -123,13 +126,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
         return SlideTransition(
           position: Tween<Offset>(
-            begin: const Offset(1, 0),
+            begin: isHebrew ? const Offset(1, 0) : const Offset(-1, 0),
             end: Offset.zero,
           ).animate(
             CurvedAnimation(parent: animation, curve: Curves.easeInOut),
           ),
           child: Align(
-            alignment: Alignment.centerRight,
+            alignment: isHebrew ? Alignment.centerRight : Alignment.centerLeft,
             child: Stack(
               clipBehavior: Clip.none,
               children: [
@@ -152,7 +155,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         ),
                       ),
                       child: Directionality(
-                        textDirection: TextDirection.rtl,
+                        textDirection:
+                            isHebrew ? TextDirection.rtl : TextDirection.ltr,
                         child: SettingsMenu(
                           hostContext: hostContext,
                         ), // <-- pass it in
@@ -161,18 +165,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ),
                 ),
 
-                // Peach ear with RIGHT chevron (like the mock)
+                // Close button positioned based on language direction
                 Positioned(
-                  left: -18,
+                  left: isHebrew ? -18 : null,
+                  right: isHebrew ? null : -18,
                   top: 44,
                   child: GestureDetector(
                     onTap: () => Navigator.pop(context),
                     child: CustomPaint(
                       size: const Size(32, 32),
                       painter: WavyButtonPainter(),
-                      child: const Center(
+                      child: Center(
                         child: Icon(
-                          Icons.chevron_right, // → matches the mock
+                          isHebrew ? Icons.chevron_right : Icons.chevron_left,
                           size: 20,
                           color: AppTheme.primaryColor,
                           textDirection: TextDirection.ltr, // prevent RTL flip
@@ -190,6 +195,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildSearchBox(BuildContext context) {
+    final isHebrew = ref.watch(settingsProvider).language == AppLanguage.hebrew;
+
     return Container(
       height: 48,
       decoration: BoxDecoration(
@@ -197,33 +204,35 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         borderRadius: BorderRadius.circular(24),
       ),
       child: Directionality(
-        textDirection: TextDirection.rtl,
+        textDirection: isHebrew ? TextDirection.rtl : TextDirection.ltr,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
             children: [
-              // Search icon on the right (RTL)
-              Container(
-                width: 24,
-                height: 48,
-                alignment: Alignment.center,
-                child: SvgPicture.asset(
-                  'assets/images/search.svg',
-                  width: 20,
-                  height: 20,
-                  colorFilter: const ColorFilter.mode(
-                    AppTheme.secondaryTextColor,
-                    BlendMode.srcIn,
+              // English: icon on the left
+              if (!isHebrew) ...[
+                Container(
+                  width: 24,
+                  height: 48,
+                  alignment: Alignment.center,
+                  child: SvgPicture.asset(
+                    'assets/images/search.svg',
+                    width: 20,
+                    height: 20,
+                    colorFilter: const ColorFilter.mode(
+                      AppTheme.secondaryTextColor,
+                      BlendMode.srcIn,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
+                const SizedBox(width: 8),
+              ],
               // Text field
               Expanded(
                 child: TextField(
                   controller: _searchController,
                   focusNode: _searchFocusNode,
-                  textAlign: TextAlign.right,
+                  textAlign: isHebrew ? TextAlign.right : TextAlign.left,
                   style: const TextStyle(
                     fontSize: 16,
                     color: AppTheme.primaryColor,
@@ -247,6 +256,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   },
                 ),
               ),
+              // Hebrew: icon on the right
+              if (isHebrew) ...[
+                const SizedBox(width: 8),
+                Container(
+                  width: 24,
+                  height: 48,
+                  alignment: Alignment.center,
+                  child: SvgPicture.asset(
+                    'assets/images/search.svg',
+                    width: 20,
+                    height: 20,
+                    colorFilter: const ColorFilter.mode(
+                      AppTheme.secondaryTextColor,
+                      BlendMode.srcIn,
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -328,12 +355,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         color: AppTheme.uiAccentColor,
                       ),
                       SizedBox(height: iconSize * 0.2),
-                      Text(
-                        AppTranslations.getText(ref, 'add_category'),
-                        style: TextStyle(
-                          fontSize: fontSize,
-                          color: AppTheme.secondaryTextColor,
-                          fontFamily: AppTheme.secondaryFontFamily,
+                      Flexible(
+                        child: Text(
+                          AppTranslations.getText(ref, 'add_category'),
+                          style: TextStyle(
+                            fontSize: fontSize * 0.85, // Slightly smaller font
+                            color: AppTheme.secondaryTextColor,
+                            fontFamily: AppTheme.secondaryFontFamily,
+                          ),
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],

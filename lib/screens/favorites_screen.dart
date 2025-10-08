@@ -293,21 +293,52 @@ class FavoritesScreen extends ConsumerWidget {
               ),
               child: Row(
                 children: [
-                  // Spoon/fork icon on the left in light pink rounded square
+                  // Recipe image or icon
                   Padding(
                     padding: const EdgeInsets.all(12),
                     child: Container(
                       width: 80,
                       height: 80,
                       decoration: BoxDecoration(
-                        color: AppTheme.cardColor, // Light background
+                        color: AppTheme.cardColor,
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: const Icon(
-                        Icons.restaurant_menu,
-                        color: AppTheme.primaryColor, // Coral color
-                        size: 40,
-                      ),
+                      child:
+                          recipe.imageUrl.isNotEmpty
+                              ? ClipRRect(
+                                borderRadius: BorderRadius.circular(20),
+                                child: Image.network(
+                                  recipe.imageUrl,
+                                  width: 80,
+                                  height: 80,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return const Icon(
+                                      Icons.restaurant_menu,
+                                      color: AppTheme.primaryColor,
+                                      size: 40,
+                                    );
+                                  },
+                                  loadingBuilder: (
+                                    context,
+                                    child,
+                                    loadingProgress,
+                                  ) {
+                                    if (loadingProgress == null) return child;
+                                    return const Center(
+                                      child: CircularProgressIndicator(
+                                        color: AppTheme.primaryColor,
+                                        strokeWidth: 2,
+                                      ),
+                                    );
+                                  },
+                                ),
+                              )
+                              : const Icon(
+                                Icons.restaurant_menu,
+                                color: AppTheme.primaryColor,
+                                size: 40,
+                              ),
                     ),
                   ),
 

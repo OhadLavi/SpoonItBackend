@@ -123,514 +123,574 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final isHebrew = ref.watch(settingsProvider).language == AppLanguage.hebrew;
 
     return Scaffold(
-      body: Stack(
-        children: [
-          // Background header band
-          const AuthHeader(height: 320, showGraphic: false),
+      resizeToAvoidBottomInset: true,
+      body: SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minHeight: MediaQuery.of(context).size.height,
+          ),
+          child: Stack(
+            children: [
+              // Background header band
+              const AuthHeader(height: 320, showGraphic: false),
 
-          // Icon aligned to the card's left (Hebrew) / right (English)
-          Align(
-            alignment: Alignment.topCenter,
-            child: Container(
-              width: panelWidth, // match the card width
-              margin: const EdgeInsets.only(top: 0),
-              // If you want a little inset from the card edge, uncomment the next line:
-              // padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Align(
-                alignment: isHebrew ? Alignment.topLeft : Alignment.topRight,
-                child: SvgPicture.asset(
-                  'assets/images/login.svg',
-                  width: 250,
-                  height: 250,
-                  colorFilter: ColorFilter.mode(
-                    isDark ? AppTheme.darkPrimaryColor : AppTheme.textColor,
-                    BlendMode.srcIn,
+              // Icon aligned to the card's left (Hebrew) / right (English)
+              Align(
+                alignment: Alignment.topCenter,
+                child: Container(
+                  width: panelWidth, // match the card width
+                  margin: const EdgeInsets.only(top: 0),
+                  // If you want a little inset from the card edge, uncomment the next line:
+                  // padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Align(
+                    alignment:
+                        isHebrew ? Alignment.topLeft : Alignment.topRight,
+                    child: SvgPicture.asset(
+                      'assets/images/login.svg',
+                      width: 250,
+                      height: 250,
+                      colorFilter: ColorFilter.mode(
+                        isDark ? AppTheme.darkPrimaryColor : AppTheme.textColor,
+                        BlendMode.srcIn,
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
 
-          // Hello text pinned to the top of the card
-          Align(
-            alignment: Alignment.topCenter,
-            child: Container(
-              width: panelWidth,
-              margin: const EdgeInsets.only(
-                top: 240 - 120,
-              ), // 240 = AuthPanel top
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Align(
-                alignment: isHebrew ? Alignment.topRight : Alignment.topLeft,
-                child: Column(
-                  crossAxisAlignment:
-                      isHebrew
-                          ? CrossAxisAlignment.start
-                          : CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      AppTranslations.getText(ref, 'hello'),
-                      style: TextStyle(
-                        fontFamily: AppTheme.primaryFontFamily,
-                        fontSize: 48,
-                        fontWeight: FontWeight.bold,
-                        color:
-                            isDark
-                                ? AppTheme.darkPrimaryColor
-                                : AppTheme.lightAccentColor,
-                      ),
+              // Hello text pinned to the top of the card
+              Align(
+                alignment: Alignment.topCenter,
+                child: Container(
+                  width: panelWidth,
+                  margin: const EdgeInsets.only(
+                    top: 240 - 120,
+                  ), // 240 = AuthPanel top
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Align(
+                    alignment:
+                        isHebrew ? Alignment.topRight : Alignment.topLeft,
+                    child: Column(
+                      crossAxisAlignment:
+                          isHebrew
+                              ? CrossAxisAlignment.start
+                              : CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          AppTranslations.getText(ref, 'hello'),
+                          style: TextStyle(
+                            fontFamily: AppTheme.primaryFontFamily,
+                            fontSize: 48,
+                            fontWeight: FontWeight.bold,
+                            color:
+                                isDark
+                                    ? AppTheme.darkPrimaryColor
+                                    : AppTheme.lightAccentColor,
+                          ),
+                        ),
+                        const SizedBox(height: 0),
+                        Text(
+                          AppTranslations.getText(ref, 'welcome_to_spoonit'),
+                          style: TextStyle(
+                            fontFamily: AppTheme.primaryFontFamily,
+                            fontSize: 18,
+                            color:
+                                isDark
+                                    ? AppTheme.darkPrimaryColor
+                                    : AppTheme.lightAccentColor,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 0),
-                    Text(
-                      AppTranslations.getText(ref, 'welcome_to_spoonit'),
-                      style: TextStyle(
-                        fontFamily: AppTheme.primaryFontFamily,
-                        fontSize: 18,
-                        color:
-                            isDark
-                                ? AppTheme.darkPrimaryColor
-                                : AppTheme.lightAccentColor,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
-            ),
-          ),
 
-          // Panel with the form
-          AuthPanel(
-            topMargin: 240,
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      AppTranslations.getText(ref, 'login_title'),
-                      textAlign: TextAlign.right,
-                      style: TextStyle(
-                        fontFamily: AppTheme.primaryFontFamily,
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        color: mainTextColor,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Email
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color:
-                          isDark
-                              ? AppTheme.darkCardColor
-                              : AppTheme.backgroundColor,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(
-                        color:
-                            isDark
-                                ? AppTheme.darkDividerColor
-                                : AppTheme.dividerColor,
-                        width: 1,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppTheme.dividerColor.withValues(alpha: 0.04),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: TextFormField(
-                      controller: _emailController,
-                      keyboardType: TextInputType.emailAddress,
-                      textAlign:
-                          _emailController.text.isEmpty
-                              ? TextAlign.right
-                              : TextAlign.left,
-                      textDirection:
-                          _emailController.text.isEmpty
-                              ? TextDirection.rtl
-                              : TextDirection.ltr,
-                      style: TextStyle(
-                        color: mainTextColor,
-                        fontWeight: FontWeight.w300,
-                      ),
-                      onChanged: (value) => setState(() {}),
-                      decoration: InputDecoration(
-                        hintText: AppTranslations.getText(ref, 'email_hint'),
-                        hintStyle: TextStyle(
-                          color: mainTextColor,
-                          fontWeight: FontWeight.w300,
-                        ),
-                        prefixIcon: Padding(
-                          padding: const EdgeInsets.all(12.0),
-                          child: SvgPicture.asset(
-                            'assets/images/email.svg',
-                            width: 18,
-                            height: 18,
-                            colorFilter: ColorFilter.mode(
-                              AppTheme.textColor,
-                              BlendMode.srcIn,
-                            ),
-                          ),
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        errorBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        focusedErrorBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        disabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 18,
-                        ),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return AppTranslations.getText(ref, 'email_required');
-                        }
-                        if (!Helpers.isValidEmail(value)) {
-                          return AppTranslations.getText(ref, 'invalid_email');
-                        }
-                        return null;
-                      },
-                    ),
-                  ),
-
-                  // Password
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    decoration: BoxDecoration(
-                      color:
-                          isDark
-                              ? AppTheme.darkCardColor
-                              : AppTheme.backgroundColor,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(
-                        color:
-                            isDark
-                                ? AppTheme.darkDividerColor
-                                : AppTheme.dividerColor,
-                        width: 1,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppTheme.dividerColor.withValues(alpha: 0.04),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: TextFormField(
-                      controller: _passwordController,
-                      obscureText: !_isPasswordVisible,
-                      textAlign:
-                          _passwordController.text.isEmpty
-                              ? TextAlign.right
-                              : TextAlign.left,
-                      textDirection:
-                          _passwordController.text.isEmpty
-                              ? TextDirection.rtl
-                              : TextDirection.ltr,
-                      style: TextStyle(
-                        color: mainTextColor,
-                        fontWeight: FontWeight.w300,
-                      ),
-                      onChanged: (value) => setState(() {}),
-                      decoration: InputDecoration(
-                        hintText: AppTranslations.getText(ref, 'password_hint'),
-                        hintStyle: TextStyle(
-                          color: mainTextColor,
-                          fontWeight: FontWeight.w300,
-                        ),
-                        prefixIcon: Padding(
-                          padding: const EdgeInsets.all(12.0),
-                          child: SvgPicture.asset(
-                            'assets/images/password.svg',
-                            width: 18,
-                            height: 18,
-                            colorFilter: ColorFilter.mode(
-                              AppTheme.textColor,
-                              BlendMode.srcIn,
-                            ),
-                          ),
-                        ),
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _isPasswordVisible
-                                ? Icons.visibility_outlined
-                                : Icons.visibility_off_outlined,
+              // Panel with the form
+              AuthPanel(
+                topMargin: 240,
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Align(
+                        alignment:
+                            isHebrew
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                        child: Text(
+                          AppTranslations.getText(ref, 'login_title'),
+                          textAlign:
+                              isHebrew ? TextAlign.right : TextAlign.left,
+                          style: TextStyle(
+                            fontFamily: AppTheme.primaryFontFamily,
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
                             color: mainTextColor,
-                            size: 18,
                           ),
-                          onPressed: () {
-                            setState(() {
-                              _isPasswordVisible = !_isPasswordVisible;
-                            });
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Email
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color:
+                              isDark
+                                  ? AppTheme.darkCardColor
+                                  : AppTheme.backgroundColor,
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(
+                            color:
+                                isDark
+                                    ? AppTheme.darkDividerColor
+                                    : AppTheme.dividerColor,
+                            width: 1,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppTheme.dividerColor.withValues(
+                                alpha: 0.04,
+                              ),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: TextFormField(
+                          controller: _emailController,
+                          keyboardType: TextInputType.emailAddress,
+                          textAlign:
+                              _emailController.text.isEmpty
+                                  ? (isHebrew
+                                      ? TextAlign.right
+                                      : TextAlign.left)
+                                  : (isHebrew
+                                      ? TextAlign.left
+                                      : TextAlign.left),
+                          textDirection:
+                              _emailController.text.isEmpty
+                                  ? (isHebrew
+                                      ? TextDirection.rtl
+                                      : TextDirection.ltr)
+                                  : (isHebrew
+                                      ? TextDirection.ltr
+                                      : TextDirection.ltr),
+                          style: TextStyle(
+                            color: mainTextColor,
+                            fontWeight: FontWeight.w300,
+                          ),
+                          onChanged: (value) => setState(() {}),
+                          decoration: InputDecoration(
+                            hintText: AppTranslations.getText(
+                              ref,
+                              'email_hint',
+                            ),
+                            hintStyle: TextStyle(
+                              color: mainTextColor,
+                              fontWeight: FontWeight.w300,
+                            ),
+                            prefixIcon: Padding(
+                              padding: const EdgeInsets.all(12.0),
+                              child: SvgPicture.asset(
+                                'assets/images/email.svg',
+                                width: 18,
+                                height: 18,
+                                colorFilter: ColorFilter.mode(
+                                  AppTheme.textColor,
+                                  BlendMode.srcIn,
+                                ),
+                              ),
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                            errorBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                            focusedErrorBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                            disabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 18,
+                            ),
+                          ),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return AppTranslations.getText(
+                                ref,
+                                'email_required',
+                              );
+                            }
+                            if (!Helpers.isValidEmail(value)) {
+                              return AppTranslations.getText(
+                                ref,
+                                'invalid_email',
+                              );
+                            }
+                            return null;
                           },
                         ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        errorBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        focusedErrorBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        disabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 18,
-                        ),
                       ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return AppTranslations.getText(
-                            ref,
-                            'password_required',
-                          );
-                        }
-                        return null;
-                      },
-                    ),
-                  ),
 
-                  // Error
-                  if (_errorMessage != null) ...[
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppTheme.errorColor.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: AppTheme.errorColor.withValues(alpha: 0.3),
+                      // Password
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color:
+                              isDark
+                                  ? AppTheme.darkCardColor
+                                  : AppTheme.backgroundColor,
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(
+                            color:
+                                isDark
+                                    ? AppTheme.darkDividerColor
+                                    : AppTheme.dividerColor,
+                            width: 1,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppTheme.dividerColor.withValues(
+                                alpha: 0.04,
+                              ),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: TextFormField(
+                          controller: _passwordController,
+                          obscureText: !_isPasswordVisible,
+                          textAlign:
+                              _passwordController.text.isEmpty
+                                  ? (isHebrew
+                                      ? TextAlign.right
+                                      : TextAlign.left)
+                                  : (isHebrew
+                                      ? TextAlign.left
+                                      : TextAlign.left),
+                          textDirection:
+                              _passwordController.text.isEmpty
+                                  ? (isHebrew
+                                      ? TextDirection.rtl
+                                      : TextDirection.ltr)
+                                  : (isHebrew
+                                      ? TextDirection.ltr
+                                      : TextDirection.ltr),
+                          style: TextStyle(
+                            color: mainTextColor,
+                            fontWeight: FontWeight.w300,
+                          ),
+                          onChanged: (value) => setState(() {}),
+                          decoration: InputDecoration(
+                            hintText: AppTranslations.getText(
+                              ref,
+                              'password_hint',
+                            ),
+                            hintStyle: TextStyle(
+                              color: mainTextColor,
+                              fontWeight: FontWeight.w300,
+                            ),
+                            prefixIcon: Padding(
+                              padding: const EdgeInsets.all(12.0),
+                              child: SvgPicture.asset(
+                                'assets/images/password.svg',
+                                width: 18,
+                                height: 18,
+                                colorFilter: ColorFilter.mode(
+                                  AppTheme.textColor,
+                                  BlendMode.srcIn,
+                                ),
+                              ),
+                            ),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _isPasswordVisible
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                                color: mainTextColor,
+                                size: 18,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _isPasswordVisible = !_isPasswordVisible;
+                                });
+                              },
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                            errorBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                            focusedErrorBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                            disabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 18,
+                            ),
+                          ),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return AppTranslations.getText(
+                                ref,
+                                'password_required',
+                              );
+                            }
+                            return null;
+                          },
                         ),
                       ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.error_outline,
-                            color: AppTheme.errorColor,
-                            size: 20,
+
+                      // Error
+                      if (_errorMessage != null) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppTheme.errorColor.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: AppTheme.errorColor.withValues(alpha: 0.3),
+                            ),
                           ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _errorMessage!,
-                              style: TextStyle(
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.error_outline,
                                 color: AppTheme.errorColor,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _errorMessage!,
+                                  style: TextStyle(
+                                    color: AppTheme.errorColor,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+
+                      // Forgot
+                      Align(
+                        alignment:
+                            isHebrew
+                                ? Alignment.centerLeft
+                                : Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: () {
+                            // TODO: Implement password reset
+                          },
+                          child: Text(
+                            AppTranslations.getText(
+                              ref,
+                              'forgot_password_link',
+                            ),
+                            style: TextStyle(
+                              color: mainTextColor,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      // Login button
+                      SizedBox(
+                        height: 44,
+                        child: ElevatedButton(
+                          onPressed:
+                              _isLoading ? null : _signInWithEmailAndPassword,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primaryColor,
+                            foregroundColor: AppTheme.backgroundColor,
+                            disabledBackgroundColor: AppTheme.primaryColor,
+                            disabledForegroundColor: AppTheme.backgroundColor,
+                            shadowColor: Colors.transparent,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(24),
+                            ),
+                            textStyle: const TextStyle(
+                              fontFamily: AppTheme.primaryFontFamily,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                            ),
+                          ),
+                          child: Text(
+                            AppTranslations.getText(ref, 'login_button'),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Divider with text
+                      Row(
+                        children: [
+                          const Expanded(child: Divider()),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: Text(
+                              AppTranslations.getText(ref, 'login_with'),
+                              style: TextStyle(
+                                fontFamily: AppTheme.primaryFontFamily,
+                                color: mainTextColor,
                                 fontSize: 14,
-                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          const Expanded(child: Divider()),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Socials
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          // Facebook (stub)
+                          InkWell(
+                            onTap: () {
+                              // TODO: Implement Facebook login
+                            },
+                            child: Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: AppTheme.backgroundColor,
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: AppTheme.dividerColor.withValues(
+                                      alpha: 0.08,
+                                    ),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: SvgPicture.asset(
+                                  'assets/images/facebook.svg',
+                                  width: 28,
+                                  height: 28,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+
+                          // Google
+                          InkWell(
+                            onTap: _isLoading ? null : _signInWithGoogle,
+                            child: Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: AppTheme.backgroundColor,
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: AppTheme.dividerColor.withValues(
+                                      alpha: 0.08,
+                                    ),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: SvgPicture.asset(
+                                  'assets/images/google.svg',
+                                  width: 28,
+                                  height: 28,
+                                ),
                               ),
                             ),
                           ),
                         ],
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 16),
 
-                  // Forgot
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton(
-                      onPressed: () {
-                        // TODO: Implement password reset
-                      },
-                      child: Text(
-                        AppTranslations.getText(ref, 'forgot_password_link'),
-                        style: TextStyle(color: mainTextColor, fontSize: 14),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-
-                  // Login button
-                  SizedBox(
-                    height: 44,
-                    child: ElevatedButton(
-                      onPressed:
-                          _isLoading ? null : _signInWithEmailAndPassword,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primaryColor,
-                        foregroundColor: AppTheme.backgroundColor,
-                        disabledBackgroundColor: AppTheme.primaryColor,
-                        disabledForegroundColor: AppTheme.backgroundColor,
-                        shadowColor: Colors.transparent,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        textStyle: const TextStyle(
-                          fontFamily: AppTheme.primaryFontFamily,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
-                      child: Text(AppTranslations.getText(ref, 'login_button')),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Divider with text
-                  Row(
-                    children: [
-                      const Expanded(child: Divider()),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Text(
-                          AppTranslations.getText(ref, 'login_with'),
-                          style: TextStyle(
-                            fontFamily: AppTheme.primaryFontFamily,
-                            color: mainTextColor,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                      const Expanded(child: Divider()),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Socials
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      // Facebook (stub)
-                      InkWell(
-                        onTap: () {
-                          // TODO: Implement Facebook login
-                        },
-                        child: Container(
-                          width: 44,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            color: AppTheme.backgroundColor,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppTheme.dividerColor.withValues(
-                                  alpha: 0.08,
-                                ),
-                                blurRadius: 4,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: SvgPicture.asset(
-                              'assets/images/facebook.svg',
-                              width: 28,
-                              height: 28,
+                      // Register link
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            AppTranslations.getText(
+                              ref,
+                              'want_to_save_recipes',
+                            ),
+                            style: TextStyle(
+                              color: mainTextColor,
+                              fontFamily: AppTheme.primaryFontFamily,
+                              fontSize: 14,
                             ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-
-                      // Google
-                      InkWell(
-                        onTap: _isLoading ? null : _signInWithGoogle,
-                        child: Container(
-                          width: 44,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            color: AppTheme.backgroundColor,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppTheme.dividerColor.withValues(
-                                  alpha: 0.08,
-                                ),
-                                blurRadius: 4,
-                                offset: const Offset(0, 2),
+                          GestureDetector(
+                            onTap: () => context.go('/register'),
+                            child: Text(
+                              AppTranslations.getText(ref, 'register_fun'),
+                              style: TextStyle(
+                                color: AppTheme.primaryColor,
+                                fontWeight: FontWeight.bold,
+                                fontFamily: AppTheme.primaryFontFamily,
+                                fontSize: 14,
                               ),
-                            ],
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: SvgPicture.asset(
-                              'assets/images/google.svg',
-                              width: 28,
-                              height: 28,
                             ),
                           ),
-                        ),
+                        ],
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-
-                  // Register link
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        AppTranslations.getText(ref, 'want_to_save_recipes'),
-                        style: TextStyle(
-                          color: mainTextColor,
-                          fontFamily: AppTheme.primaryFontFamily,
-                          fontSize: 14,
-                        ),
-                      ),
-                      GestureDetector(
-                        onTap: () => context.go('/register'),
-                        child: Text(
-                          AppTranslations.getText(ref, 'register_fun'),
-                          style: TextStyle(
-                            color: AppTheme.primaryColor,
-                            fontWeight: FontWeight.bold,
-                            fontFamily: AppTheme.primaryFontFamily,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

@@ -369,6 +369,7 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
                             ),
                           ),
                         ),
+                        const SizedBox(height: 45),
                       ],
                     ),
                   ),

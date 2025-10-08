@@ -362,57 +362,71 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                                           overflow: TextOverflow.ellipsis,
                                         ),
                                       const SizedBox(height: 8),
-                                      Row(
+                                      Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
-                                          if (recipe.prepTime > 0) ...[
-                                            Icon(
-                                              Icons.access_time,
-                                              size: 16,
-                                              color: AppTheme.primaryColor,
+                                          if (recipe.prepTime > 0)
+                                            Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(
+                                                  Icons.access_time,
+                                                  size: 14,
+                                                  color: AppTheme.primaryColor,
+                                                ),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  AppTranslations.getText(
+                                                    ref,
+                                                    'prep_time_short',
+                                                  ).replaceAll(
+                                                    '{time}',
+                                                    recipe.prepTime.toString(),
+                                                  ),
+                                                  style: TextStyle(
+                                                    fontFamily:
+                                                        AppTheme
+                                                            .secondaryFontFamily,
+                                                    fontSize: 11,
+                                                    color:
+                                                        AppTheme
+                                                            .secondaryTextColor,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              AppTranslations.getText(
-                                                ref,
-                                                'prep_time_short',
-                                              ).replaceAll(
-                                                '{time}',
-                                                recipe.prepTime.toString(),
-                                              ),
-                                              style: TextStyle(
-                                                fontFamily:
-                                                    AppTheme
-                                                        .secondaryFontFamily,
-                                                fontSize: 12,
-                                                color:
-                                                    AppTheme.secondaryTextColor,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 12),
-                                          ],
                                           if (recipe.servings > 0) ...[
-                                            Icon(
-                                              Icons.people,
-                                              size: 16,
-                                              color: AppTheme.primaryColor,
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              AppTranslations.getText(
-                                                ref,
-                                                'servings_short',
-                                              ).replaceAll(
-                                                '{count}',
-                                                recipe.servings.toString(),
-                                              ),
-                                              style: TextStyle(
-                                                fontFamily:
-                                                    AppTheme
-                                                        .secondaryFontFamily,
-                                                fontSize: 12,
-                                                color:
-                                                    AppTheme.secondaryTextColor,
-                                              ),
+                                            if (recipe.prepTime > 0)
+                                              const SizedBox(height: 4),
+                                            Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(
+                                                  Icons.people,
+                                                  size: 14,
+                                                  color: AppTheme.primaryColor,
+                                                ),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  AppTranslations.getText(
+                                                    ref,
+                                                    'servings_short',
+                                                  ).replaceAll(
+                                                    '{count}',
+                                                    recipe.servings.toString(),
+                                                  ),
+                                                  style: TextStyle(
+                                                    fontFamily:
+                                                        AppTheme
+                                                            .secondaryFontFamily,
+                                                    fontSize: 11,
+                                                    color:
+                                                        AppTheme
+                                                            .secondaryTextColor,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ],
                                         ],
