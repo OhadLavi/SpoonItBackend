@@ -1,10 +1,10 @@
 # Recipe Image Scanning Feature
 
-This document describes how to set up and use the recipe image scanning feature in the Recipe Keeper app.
+This document describes how to set up and use the recipe image scanning feature in the SpoonIt app.
 
 ## Overview
 
-The Recipe Keeper app now supports extracting recipe information from images. This feature uses:
+The SpoonIt app now supports extracting recipe information from images. This feature uses:
 
 1. Tesseract OCR for text extraction from images
 2. An LLM (Ollama) for understanding and parsing the recipe text

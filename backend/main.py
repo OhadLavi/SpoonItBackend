@@ -769,7 +769,7 @@ def create_recipe_extraction_prompt(section_text: str) -> str:
 # FastAPI app
 # =============================================================================
 app = FastAPI(
-    title="Recipe Keeper API",
+    title="SpoonIt API",
     version="1.3.0",
     description="Generic recipe extraction via schema.org, DOM heuristics (Hebrew/English), and LLM fallback.",
 )
@@ -790,7 +790,7 @@ async def api_error_handler(request, exc: APIError):
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to Recipe Keeper API", "docs": "/docs", "redoc": "/redoc"}
+    return {"message": "Welcome to SpoonIt API", "docs": "/docs", "redoc": "/redoc"}
 
 @app.get("/health")
 async def health():

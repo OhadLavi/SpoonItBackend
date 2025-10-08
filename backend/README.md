@@ -1,6 +1,6 @@
-# Recipe Keeper Backend
+# SpoonIt Backend
 
-This is the backend server for the Recipe Keeper application that communicates with Ollama's Gemma 3B model.
+This is the backend server for the SpoonIt application that communicates with Ollama's Gemma 3B model.
 
 ## Prerequisites
 

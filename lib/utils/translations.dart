@@ -267,7 +267,7 @@ class AppTranslations {
     'instructions_section': 'Instructions',
     'notes_section': 'Notes',
     'tags_section': 'Tags',
-    'shared_from_recipe_keeper': 'Shared from Recipe Keeper',
+    'shared_from_recipe_keeper': 'Shared from SpoonIt',
     'login_to_add_to_shopping_list':
         'You need to be logged in to add to shopping list',
     'item_already_in_shopping_list': 'Item already exists in shopping list',
@@ -351,7 +351,7 @@ class AppTranslations {
     'i_am_not_robot': 'I am not a robot',
     'send_email': 'Send Email',
     'cannot_open_email_app': 'Cannot open email application',
-    'technical_support_subject': 'Technical Support - Recipe Keeper',
+    'technical_support_subject': 'Technical Support - SpoonIt',
     'default_support_message':
         'Hello,\n\nI need technical support.\n\nThank you!',
     // Bottom navigation
@@ -675,7 +675,7 @@ class AppTranslations {
     'instructions_section': 'הוראות הכנה',
     'notes_section': 'הערות',
     'tags_section': 'תגיות',
-    'shared_from_recipe_keeper': 'שיתוף מ-Recipe Keeper',
+    'shared_from_recipe_keeper': 'שיתוף מ-SpoonIt',
     'login_to_add_to_shopping_list': 'יש להתחבר כדי להוסיף לרשימת קניות',
     'item_already_in_shopping_list': 'הפריט כבר קיים ברשימת הקניות',
     'item_added_to_shopping_list': 'הפריט נוסף לרשימת הקניות',
@@ -755,7 +755,7 @@ class AppTranslations {
     'i_am_not_robot': 'אני לא רובוט',
     'send_email': 'שלח אימייל',
     'cannot_open_email_app': 'לא ניתן לפתוח אפליקציית אימייל',
-    'technical_support_subject': 'תמיכה טכנית - Recipe Keeper',
+    'technical_support_subject': 'תמיכה טכנית - SpoonIt',
     'default_support_message': 'שלום,\n\nאני זקוק לתמיכה טכנית.\n\nתודה!',
     // Bottom navigation
     'shopping_list_nav': 'רשימת קניות',

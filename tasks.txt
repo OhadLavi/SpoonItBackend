@@ -1,4 +1,4 @@
-# Recipe Keeper App Tasks
+# SpoonIt App Tasks
 
 ## UI Improvements
 - [x] Fix grid cards in home screen to make them less tall

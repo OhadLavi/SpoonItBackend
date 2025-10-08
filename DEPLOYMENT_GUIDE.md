@@ -1,6 +1,6 @@
-# Recipe Keeper App Deployment Guide
+# SpoonIt App Deployment Guide
 
-This guide will help you deploy your Recipe Keeper app to Firebase Hosting.
+This guide will help you deploy your SpoonIt app to Firebase Hosting.
 
 ## Prerequisites
 

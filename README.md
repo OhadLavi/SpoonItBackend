@@ -1,4 +1,4 @@
-# Recipe Keeper
+# SpoonIt
 
 A Flutter application for storing, organizing, and sharing your favorite recipes.
 

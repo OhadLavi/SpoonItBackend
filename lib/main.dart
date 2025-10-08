@@ -106,7 +106,7 @@ class _RecipeKeeperAppState extends ConsumerState<RecipeKeeperApp>
     final themeMode = settings.themeMode;
 
     return MaterialApp.router(
-      title: 'Recipe Keeper',
+      title: 'SpoonIt',
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: themeMode,
