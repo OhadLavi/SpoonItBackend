@@ -12,7 +12,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:recipe_keeper/services/image_service.dart';
 // import 'package:url_launcher/url_launcher.dart';
 import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
-// import 'package:share_plus/share_plus.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:recipe_keeper/services/shopping_list_service.dart';
 
 class RecipeDetailScreen extends ConsumerStatefulWidget {
@@ -500,8 +500,8 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
   // Share recipe functionality
   void _shareRecipe(dynamic recipe) {
     final String shareText = _buildShareText(recipe);
-    // TODO: Fix SharePlus API usage
-    // SharePlus.instance.share(shareText, subject: 'Recipe');
+    // Share the recipe using the updated SharePlus API
+    SharePlus.instance.share(ShareParams(text: shareText, subject: 'Recipe'));
   }
 
   String _buildShareText(dynamic recipe) {

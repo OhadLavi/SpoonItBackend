@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:recipe_keeper/services/chat_service.dart';
-import 'package:recipe_keeper/providers/settings_provider.dart';
 import 'package:recipe_keeper/utils/translations.dart';
 import 'package:recipe_keeper/widgets/app_header.dart';
 import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:recipe_keeper/utils/language_utils.dart';
+import 'package:recipe_keeper/widgets/common/directional_text.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({super.key});
@@ -32,7 +33,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final message = _messageController.text.trim();
     if (message.isEmpty) return;
 
-    final isHebrew = ref.read(settingsProvider).language == AppLanguage.hebrew;
+    final isHebrew = LanguageUtils.isHebrew(ref);
 
     setState(() {
       _messages.add(ChatMessage(text: message, isUser: true));
@@ -68,11 +69,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isHebrew = ref.watch(settingsProvider).language == AppLanguage.hebrew;
+    final isHebrew = LanguageUtils.isHebrew(ref);
 
-    return Directionality(
-      textDirection: isHebrew ? TextDirection.rtl : TextDirection.ltr,
-      child: Scaffold(
+    return LanguageUtils.wrapWithDirectionality(
+      ref,
+      Scaffold(
         body: Column(
           children: [
             AppHeader(title: AppTranslations.getText(ref, 'chat')),
@@ -192,15 +193,13 @@ class MessageBubble extends StatelessWidget {
                   : Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(20),
         ),
-        child: Text(
+        child: DirectionalText(
           message.text,
           style: TextStyle(
             color: message.isUser ? AppTheme.lightAccentColor : null,
             fontFamily: isHebrew ? 'Heebo' : null,
             fontSize: 16,
           ),
-          textDirection: isHebrew ? TextDirection.rtl : TextDirection.ltr,
-          textAlign: isHebrew ? TextAlign.right : TextAlign.left,
         ),
       ),
     );

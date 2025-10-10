@@ -214,6 +214,11 @@ class AuthNotifier extends Notifier<AuthState> {
     return _completeLogin(_authService!.signInWithGoogle);
   }
 
+  Future<void> signInWithFacebook() {
+    _ensureReady();
+    return _completeLogin(_authService!.signInWithFacebook);
+  }
+
   Future<void> signInAnonymously() {
     _ensureReady();
     return _completeLogin(_authService!.signInAnonymously);

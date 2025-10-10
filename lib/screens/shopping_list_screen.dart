@@ -438,9 +438,11 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
     );
 
     // Share the shopping list using the updated SharePlus API
-    Share.share(
-      shareText.toString(),
-      subject: AppTranslations.getText(ref, 'shopping_list_share_title'),
+    SharePlus.instance.share(
+      ShareParams(
+        text: shareText.toString(),
+        subject: AppTranslations.getText(ref, 'shopping_list_share_title'),
+      ),
     );
   }
 }

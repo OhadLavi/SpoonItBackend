@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:recipe_keeper/widgets/settings_panel.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
-import 'package:recipe_keeper/utils/translations.dart';
+import 'package:recipe_keeper/utils/language_utils.dart';
+import 'package:recipe_keeper/utils/navigation_helpers.dart';
 
 class AppHeader extends ConsumerWidget {
   final String? title;
@@ -54,7 +54,7 @@ class AppHeader extends ConsumerWidget {
                             height: 32,
                             child: _TopIconButton(
                               icon:
-                                  AppTranslations.getText(ref, 'home') == 'Home'
+                                  LanguageUtils.isHebrew(ref)
                                       ? Icons.arrow_forward
                                       : Icons.arrow_back,
                               onTap:
@@ -63,8 +63,7 @@ class AppHeader extends ConsumerWidget {
                             ),
                           ),
                         )
-                      else if (AppTranslations.getText(ref, 'home') ==
-                          'Home') // English
+                      else if (!LanguageUtils.isHebrew(ref)) // English
                         Align(
                           alignment: Alignment.centerLeft,
                           child: SizedBox(
@@ -76,7 +75,10 @@ class AppHeader extends ConsumerWidget {
                               child: _TopProfileButton(
                                 onTap:
                                     onProfileTap ??
-                                    () => showSettingsPanel(context),
+                                    () => NavigationHelpers.showSettingsPanel(
+                                      context,
+                                      ref,
+                                    ),
                               ),
                             ),
                           ),
@@ -90,8 +92,8 @@ class AppHeader extends ConsumerWidget {
                           child: SizedBox(
                             height: 32,
                             child: Transform.translate(
-                              // tiny down-nudge for nicer optical centering
-                              offset: const Offset(0, 1),
+                              // Match the profile icon alignment
+                              offset: const Offset(0, 6),
                               child: SvgPicture.asset(
                                 'assets/images/logo.svg',
                                 height: 32,
@@ -108,8 +110,7 @@ class AppHeader extends ConsumerWidget {
                       ),
 
                       // Right: profile (for Hebrew) or empty space (for English)
-                      if (AppTranslations.getText(ref, 'home') !=
-                          'Home') // Hebrew
+                      if (LanguageUtils.isHebrew(ref)) // Hebrew
                         Align(
                           alignment: Alignment.centerRight,
                           child: SizedBox(
@@ -121,7 +122,10 @@ class AppHeader extends ConsumerWidget {
                               child: _TopProfileButton(
                                 onTap:
                                     onProfileTap ??
-                                    () => showSettingsPanel(context),
+                                    () => NavigationHelpers.showSettingsPanel(
+                                      context,
+                                      ref,
+                                    ),
                               ),
                             ),
                           ),

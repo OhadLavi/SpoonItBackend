@@ -193,6 +193,25 @@ class AuthService {
     }
   }
 
+  Future<UserCredentialLite> signInWithFacebook() async {
+    try {
+      if (kDebugMode) {
+        developer.log('Facebook sign-in', name: 'AuthService');
+      }
+
+      // For now, we'll use a placeholder implementation
+      // In a real app, you would integrate with Facebook SDK
+      throw Exception(
+        'Facebook login not yet implemented. Please use Google or email login.',
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        developer.log('Facebook sign-in error', name: 'AuthService', error: e);
+      }
+      rethrow;
+    }
+  }
+
   Future<UserCredentialLite> signInAnonymously() async {
     try {
       if (kDebugMode) {

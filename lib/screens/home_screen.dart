@@ -4,16 +4,18 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:recipe_keeper/services/category_service.dart';
 import 'package:recipe_keeper/models/category.dart';
-import 'package:recipe_keeper/widgets/settings_menu.dart';
 import 'package:recipe_keeper/widgets/app_header.dart';
 import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
 import 'package:recipe_keeper/widgets/add_category_dialog.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
 import 'package:recipe_keeper/services/category_icon_service.dart';
-import 'package:recipe_keeper/providers/settings_provider.dart';
-import 'dart:ui';
 import 'package:recipe_keeper/utils/translations.dart';
+import 'package:recipe_keeper/utils/language_utils.dart';
+import 'package:recipe_keeper/utils/responsive_utils.dart';
+import 'package:recipe_keeper/utils/navigation_helpers.dart';
+import 'package:recipe_keeper/widgets/common/dotted_border_card.dart';
+import 'package:recipe_keeper/widgets/common/directional_text.dart';
 
 final gridViewProvider = Provider<bool>((ref) => false);
 final favoritesUIProvider = Provider<Set<String>>((ref) => <String>{});
@@ -109,93 +111,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _showSettings(BuildContext context) {
-    final hostContext = context; // <-- stable parent context
-    final isHebrew = ref.watch(settingsProvider).language == AppLanguage.hebrew;
-
-    showGeneralDialog(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: '',
-      barrierColor: AppTheme.dividerColor.withValues(alpha: 0.54),
-      transitionDuration: const Duration(milliseconds: 300),
-      pageBuilder: (ctx, anim, secAnim) => const SizedBox.shrink(),
-      transitionBuilder: (context, animation, secAnim, child) {
-        final w = MediaQuery.of(context).size.width;
-        final h = MediaQuery.of(context).size.height;
-        final panelW = w < 520 ? 320.0 : 380.0;
-
-        return SlideTransition(
-          position: Tween<Offset>(
-            begin: isHebrew ? const Offset(1, 0) : const Offset(-1, 0),
-            end: Offset.zero,
-          ).animate(
-            CurvedAnimation(parent: animation, curve: Curves.easeInOut),
-          ),
-          child: Align(
-            alignment: isHebrew ? Alignment.centerRight : Alignment.centerLeft,
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                // Panel
-                Container(
-                  width: panelW,
-                  height: h,
-                  decoration: const BoxDecoration(
-                    color: AppTheme.uiAccentColor,
-                  ),
-                  child: Material(
-                    color: Colors.transparent,
-                    child: Theme(
-                      data: Theme.of(context).copyWith(
-                        textTheme: Theme.of(context).textTheme.copyWith(
-                          bodyMedium: const TextStyle(
-                            color: AppTheme.lightAccentColor,
-                            fontFamily: AppTheme.primaryFontFamily,
-                          ),
-                        ),
-                      ),
-                      child: Directionality(
-                        textDirection:
-                            isHebrew ? TextDirection.rtl : TextDirection.ltr,
-                        child: SettingsMenu(
-                          hostContext: hostContext,
-                        ), // <-- pass it in
-                      ),
-                    ),
-                  ),
-                ),
-
-                // Close button positioned based on language direction
-                Positioned(
-                  left: isHebrew ? -18 : null,
-                  right: isHebrew ? null : -18,
-                  top: 44,
-                  child: GestureDetector(
-                    onTap: () => Navigator.pop(context),
-                    child: CustomPaint(
-                      size: const Size(32, 32),
-                      painter: WavyButtonPainter(),
-                      child: Center(
-                        child: Icon(
-                          isHebrew ? Icons.chevron_right : Icons.chevron_left,
-                          size: 20,
-                          color: AppTheme.primaryColor,
-                          textDirection: TextDirection.ltr, // prevent RTL flip
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
+    NavigationHelpers.showSettingsPanel(context, ref);
   }
 
   Widget _buildSearchBox(BuildContext context) {
-    final isHebrew = ref.watch(settingsProvider).language == AppLanguage.hebrew;
+    final isHebrew = LanguageUtils.isHebrew(ref);
 
     return Container(
       height: 48,
@@ -360,12 +280,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     List<dynamic> categories,
     bool isDynamic,
   ) {
-    // Calculate responsive sizes based on screen width
-    final screenWidth = MediaQuery.of(context).size.width;
-    // Make icons larger and cards visually tighter
-    final iconSize = (screenWidth * 0.10).clamp(40.0, 72.0);
-    final fontSize = (screenWidth * 0.033).clamp(12.0, 17.0);
-    final spacing = (screenWidth * 0.06).clamp(12.0, 24.0);
+    // Calculate responsive sizes using utilities
+    final iconSize = ResponsiveUtils.calculateResponsiveIconSize(
+      context,
+      minSize: 40.0,
+      maxSize: 72.0,
+      scaleFactor: 0.10,
+    );
+    final fontSize = ResponsiveUtils.calculateResponsiveFontSize(
+      context,
+      minSize: 12.0,
+      maxSize: 17.0,
+      scaleFactor: 0.033,
+    );
+    final spacing = ResponsiveUtils.calculateResponsiveSpacing(
+      context,
+      minSpacing: 12.0,
+      maxSpacing: 24.0,
+      scaleFactor: 0.06,
+    );
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -396,7 +329,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                       SizedBox(height: iconSize * 0.2),
                       Flexible(
-                        child: Text(
+                        child: DirectionalText(
                           AppTranslations.getText(ref, 'add_category'),
                           style: TextStyle(
                             fontSize: fontSize * 0.85, // Slightly smaller font
@@ -466,7 +399,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           color: AppTheme.primaryColor,
                         ),
                     SizedBox(height: iconSize * 0.1),
-                    Text(
+                    DirectionalText(
                       isDynamic
                           ? category.name
                           : AppTranslations.getText(
@@ -615,101 +548,4 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
     );
   }
-}
-
-// Dotted border card for add-category
-class DottedBorderCard extends StatelessWidget {
-  final Widget child;
-  const DottedBorderCard({super.key, required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    return CustomPaint(
-      painter: _DashedBorderPainter(),
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppTheme.backgroundColor,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: child,
-      ),
-    );
-  }
-}
-
-class _DashedBorderPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Paint paint =
-        Paint()
-          ..color = AppTheme.uiAccentColor
-          ..strokeWidth = 1.5
-          ..style = PaintingStyle.stroke;
-    const double dashWidth = 6.0;
-    const double dashSpace = 4.0;
-    final RRect rRect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(0, 0, size.width, size.height),
-      const Radius.circular(12),
-    );
-    final Path path = Path()..addRRect(rRect);
-    double distance = 0.0;
-    final PathMetrics pathMetrics = path.computeMetrics();
-    for (final PathMetric pathMetric in pathMetrics) {
-      while (distance < pathMetric.length) {
-        final double nextDash = distance + dashWidth;
-        final bool isDashEnd = nextDash < pathMetric.length;
-        final Path extractPath = pathMetric.extractPath(
-          distance,
-          isDashEnd ? nextDash : pathMetric.length,
-        );
-        canvas.drawPath(extractPath, paint);
-        distance += dashWidth + dashSpace;
-      }
-      distance = 0.0;
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-class WavyButtonPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint =
-        Paint()
-          ..color = AppTheme.uiAccentColor
-          ..style = PaintingStyle.fill;
-
-    final path = Path();
-
-    // Start from top-left
-    path.moveTo(0, 0);
-
-    // Create concave curve on the left edge
-    path.cubicTo(
-      size.width * 0.1,
-      size.height * 0.2, // Control point 1
-      size.width * 0.1,
-      size.height * 0.8, // Control point 2
-      0,
-      size.height, // End at bottom-left
-    );
-
-    // Bottom edge (straight)
-    path.lineTo(size.width, size.height);
-
-    // Right edge (straight)
-    path.lineTo(size.width, 0);
-
-    // Top edge (straight)
-    path.lineTo(0, 0);
-
-    path.close();
-
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

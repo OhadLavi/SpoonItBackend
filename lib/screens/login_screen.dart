@@ -8,6 +8,8 @@ import 'package:recipe_keeper/utils/helpers.dart';
 import 'package:recipe_keeper/utils/translations.dart';
 import 'package:recipe_keeper/widgets/auth_widgets.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:recipe_keeper/utils/responsive_utils.dart';
+import 'package:recipe_keeper/utils/language_utils.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -72,6 +74,68 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
+  Future<void> _signInWithFacebook() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await ref.read(authProvider.notifier).signInWithFacebook();
+      if (mounted) context.go('/home');
+    } catch (e) {
+      setState(() {
+        _errorMessage = e.toString().replaceFirst('Exception: ', '');
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _resetPassword() async {
+    if (_emailController.text.trim().isEmpty) {
+      setState(() {
+        _errorMessage = AppTranslations.getText(ref, 'email_required');
+      });
+      return;
+    }
+
+    if (!Helpers.isValidEmail(_emailController.text.trim())) {
+      setState(() {
+        _errorMessage = AppTranslations.getText(ref, 'invalid_email');
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await ref
+          .read(authProvider.notifier)
+          .resetPassword(_emailController.text.trim());
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              AppTranslations.getText(ref, 'reset_password_success'),
+            ),
+            backgroundColor: AppTheme.successColor,
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = e.toString().replaceFirst('Exception: ', '');
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
@@ -80,13 +144,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final mainTextColor = isDark ? AppTheme.darkTextColor : AppTheme.textColor;
 
     final screenWidth = MediaQuery.of(context).size.width;
-    final isWeb = screenWidth > 700;
+    // final isWeb = screenWidth > 700;
 
     // NEW: keep margins on phones, cap width on larger screens
-    final double panelWidth =
-        isWeb ? 500.0 : (screenWidth > 560 ? 500.0 : (screenWidth - 32.0));
+    final double panelWidth = ResponsiveUtils.calculateResponsivePanelWidth(
+      context,
+    );
 
-    final isHebrew = ref.watch(settingsProvider).language == AppLanguage.hebrew;
+    final isHebrew = LanguageUtils.isHebrew(ref);
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
@@ -497,9 +562,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                         ? Alignment.centerLeft
                                         : Alignment.centerRight,
                                 child: TextButton(
-                                  onPressed: () {
-                                    // TODO: Implement password reset
-                                  },
+                                  onPressed: _isLoading ? null : _resetPassword,
                                   child: Text(
                                     AppTranslations.getText(
                                       ref,
@@ -579,11 +642,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  // Facebook (stub)
+                                  // Facebook
                                   InkWell(
-                                    onTap: () {
-                                      // TODO: Implement Facebook login
-                                    },
+                                    onTap:
+                                        _isLoading ? null : _signInWithFacebook,
                                     child: Container(
                                       width: 44,
                                       height: 44,

@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:recipe_keeper/providers/auth_provider.dart';
-import 'package:recipe_keeper/providers/settings_provider.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
 import 'dart:developer' as developer;
 import 'package:recipe_keeper/utils/translations.dart';
+import 'package:recipe_keeper/utils/language_utils.dart';
+import 'package:recipe_keeper/widgets/common/directional_text.dart';
+import 'package:recipe_keeper/widgets/common/directional_icon.dart';
 
 class SettingsMenu extends ConsumerWidget {
   const SettingsMenu({super.key, required this.hostContext});
@@ -46,8 +47,7 @@ class SettingsMenu extends ConsumerWidget {
     final email = authState.user?.email.trim();
 
     // Check if we're in English mode
-    final isEnglish =
-        ref.read(settingsProvider).language == AppLanguage.english;
+    // final isEnglish = !LanguageUtils.isHebrew(ref);
 
     // Debug logging
     developer.log(
@@ -70,11 +70,10 @@ class SettingsMenu extends ConsumerWidget {
             onTap: () => _closeAndGo('/profile'),
             child: MouseRegion(
               cursor: SystemMouseCursors.click,
-              child: Text(
+              child: DirectionalText(
                 (name?.isNotEmpty ?? false)
                     ? name!
                     : AppTranslations.getText(ref, 'user'),
-                textAlign: isEnglish ? TextAlign.left : TextAlign.right,
                 style: const TextStyle(
                   fontSize: 34.58,
                   fontWeight: FontWeight.w600,
@@ -85,9 +84,8 @@ class SettingsMenu extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 2),
-          Text(
+          DirectionalText(
             email ?? '',
-            textAlign: isEnglish ? TextAlign.left : TextAlign.right,
             style: const TextStyle(
               fontSize: 17.29,
               fontFamily: AppTheme.primaryFontFamily,
@@ -181,9 +179,7 @@ class SettingsMenu extends ConsumerWidget {
     WidgetRef? ref,
   }) {
     // Check if we're in English mode
-    final isEnglish =
-        ref != null &&
-        ref.read(settingsProvider).language == AppLanguage.english;
+    // final isEnglish = ref != null && !LanguageUtils.isHebrew(ref);
 
     return InkWell(
       onTap: onTap,
@@ -195,25 +191,10 @@ class SettingsMenu extends ConsumerWidget {
               SizedBox(
                 width: 20,
                 height: 20,
-                child: Transform(
-                  alignment: Alignment.center,
-                  transform:
-                      svgAsset == 'assets/images/logout.svg' && isEnglish
-                          ? (Matrix4.identity()..scaleByDouble(
-                            -1.0,
-                            1.0,
-                            1.0,
-                            1.0,
-                          )) // Flip logout icon for English
-                          : Matrix4.identity(),
-                  child: SvgPicture.asset(
-                    svgAsset,
-                    colorFilter: ColorFilter.mode(
-                      AppTheme.lightAccentColor.withValues(alpha: 0.6),
-                      BlendMode.srcIn,
-                    ),
-                    fit: BoxFit.contain,
-                  ),
+                child: DirectionalIcon.svg(
+                  svgAsset,
+                  size: 20,
+                  color: AppTheme.lightAccentColor.withValues(alpha: 0.6),
                 ),
               )
             else if (icon != null)
@@ -225,9 +206,8 @@ class SettingsMenu extends ConsumerWidget {
               ),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(
+              child: DirectionalText(
                 title,
-                textAlign: isEnglish ? TextAlign.left : TextAlign.right,
                 style: const TextStyle(
                   fontSize: 18,
                   color: AppTheme.lightAccentColor,
