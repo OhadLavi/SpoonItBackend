@@ -17,13 +17,11 @@ class InputSanitizer {
     return input
         .trim()
         .replaceAll(RegExp(r'<[^>]*>'), '') // Remove HTML tags
-        .replaceAll(
-          RegExp(
-            r'[<>"\'
-            ']',
-          ),
-          '',
-        ) // Remove dangerous characters
+        .replaceAll('<', '')
+        .replaceAll('>', '')
+        .replaceAll('"', '')
+        .replaceAll("'", '')
+        .replaceAll(r'\', '') // Remove dangerous characters
         .replaceAll(RegExp(r'\s+'), ' ') // Normalize whitespace
         .substring(0, math.min(input.length, maxGeneralTextLength));
   }
@@ -35,13 +33,11 @@ class InputSanitizer {
     return input
         .trim()
         .replaceAll(RegExp(r'<[^>]*>'), '') // Remove HTML tags
-        .replaceAll(
-          RegExp(
-            r'[<>"\'
-            ']',
-          ),
-          '',
-        ) // Remove dangerous characters
+        .replaceAll('<', '')
+        .replaceAll('>', '')
+        .replaceAll('"', '')
+        .replaceAll("'", '')
+        .replaceAll(r'\', '') // Remove dangerous characters
         .replaceAll(RegExp(r'\s+'), ' ') // Normalize whitespace
         .substring(0, math.min(input.length, maxNameLength));
   }
@@ -73,13 +69,13 @@ class InputSanitizer {
       final uri = Uri.parse(urlWithProtocol);
 
       // Validate scheme
-      if (!['http', 'https'].contains(uri.scheme)) {
-        throw FormatException('Invalid URL scheme');
+      if (!const ['http', 'https'].contains(uri.scheme)) {
+        throw const FormatException('Invalid URL scheme');
       }
 
       // Validate host
       if (uri.host.isEmpty) {
-        throw FormatException('Invalid host');
+        throw const FormatException('Invalid host');
       }
 
       return uri.toString().substring(
@@ -98,13 +94,11 @@ class InputSanitizer {
     return title
         .trim()
         .replaceAll(RegExp(r'<[^>]*>'), '') // Remove HTML tags
-        .replaceAll(
-          RegExp(
-            r'[<>"\'
-            ']',
-          ),
-          '',
-        ) // Remove dangerous characters
+        .replaceAll('<', '')
+        .replaceAll('>', '')
+        .replaceAll('"', '')
+        .replaceAll("'", '')
+        .replaceAll(r'\', '') // Remove dangerous characters
         .replaceAll(RegExp(r'\s+'), ' ') // Normalize whitespace
         .substring(0, math.min(title.length, maxRecipeTitleLength));
   }
@@ -116,13 +110,11 @@ class InputSanitizer {
     return ingredient
         .trim()
         .replaceAll(RegExp(r'<[^>]*>'), '') // Remove HTML tags
-        .replaceAll(
-          RegExp(
-            r'[<>"\'
-            ']',
-          ),
-          '',
-        ) // Remove dangerous characters
+        .replaceAll('<', '')
+        .replaceAll('>', '')
+        .replaceAll('"', '')
+        .replaceAll("'", '')
+        .replaceAll(r'\', '') // Remove dangerous characters
         .replaceAll(RegExp(r'\s+'), ' ') // Normalize whitespace
         .substring(0, math.min(ingredient.length, maxIngredientLength));
   }
@@ -134,13 +126,11 @@ class InputSanitizer {
     return instruction
         .trim()
         .replaceAll(RegExp(r'<[^>]*>'), '') // Remove HTML tags
-        .replaceAll(
-          RegExp(
-            r'[<>"\'
-            ']',
-          ),
-          '',
-        ) // Remove dangerous characters
+        .replaceAll('<', '')
+        .replaceAll('>', '')
+        .replaceAll('"', '')
+        .replaceAll("'", '')
+        .replaceAll(r'\', '') // Remove dangerous characters
         .replaceAll(RegExp(r'\s+'), ' ') // Normalize whitespace
         .substring(0, math.min(instruction.length, maxInstructionLength));
   }

@@ -156,8 +156,9 @@ class PasswordValidator {
     // Penalty for common patterns
     if (_isCommonPassword(password)) score -= 2;
     if (RegExp(r'(.)\1{2,}').hasMatch(password)) score -= 1; // Repeated chars
-    if (RegExp(r'123|abc|qwe').hasMatch(password.toLowerCase()))
+    if (RegExp(r'123|abc|qwe').hasMatch(password.toLowerCase())) {
       score -= 1; // Sequential
+    }
 
     if (score <= 2) return PasswordStrength.weak;
     if (score <= 4) return PasswordStrength.medium;

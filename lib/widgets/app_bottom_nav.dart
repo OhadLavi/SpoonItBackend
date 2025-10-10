@@ -26,7 +26,7 @@ class AppBottomNav extends ConsumerWidget {
               child: SizedBox(
                 height: 60,
                 child: CustomPaint(
-                  painter: CurvedBottomNavPainter(),
+                  painter: const CurvedBottomNavPainter(),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     crossAxisAlignment: CrossAxisAlignment.center,

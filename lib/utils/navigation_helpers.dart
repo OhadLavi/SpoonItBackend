@@ -138,7 +138,7 @@ class NavigationHelpers {
                     onTap: () => Navigator.pop(context),
                     child: CustomPaint(
                       size: const Size(32, 32),
-                      painter: WavyButtonPainter(),
+                      painter: const WavyButtonPainter(),
                       child: Center(
                         child: Icon(
                           isHebrew ? Icons.chevron_right : Icons.chevron_left,
