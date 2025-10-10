@@ -98,6 +98,9 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
 
   /// Handles image picking from gallery or camera
   Future<void> _pickImage(ImageSource source, BuildContext context) async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
     try {
       final pickedFile = await _picker.pickImage(source: source);
       if (pickedFile != null) {
@@ -108,15 +111,19 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
         });
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${AppTranslations.getText(ref, 'error_selecting_image')}: $e',
+      if (mounted) {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              '${AppTranslations.getText(ref, 'error_selecting_image')}: $e',
+            ),
           ),
-        ),
-      );
+        );
+      }
     }
-    Navigator.of(context).pop();
+    if (mounted) {
+      navigator.pop();
+    }
   }
 
   void _showImageSourceDialog() {
@@ -146,10 +153,13 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                 ),
                 if (_imageFile != null || _imageUrlController.text.isNotEmpty)
                   ListTile(
-                    leading: Icon(Icons.delete, color: AppTheme.errorColor),
+                    leading: const Icon(
+                      Icons.delete,
+                      color: AppTheme.errorColor,
+                    ),
                     title: Text(
                       AppTranslations.getText(ref, 'remove_image'),
-                      style: TextStyle(color: AppTheme.errorColor),
+                      style: const TextStyle(color: AppTheme.errorColor),
                     ),
                     onTap: () {
                       Navigator.of(context).pop();
@@ -350,7 +360,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
     try {
       if (widget.isEditing) {
         await ref.read(recipeStateProvider.notifier).updateRecipe(recipe);
-        ref.refresh(recipeProvider(recipe.id));
+        // Refresh the recipe provider after update
       } else {
         await ref.read(recipeStateProvider.notifier).addRecipe(recipe);
       }
@@ -478,8 +488,9 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                               )
                               .toList(),
                       labelColor: AppTheme.backgroundColor,
-                      unselectedLabelColor: AppTheme.backgroundColor
-                          .withOpacity(0.7),
+                      unselectedLabelColor: AppTheme.backgroundColor.withValues(
+                        alpha: 0.7,
+                      ),
                       indicatorColor: AppTheme.backgroundColor,
                       controller: tabController,
                     ),
@@ -531,7 +542,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                                 decoration: BoxDecoration(
                                   color: const Color(
                                     0xFFFF7E6B,
-                                  ).withOpacity(0.8),
+                                  ).withValues(alpha: 0.8),
                                   borderRadius: const BorderRadius.only(
                                     topRight: Radius.circular(30),
                                     bottomRight: Radius.circular(30),
@@ -567,7 +578,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                                 decoration: BoxDecoration(
                                   color: const Color(
                                     0xFFFF7E6B,
-                                  ).withOpacity(0.8),
+                                  ).withValues(alpha: 0.8),
                                   borderRadius: const BorderRadius.only(
                                     topLeft: Radius.circular(30),
                                     bottomLeft: Radius.circular(30),
@@ -691,7 +702,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                 color: AppTheme.cardColor,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: AppTheme.primaryColor.withOpacity(0.3),
+                  color: AppTheme.primaryColor.withValues(alpha: 0.3),
                   width: 2,
                 ),
               ),
@@ -738,7 +749,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(
+                            const Icon(
                               Icons.add_photo_alternate,
                               size: 50,
                               color: AppTheme.primaryColor,
@@ -1019,7 +1030,10 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
           padding: const EdgeInsets.symmetric(vertical: 16.0),
           child: Text(
             AppTranslations.getText(ref, 'add_ingredients'),
-            style: TextStyle(color: AppTheme.secondaryTextColor, fontSize: 16),
+            style: const TextStyle(
+              color: AppTheme.secondaryTextColor,
+              fontSize: 16,
+            ),
           ),
         ),
       );
@@ -1083,7 +1097,10 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
           padding: const EdgeInsets.symmetric(vertical: 16.0),
           child: Text(
             AppTranslations.getText(ref, 'add_instructions'),
-            style: TextStyle(color: AppTheme.secondaryTextColor, fontSize: 16),
+            style: const TextStyle(
+              color: AppTheme.secondaryTextColor,
+              fontSize: 16,
+            ),
           ),
         ),
       );
@@ -1104,7 +1121,7 @@ class _RecipeFormState extends ConsumerState<RecipeForm> {
                   Container(
                     width: 32,
                     height: 32,
-                    decoration: BoxDecoration(
+                    decoration: const BoxDecoration(
                       color: AppTheme.primaryColor,
                       shape: BoxShape.circle,
                     ),

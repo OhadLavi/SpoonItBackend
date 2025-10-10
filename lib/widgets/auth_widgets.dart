@@ -9,11 +9,11 @@ class AuthHeader extends StatelessWidget {
   final bool showGraphic;
 
   const AuthHeader({
-    Key? key,
+    super.key,
     this.height = 420,
     this.child,
     this.showGraphic = true,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -77,8 +77,7 @@ class AuthPanel extends StatelessWidget {
   final Widget child;
   final double topMargin;
 
-  const AuthPanel({Key? key, required this.child, this.topMargin = 220})
-    : super(key: key);
+  const AuthPanel({super.key, required this.child, this.topMargin = 220});
 
   @override
   Widget build(BuildContext context) {
@@ -133,7 +132,7 @@ class AuthWelcomeBar extends StatelessWidget {
   final double? maxIconSize;
 
   const AuthWelcomeBar({
-    Key? key,
+    super.key,
     required this.panelWidth,
     required this.topMargin,
     required this.isHebrew,
@@ -141,7 +140,7 @@ class AuthWelcomeBar extends StatelessWidget {
     required this.subtitleText,
     required this.iconAsset,
     this.maxIconSize,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

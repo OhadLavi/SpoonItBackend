@@ -106,7 +106,7 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
                       fontFamily: AppTheme.secondaryFontFamily,
                     ),
                     hintStyle: TextStyle(
-                      color: AppTheme.textColor.withOpacity(0.6),
+                      color: AppTheme.textColor.withValues(alpha: 0.6),
                       fontFamily: AppTheme.secondaryFontFamily,
                     ),
                     border: OutlineInputBorder(
@@ -116,12 +116,12 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(
-                        color: AppTheme.textColor.withOpacity(0.2),
+                        color: AppTheme.textColor.withValues(alpha: 0.2),
                         width: 1,
                       ),
                     ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: const BorderRadius.all(Radius.circular(8)),
+                    focusedBorder: const OutlineInputBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(8)),
                       borderSide: BorderSide(
                         color: AppTheme.primaryColor, // avoid const here
                         width: 2,
@@ -144,10 +144,10 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: AppTheme.errorColor.withOpacity(0.1),
+                    color: AppTheme.errorColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: AppTheme.errorColor.withOpacity(0.3),
+                      color: AppTheme.errorColor.withValues(alpha: 0.3),
                     ),
                   ),
                   child: Row(
@@ -176,7 +176,7 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
 
               Text(
                 AppTranslations.getText(ref, 'select_icon'),
-                style: TextStyle(
+                style: const TextStyle(
                   color: AppTheme.textColor,
                   fontFamily: AppTheme.secondaryFontFamily,
                   fontWeight: FontWeight.w600,
@@ -210,14 +210,14 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
                       decoration: BoxDecoration(
                         color:
                             isSelected
-                                ? AppTheme.primaryColor.withOpacity(0.1)
+                                ? AppTheme.primaryColor.withValues(alpha: 0.1)
                                 : AppTheme.cardColor,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
                           color:
                               isSelected
                                   ? AppTheme.primaryColor
-                                  : AppTheme.textColor.withOpacity(0.1),
+                                  : AppTheme.textColor.withValues(alpha: 0.1),
                           width: isSelected ? 2 : 1,
                         ),
                       ),
@@ -245,7 +245,7 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
           onPressed: _isLoading ? null : () => Navigator.pop(context),
           child: Text(
             AppTranslations.getText(ref, 'cancel'),
-            style: TextStyle(
+            style: const TextStyle(
               color: AppTheme.textColor,
               fontFamily: AppTheme.secondaryFontFamily,
             ),
@@ -256,7 +256,9 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
           style: ElevatedButton.styleFrom(
             backgroundColor: AppTheme.primaryColor,
             foregroundColor: AppTheme.backgroundColor,
-            disabledBackgroundColor: AppTheme.primaryColor.withOpacity(0.3),
+            disabledBackgroundColor: AppTheme.primaryColor.withValues(
+              alpha: 0.3,
+            ),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
             ),
@@ -327,7 +329,9 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
             SnackBar(
               content: Text(
                 AppTranslations.getText(ref, 'category_updated_successfully'),
-                style: TextStyle(fontFamily: AppTheme.secondaryFontFamily),
+                style: const TextStyle(
+                  fontFamily: AppTheme.secondaryFontFamily,
+                ),
               ),
               backgroundColor: AppTheme.primaryColor,
             ),
@@ -349,7 +353,9 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
             SnackBar(
               content: Text(
                 AppTranslations.getText(ref, 'category_added_successfully'),
-                style: TextStyle(fontFamily: AppTheme.secondaryFontFamily),
+                style: const TextStyle(
+                  fontFamily: AppTheme.secondaryFontFamily,
+                ),
               ),
               backgroundColor: AppTheme.primaryColor,
             ),

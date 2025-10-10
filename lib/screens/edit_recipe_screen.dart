@@ -42,7 +42,9 @@ class _EditRecipeScreenState extends ConsumerState<EditRecipeScreen> {
                         Icon(
                           Icons.restaurant_menu,
                           size: 80,
-                          color: AppTheme.secondaryTextColor.withOpacity(0.5),
+                          color: AppTheme.secondaryTextColor.withValues(
+                            alpha: 0.5,
+                          ),
                         ),
                         const SizedBox(height: 16),
                         Text(
@@ -116,7 +118,9 @@ class _EditRecipeScreenState extends ConsumerState<EditRecipeScreen> {
                         Icon(
                           Icons.error_outline,
                           size: 80,
-                          color: AppTheme.secondaryTextColor.withOpacity(0.5),
+                          color: AppTheme.secondaryTextColor.withValues(
+                            alpha: 0.5,
+                          ),
                         ),
                         const SizedBox(height: 16),
                         Text(

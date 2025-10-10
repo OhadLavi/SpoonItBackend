@@ -45,7 +45,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                 const SizedBox(height: 24),
                 Text(
                   AppTranslations.getText(ref, 'frequently_asked_questions'),
-                  style: TextStyle(
+                  style: const TextStyle(
                     color: AppTheme.textColor,
                     fontFamily: AppTheme.secondaryFontFamily,
                     fontSize: 18,
@@ -125,7 +125,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.secondaryTextColor.withOpacity(0.1),
+            color: AppTheme.secondaryTextColor.withValues(alpha: 0.1),
             spreadRadius: 1,
             blurRadius: 4,
             offset: const Offset(0, 2),
@@ -173,7 +173,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                   ),
                   title: Text(
                     AppTranslations.getText(ref, 'contact_us_title'),
-                    style: TextStyle(
+                    style: const TextStyle(
                       color: AppTheme.textColor,
                       fontFamily: AppTheme.secondaryFontFamily,
                       fontWeight: FontWeight.bold,
@@ -195,7 +195,9 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                               ),
                               textAlign: TextAlign.center,
                               style: TextStyle(
-                                color: AppTheme.textColor.withOpacity(0.8),
+                                color: AppTheme.textColor.withValues(
+                                  alpha: 0.8,
+                                ),
                                 fontFamily: AppTheme.secondaryFontFamily,
                                 fontSize: 16,
                                 fontWeight: FontWeight.w500,
@@ -227,7 +229,9 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(8),
                                   borderSide: BorderSide(
-                                    color: AppTheme.textColor.withOpacity(0.2),
+                                    color: AppTheme.textColor.withValues(
+                                      alpha: 0.2,
+                                    ),
                                     width: 1,
                                   ),
                                 ),
@@ -273,7 +277,9 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(8),
                                   borderSide: BorderSide(
-                                    color: AppTheme.textColor.withOpacity(0.2),
+                                    color: AppTheme.textColor.withValues(
+                                      alpha: 0.2,
+                                    ),
                                     width: 1,
                                   ),
                                 ),
@@ -305,7 +311,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                             },
                             title: Text(
                               AppTranslations.getText(ref, 'i_am_not_robot'),
-                              style: TextStyle(
+                              style: const TextStyle(
                                 color: AppTheme.textColor,
                                 fontFamily: AppTheme.secondaryFontFamily,
                                 fontSize: 14,
@@ -323,7 +329,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                       onPressed: () => Navigator.pop(context),
                       child: Text(
                         AppTranslations.getText(ref, 'cancel'),
-                        style: TextStyle(
+                        style: const TextStyle(
                           color: AppTheme.textColor,
                           fontFamily: AppTheme.secondaryFontFamily,
                         ),
@@ -342,14 +348,14 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                         backgroundColor: AppTheme.primaryColor,
                         foregroundColor: AppTheme.backgroundColor,
                         disabledBackgroundColor: AppTheme.dividerColor
-                            .withOpacity(0.3),
+                            .withValues(alpha: 0.3),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
                       child: Text(
                         AppTranslations.getText(ref, 'send_email'),
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontFamily: AppTheme.secondaryFontFamily,
                           fontWeight: FontWeight.bold,
                         ),
@@ -363,6 +369,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
 
   void _launchEmail(BuildContext context) async {
     Navigator.pop(context); // Close dialog first
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
 
     final String title = _titleController.text.trim();
     final String message = _messageController.text.trim();
@@ -372,7 +379,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
       subject = title;
     }
 
-    String body =
+    final String body =
         message.isNotEmpty
             ? message
             : AppTranslations.getText(ref, 'default_support_message');
@@ -387,12 +394,16 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
     if (await canLaunchUrl(emailUri)) {
       await launchUrl(emailUri);
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(AppTranslations.getText(ref, 'cannot_open_email_app')),
-          backgroundColor: AppTheme.primaryColor,
-        ),
-      );
+      if (mounted) {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              AppTranslations.getText(ref, 'cannot_open_email_app'),
+            ),
+            backgroundColor: AppTheme.primaryColor,
+          ),
+        );
+      }
     }
   }
 
@@ -403,7 +414,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.secondaryTextColor.withOpacity(0.1),
+            color: AppTheme.secondaryTextColor.withValues(alpha: 0.1),
             spreadRadius: 1,
             blurRadius: 4,
             offset: const Offset(0, 2),
@@ -419,7 +430,8 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
               children: [
                 Transform(
                   alignment: Alignment.center,
-                  transform: Matrix4.identity()..scale(-1.0, 1.0),
+                  transform:
+                      Matrix4.identity()..scaleByDouble(-1.0, 1.0, 1.0, 1.0),
                   child: const Icon(
                     Icons.help_outline,
                     color: AppTheme.primaryColor,

@@ -182,7 +182,7 @@ class _ScanRecipeScreenState extends ConsumerState<ScanRecipeScreen> {
                           width: 300,
                           height: 400,
                           decoration: BoxDecoration(
-                            color: AppTheme.primaryColor.withOpacity(0.2),
+                            color: AppTheme.primaryColor.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
                               color: AppTheme.primaryColor,
@@ -196,7 +196,7 @@ class _ScanRecipeScreenState extends ConsumerState<ScanRecipeScreen> {
                                   : Column(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Icon(
+                                      const Icon(
                                         Icons.cloud_upload,
                                         size: 60,
                                         color: AppTheme.secondaryTextColor,
@@ -207,7 +207,7 @@ class _ScanRecipeScreenState extends ConsumerState<ScanRecipeScreen> {
                                           ref,
                                           'drop_image_here',
                                         ),
-                                        style: TextStyle(
+                                        style: const TextStyle(
                                           color: AppTheme.secondaryTextColor,
                                         ),
                                         textAlign: TextAlign.center,
@@ -264,7 +264,9 @@ class _ScanRecipeScreenState extends ConsumerState<ScanRecipeScreen> {
                             'scan_recipe_instructions',
                           ),
                           textAlign: TextAlign.center,
-                          style: TextStyle(color: AppTheme.secondaryTextColor),
+                          style: const TextStyle(
+                            color: AppTheme.secondaryTextColor,
+                          ),
                         ),
                       ),
                     ],
@@ -330,7 +332,7 @@ class _RecipeFormScreenState extends ConsumerState<_RecipeFormScreen> {
               child: Row(
                 children: [
                   IconButton(
-                    icon: Icon(
+                    icon: const Icon(
                       Icons.arrow_forward,
                       color: AppTheme.lightAccentColor,
                     ),
@@ -365,7 +367,7 @@ class _RecipeFormScreenState extends ConsumerState<_RecipeFormScreen> {
                           ref,
                           'recipe_saved_successfully',
                         ),
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontFamily: AppTheme.primaryFontFamily,
                           color: AppTheme.lightAccentColor,
                         ),

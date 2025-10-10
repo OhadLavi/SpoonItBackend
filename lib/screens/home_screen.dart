@@ -77,10 +77,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         children: [
                           const SizedBox(height: 12),
                           Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 16),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
                             child: Text(
                               AppTranslations.getText(ref, 'categories'),
-                              style: TextStyle(
+                              style: const TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 28,
                                 fontFamily: AppTheme.secondaryFontFamily,
@@ -116,10 +116,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       context: context,
       barrierDismissible: true,
       barrierLabel: '',
-      barrierColor: AppTheme.dividerColor.withOpacity(0.54),
+      barrierColor: AppTheme.dividerColor.withValues(alpha: 0.54),
       transitionDuration: const Duration(milliseconds: 300),
-      pageBuilder: (_, __, ___) => const SizedBox.shrink(),
-      transitionBuilder: (context, animation, __, ___) {
+      pageBuilder: (ctx, anim, secAnim) => const SizedBox.shrink(),
+      transitionBuilder: (context, animation, secAnim, child) {
         final w = MediaQuery.of(context).size.width;
         final h = MediaQuery.of(context).size.height;
         final panelW = w < 520 ? 320.0 : 380.0;
@@ -148,7 +148,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     child: Theme(
                       data: Theme.of(context).copyWith(
                         textTheme: Theme.of(context).textTheme.copyWith(
-                          bodyMedium: TextStyle(
+                          bodyMedium: const TextStyle(
                             color: AppTheme.lightAccentColor,
                             fontFamily: AppTheme.primaryFontFamily,
                           ),
@@ -221,7 +221,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                       cursorColor: AppTheme.primaryColor,
                       decoration: InputDecoration(
-                        contentPadding: EdgeInsets.only(
+                        contentPadding: const EdgeInsets.only(
                           left: 16,
                           right: 32, // Leave space for icon
                           top: 14,
@@ -231,7 +231,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         enabledBorder: InputBorder.none,
                         focusedBorder: InputBorder.none,
                         hintText: AppTranslations.getText(ref, 'search_hint'),
-                        hintStyle: TextStyle(
+                        hintStyle: const TextStyle(
                           color: AppTheme.secondaryTextColor,
                           fontSize: 16,
                         ),
@@ -276,7 +276,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                       cursorColor: AppTheme.primaryColor,
                       decoration: InputDecoration(
-                        contentPadding: EdgeInsets.only(
+                        contentPadding: const EdgeInsets.only(
                           left: 32, // Leave space for icon
                           right: 16,
                           top: 14,
@@ -286,7 +286,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         enabledBorder: InputBorder.none,
                         focusedBorder: InputBorder.none,
                         hintText: AppTranslations.getText(ref, 'search_hint'),
-                        hintStyle: TextStyle(
+                        hintStyle: const TextStyle(
                           color: AppTheme.secondaryTextColor,
                           fontSize: 16,
                         ),
@@ -333,7 +333,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         return _buildCategoriesList(context, categories, true);
       },
       loading:
-          () => Center(
+          () => const Center(
             child: CircularProgressIndicator(
               valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryColor),
             ),
@@ -342,7 +342,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           (error, stack) => Center(
             child: Text(
               AppTranslations.getText(ref, 'error_loading_categories'),
-              style: TextStyle(
+              style: const TextStyle(
                 color: AppTheme.textColor,
                 fontFamily: AppTheme.secondaryFontFamily,
               ),
@@ -444,7 +444,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         : null,
                 boxShadow: [
                   BoxShadow(
-                    color: AppTheme.dividerColor.withOpacity(0.04),
+                    color: AppTheme.dividerColor.withValues(alpha: 0.04),
                     blurRadius: 2,
                     offset: const Offset(0, 1),
                   ),
@@ -539,7 +539,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   },
                 ),
                 ListTile(
-                  leading: Icon(Icons.delete, color: AppTheme.errorColor),
+                  leading: const Icon(Icons.delete, color: AppTheme.errorColor),
                   title: Text(AppTranslations.getText(ref, 'delete_category')),
                   onTap: () {
                     Navigator.pop(context);
@@ -573,11 +573,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               TextButton(
                 onPressed: () async {
                   Navigator.pop(context);
+                  final scaffoldMessenger = ScaffoldMessenger.of(context);
                   try {
                     final categoryService = ref.read(categoryServiceProvider);
                     await categoryService.deleteCategory(category.id);
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      scaffoldMessenger.showSnackBar(
                         SnackBar(
                           content: Text(
                             AppTranslations.getText(
@@ -591,7 +592,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     }
                   } catch (e) {
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      scaffoldMessenger.showSnackBar(
                         SnackBar(
                           content: Text(
                             AppTranslations.getText(
@@ -607,7 +608,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 },
                 child: Text(
                   AppTranslations.getText(ref, 'delete'),
-                  style: TextStyle(color: AppTheme.errorColor),
+                  style: const TextStyle(color: AppTheme.errorColor),
                 ),
               ),
             ],

@@ -27,8 +27,8 @@ class SettingsMenu extends ConsumerWidget {
     return Column(
       children: [
         _buildSettingsHeader(context, ref),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20),
           child: Divider(
             color: AppTheme.lightAccentColor,
             thickness: 0.5,
@@ -199,8 +199,12 @@ class SettingsMenu extends ConsumerWidget {
                   alignment: Alignment.center,
                   transform:
                       svgAsset == 'assets/images/logout.svg' && isEnglish
-                          ? (Matrix4.identity()
-                            ..scale(-1.0, 1.0)) // Flip logout icon for English
+                          ? (Matrix4.identity()..scaleByDouble(
+                            -1.0,
+                            1.0,
+                            1.0,
+                            1.0,
+                          )) // Flip logout icon for English
                           : Matrix4.identity(),
                   child: SvgPicture.asset(
                     svgAsset,
@@ -224,7 +228,7 @@ class SettingsMenu extends ConsumerWidget {
               child: Text(
                 title,
                 textAlign: isEnglish ? TextAlign.left : TextAlign.right,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 18,
                   color: AppTheme.lightAccentColor,
                   fontWeight: FontWeight.w400,

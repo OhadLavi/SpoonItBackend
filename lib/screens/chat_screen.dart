@@ -32,7 +32,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final message = _messageController.text.trim();
     if (message.isEmpty) return;
 
-    final isHebrew = ref.read(settingsProvider) == AppLanguage.hebrew;
+    final isHebrew = ref.read(settingsProvider).language == AppLanguage.hebrew;
 
     setState(() {
       _messages.add(ChatMessage(text: message, isUser: true));
@@ -51,9 +51,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         _messages.add(ChatMessage(text: response, isUser: false));
       });
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${AppTranslations.getText(ref, 'error')}: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${AppTranslations.getText(ref, 'error')}: $e'),
+          ),
+        );
+      }
     } finally {
       setState(() {
         _isLoading = false;
@@ -64,7 +68,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isHebrew = ref.watch(settingsProvider) == AppLanguage.hebrew;
+    final isHebrew = ref.watch(settingsProvider).language == AppLanguage.hebrew;
 
     return Directionality(
       textDirection: isHebrew ? TextDirection.rtl : TextDirection.ltr,

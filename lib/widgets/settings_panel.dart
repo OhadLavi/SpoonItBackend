@@ -12,10 +12,10 @@ void showSettingsPanel(BuildContext context) {
     context: context,
     barrierDismissible: true,
     barrierLabel: '',
-    barrierColor: AppTheme.dividerColor.withOpacity(0.54),
+    barrierColor: AppTheme.dividerColor.withValues(alpha: 0.54),
     transitionDuration: const Duration(milliseconds: 300),
-    pageBuilder: (_, __, ___) => const SizedBox.shrink(),
-    transitionBuilder: (context, animation, __, ___) {
+    pageBuilder: (ctx, anim, secAnim) => const SizedBox.shrink(),
+    transitionBuilder: (context, animation, secAnim, child) {
       final w = MediaQuery.of(context).size.width;
       final h = MediaQuery.of(context).size.height;
       final panelW = w < 520 ? 320.0 : 380.0;
@@ -44,7 +44,7 @@ void showSettingsPanel(BuildContext context) {
                   child: Theme(
                     data: Theme.of(context).copyWith(
                       textTheme: Theme.of(context).textTheme.copyWith(
-                        bodyMedium: TextStyle(
+                        bodyMedium: const TextStyle(
                           color: AppTheme.lightAccentColor,
                           fontFamily: AppTheme.primaryFontFamily,
                         ),

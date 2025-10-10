@@ -57,6 +57,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   }
 
   Future<void> _pickImage(ImageSource source) async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
     try {
       final pickedFile = await _picker.pickImage(source: source);
       if (pickedFile != null) {
@@ -67,13 +69,15 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       }
     } catch (e) {
       // Handle errors, e.g., permissions
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${AppTranslations.getText(ref, 'error_selecting_image')}: $e',
+      if (mounted) {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              '${AppTranslations.getText(ref, 'error_selecting_image')}: $e',
+            ),
           ),
-        ),
-      );
+        );
+      }
     }
   }
 
@@ -103,10 +107,13 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 if (_imageFile != null ||
                     (_currentImageUrl != null && _currentImageUrl!.isNotEmpty))
                   ListTile(
-                    leading: Icon(Icons.delete, color: AppTheme.errorColor),
+                    leading: const Icon(
+                      Icons.delete,
+                      color: AppTheme.errorColor,
+                    ),
                     title: Text(
                       AppTranslations.getText(ref, 'remove_image'),
-                      style: TextStyle(color: AppTheme.errorColor),
+                      style: const TextStyle(color: AppTheme.errorColor),
                     ),
                     onTap: () {
                       setState(() {
@@ -241,7 +248,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                             radius: 60,
                             backgroundColor: const Color(
                               0xFFFF7E6B,
-                            ).withOpacity(0.1),
+                            ).withValues(alpha: 0.1),
                             backgroundImage:
                                 _imageFile != null
                                     ? FileImage(_imageFile!)
@@ -290,7 +297,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: AppTheme.secondaryTextColor.withOpacity(0.1),
+                            color: AppTheme.secondaryTextColor.withValues(
+                              alpha: 0.1,
+                            ),
                             spreadRadius: 1,
                             blurRadius: 4,
                             offset: const Offset(0, 2),
@@ -301,7 +310,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                         controller: _displayNameController,
                         decoration: InputDecoration(
                           labelText: AppTranslations.getText(ref, 'name'),
-                          labelStyle: TextStyle(color: AppTheme.textColor),
+                          labelStyle: const TextStyle(
+                            color: AppTheme.textColor,
+                          ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide.none,
@@ -333,7 +344,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: AppTheme.secondaryTextColor.withOpacity(0.1),
+                            color: AppTheme.secondaryTextColor.withValues(
+                              alpha: 0.1,
+                            ),
                             spreadRadius: 1,
                             blurRadius: 4,
                             offset: const Offset(0, 2),
@@ -347,7 +360,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                             ref,
                             'current_password',
                           ),
-                          labelStyle: TextStyle(color: AppTheme.textColor),
+                          labelStyle: const TextStyle(
+                            color: AppTheme.textColor,
+                          ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide.none,
@@ -395,7 +410,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: AppTheme.secondaryTextColor.withOpacity(0.1),
+                            color: AppTheme.secondaryTextColor.withValues(
+                              alpha: 0.1,
+                            ),
                             spreadRadius: 1,
                             blurRadius: 4,
                             offset: const Offset(0, 2),
@@ -409,7 +426,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                             ref,
                             'new_password',
                           ),
-                          labelStyle: TextStyle(color: AppTheme.textColor),
+                          labelStyle: const TextStyle(
+                            color: AppTheme.textColor,
+                          ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide.none,
@@ -457,7 +476,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: AppTheme.secondaryTextColor.withOpacity(0.1),
+                            color: AppTheme.secondaryTextColor.withValues(
+                              alpha: 0.1,
+                            ),
                             spreadRadius: 1,
                             blurRadius: 4,
                             offset: const Offset(0, 2),
@@ -471,7 +492,9 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                             ref,
                             'confirm_new_password',
                           ),
-                          labelStyle: TextStyle(color: AppTheme.textColor),
+                          labelStyle: const TextStyle(
+                            color: AppTheme.textColor,
+                          ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide.none,
@@ -521,7 +544,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: AppTheme.primaryColor.withOpacity(0.3),
+                            color: AppTheme.primaryColor.withValues(alpha: 0.3),
                             spreadRadius: 1,
                             blurRadius: 4,
                             offset: const Offset(0, 2),

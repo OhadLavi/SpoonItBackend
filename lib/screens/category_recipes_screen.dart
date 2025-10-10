@@ -68,7 +68,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                   },
                 ),
                 ListTile(
-                  leading: Icon(Icons.delete, color: AppTheme.errorColor),
+                  leading: const Icon(Icons.delete, color: AppTheme.errorColor),
                   title: Text(AppTranslations.getText(ref, 'delete_recipe')),
                   onTap: () {
                     Navigator.pop(context);
@@ -102,12 +102,13 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
               TextButton(
                 onPressed: () async {
                   Navigator.pop(context);
+                  final scaffoldMessenger = ScaffoldMessenger.of(context);
                   try {
                     await ref
                         .read(recipeStateProvider.notifier)
                         .deleteRecipe(recipe.id);
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      scaffoldMessenger.showSnackBar(
                         SnackBar(
                           content: Text(
                             AppTranslations.getText(
@@ -121,7 +122,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                     }
                   } catch (e) {
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      scaffoldMessenger.showSnackBar(
                         SnackBar(
                           content: Text(
                             AppTranslations.getText(
@@ -137,7 +138,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                 },
                 child: Text(
                   AppTranslations.getText(ref, 'delete'),
-                  style: TextStyle(color: AppTheme.errorColor),
+                  style: const TextStyle(color: AppTheme.errorColor),
                 ),
               ),
             ],
@@ -186,12 +187,14 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                         Icon(
                           Icons.error_outline,
                           size: 80,
-                          color: AppTheme.secondaryTextColor.withOpacity(0.5),
+                          color: AppTheme.secondaryTextColor.withValues(
+                            alpha: 0.5,
+                          ),
                         ),
                         const SizedBox(height: 16),
                         Text(
                           AppTranslations.getText(ref, 'error_loading_recipes'),
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontFamily: AppTheme.secondaryFontFamily,
                             fontSize: 18,
                             fontWeight: FontWeight.w500,
@@ -212,7 +215,9 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                         Icon(
                           Icons.restaurant_menu,
                           size: 80,
-                          color: AppTheme.secondaryTextColor.withOpacity(0.5),
+                          color: AppTheme.secondaryTextColor.withValues(
+                            alpha: 0.5,
+                          ),
                         ),
                         const SizedBox(height: 16),
                         Text(
@@ -220,7 +225,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                             ref,
                             'no_recipes_in_category',
                           ),
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontFamily: AppTheme.secondaryFontFamily,
                             fontSize: 18,
                             fontWeight: FontWeight.w500,
@@ -233,7 +238,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                             ref,
                             'add_recipes_with_tag',
                           ).replaceAll('{tag}', widget.categoryName),
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontFamily: AppTheme.secondaryFontFamily,
                             fontSize: 16,
                             color: AppTheme.secondaryTextColor,
@@ -297,7 +302,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                                         errorWidget: (context, url, error) {
                                           return Container(
                                             color: AppTheme.primaryColor
-                                                .withOpacity(0.1),
+                                                .withValues(alpha: 0.1),
                                             child: const Center(
                                               child: Icon(
                                                 Icons
@@ -315,8 +320,8 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                                     width: 80,
                                     height: 80,
                                     decoration: BoxDecoration(
-                                      color: AppTheme.primaryColor.withOpacity(
-                                        0.1,
+                                      color: AppTheme.primaryColor.withValues(
+                                        alpha: 0.1,
                                       ),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
@@ -338,7 +343,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                                     children: [
                                       Text(
                                         recipe.title,
-                                        style: TextStyle(
+                                        style: const TextStyle(
                                           fontFamily:
                                               AppTheme.secondaryFontFamily,
                                           fontSize: 16,
@@ -352,7 +357,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                                       if (recipe.description.isNotEmpty)
                                         Text(
                                           recipe.description,
-                                          style: TextStyle(
+                                          style: const TextStyle(
                                             fontFamily:
                                                 AppTheme.secondaryFontFamily,
                                             fontSize: 14,
@@ -365,7 +370,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                                       Row(
                                         children: [
                                           if (recipe.prepTime > 0) ...[
-                                            Icon(
+                                            const Icon(
                                               Icons.access_time,
                                               size: 14,
                                               color: AppTheme.primaryColor,
@@ -379,7 +384,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                                                 '{time}',
                                                 recipe.prepTime.toString(),
                                               ),
-                                              style: TextStyle(
+                                              style: const TextStyle(
                                                 fontFamily:
                                                     AppTheme
                                                         .secondaryFontFamily,
@@ -393,7 +398,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                                               recipe.servings > 0)
                                             const SizedBox(width: 12),
                                           if (recipe.servings > 0) ...[
-                                            Icon(
+                                            const Icon(
                                               Icons.people,
                                               size: 14,
                                               color: AppTheme.primaryColor,
@@ -407,7 +412,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                                                 '{count}',
                                                 recipe.servings.toString(),
                                               ),
-                                              style: TextStyle(
+                                              style: const TextStyle(
                                                 fontFamily:
                                                     AppTheme
                                                         .secondaryFontFamily,

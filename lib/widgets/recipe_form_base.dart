@@ -206,7 +206,9 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
                               borderRadius: BorderRadius.circular(12),
                               boxShadow: [
                                 BoxShadow(
-                                  color: AppTheme.dividerColor.withOpacity(0.5),
+                                  color: AppTheme.dividerColor.withValues(
+                                    alpha: 0.5,
+                                  ),
                                   blurRadius: 10,
                                   offset: const Offset(0, 2),
                                 ),
@@ -223,7 +225,9 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
                                     ),
                                     elevation: WidgetStateProperty.all(10),
                                     shadowColor: WidgetStateProperty.all(
-                                      AppTheme.dividerColor.withOpacity(0.5),
+                                      AppTheme.dividerColor.withValues(
+                                        alpha: 0.5,
+                                      ),
                                     ),
                                     shape: WidgetStateProperty.all(
                                       RoundedRectangleBorder(
@@ -234,7 +238,7 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
                                 ),
                               ),
                               child: DropdownButtonFormField<String>(
-                                value: _selectedCategoryId,
+                                initialValue: _selectedCategoryId,
                                 decoration: InputDecoration(
                                   labelText: AppTranslations.getText(
                                     ref,
@@ -574,7 +578,7 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
           height: 240,
           width: double.infinity,
           decoration: BoxDecoration(
-            color: AppTheme.primaryColor.withOpacity(0.1),
+            color: AppTheme.primaryColor.withValues(alpha: 0.1),
             image:
                 (_selectedImageFile != null)
                     ? DecorationImage(
@@ -591,7 +595,7 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
           child: Stack(
             children: [
               // Dark overlay
-              Container(color: AppTheme.dividerColor.withOpacity(0.4)),
+              Container(color: AppTheme.dividerColor.withValues(alpha: 0.4)),
               // Show loading indicator if uploading
               if (_isUploadingImage)
                 const Center(
@@ -614,7 +618,7 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
                       child: Center(
                         child: Text(
                           AppTranslations.getText(ref, 'change_image'),
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
                             color: AppTheme.lightAccentColor,
@@ -663,7 +667,7 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
         borderRadius: BorderRadius.circular(8),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.dividerColor.withOpacity(0.5),
+            color: AppTheme.dividerColor.withValues(alpha: 0.5),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -752,7 +756,7 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
                     borderRadius: BorderRadius.circular(12),
                     boxShadow: [
                       BoxShadow(
-                        color: AppTheme.dividerColor.withOpacity(0.5),
+                        color: AppTheme.dividerColor.withValues(alpha: 0.5),
                         blurRadius: 10,
                         offset: const Offset(0, 2),
                       ),
@@ -853,7 +857,7 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
                     borderRadius: BorderRadius.circular(12),
                     boxShadow: [
                       BoxShadow(
-                        color: AppTheme.dividerColor.withOpacity(0.5),
+                        color: AppTheme.dividerColor.withValues(alpha: 0.5),
                         blurRadius: 10,
                         offset: const Offset(0, 2),
                       ),
@@ -1003,7 +1007,7 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
                   ),
                   title: Text(
                     AppTranslations.getText(ref, 'camera'),
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontFamily: AppTheme.primaryFontFamily,
                       color: AppTheme.textColor,
                     ),
@@ -1020,7 +1024,7 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
                   ),
                   title: Text(
                     AppTranslations.getText(ref, 'gallery'),
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontFamily: AppTheme.primaryFontFamily,
                       color: AppTheme.textColor,
                     ),
@@ -1034,7 +1038,7 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
                   leading: const Icon(Icons.link, color: AppTheme.primaryColor),
                   title: Text(
                     AppTranslations.getText(ref, 'add_image'),
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontFamily: AppTheme.primaryFontFamily,
                       color: AppTheme.textColor,
                     ),
@@ -1069,8 +1073,7 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
       if (mounted) {
         ValidationService.showErrorSnackBar(
           context,
-          AppTranslations.getText(ref, 'error_selecting_image') +
-              ': ${e.toString()}',
+          '${AppTranslations.getText(ref, 'error_selecting_image')}: ${e.toString()}',
         );
       }
     }
@@ -1095,8 +1098,7 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
       if (mounted) {
         ValidationService.showErrorSnackBar(
           context,
-          AppTranslations.getText(ref, 'error_selecting_image') +
-              ': ${e.toString()}',
+          '${AppTranslations.getText(ref, 'error_selecting_image')}: ${e.toString()}',
         );
       }
     }
@@ -1112,7 +1114,7 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
             backgroundColor: AppTheme.backgroundColor,
             title: Text(
               AppTranslations.getText(ref, 'add_image'),
-              style: TextStyle(
+              style: const TextStyle(
                 fontFamily: AppTheme.primaryFontFamily,
                 color: AppTheme.textColor,
               ),
@@ -1121,17 +1123,17 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
               controller: urlController,
               decoration: InputDecoration(
                 hintText: AppTranslations.getText(ref, 'paste_recipe_url'),
-                hintStyle: TextStyle(
+                hintStyle: const TextStyle(
                   fontFamily: AppTheme.primaryFontFamily,
                   color: AppTheme.textColor,
                 ),
-                border: OutlineInputBorder(
+                border: const OutlineInputBorder(
                   borderSide: BorderSide(color: AppTheme.dividerColor),
                 ),
-                enabledBorder: OutlineInputBorder(
+                enabledBorder: const OutlineInputBorder(
                   borderSide: BorderSide(color: AppTheme.dividerColor),
                 ),
-                focusedBorder: OutlineInputBorder(
+                focusedBorder: const OutlineInputBorder(
                   borderSide: BorderSide(
                     color: AppTheme.primaryColor,
                     width: 2,
@@ -1148,7 +1150,7 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
                 onPressed: () => Navigator.pop(context),
                 child: Text(
                   AppTranslations.getText(ref, 'cancel'),
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontFamily: AppTheme.primaryFontFamily,
                     color: AppTheme.textColor,
                   ),
@@ -1173,7 +1175,7 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
                 ),
                 child: Text(
                   AppTranslations.getText(ref, 'ok'),
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontFamily: AppTheme.primaryFontFamily,
                     color: AppTheme.lightAccentColor,
                   ),
@@ -1224,8 +1226,7 @@ class _RecipeFormBaseState extends ConsumerState<RecipeFormBase> {
       if (mounted) {
         ValidationService.showErrorSnackBar(
           context,
-          AppTranslations.getText(ref, 'error_uploading_image') +
-              ': ${e.toString()}',
+          '${AppTranslations.getText(ref, 'error_uploading_image')}: ${e.toString()}',
         );
       }
     }

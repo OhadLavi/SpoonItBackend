@@ -32,12 +32,10 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
     final userId = authState.user?.uid;
 
     if (userId == null) {
-      return Scaffold(
+      return const Scaffold(
         backgroundColor: AppTheme.backgroundColor,
-        body: const Center(
-          child: Text('Please log in to view your shopping list'),
-        ),
-        bottomNavigationBar: const AppBottomNav(currentIndex: 1),
+        body: Center(child: Text('Please log in to view your shopping list')),
+        bottomNavigationBar: AppBottomNav(currentIndex: 1),
       );
     }
 
@@ -97,7 +95,7 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
                                     ref,
                                     'clear_checked_items',
                                   ),
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontFamily: AppTheme.primaryFontFamily,
                                   ),
                                 ),
@@ -123,7 +121,7 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
                                     ref,
                                     'clear_checked_items',
                                   ),
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontFamily: AppTheme.primaryFontFamily,
                                   ),
                                 ),
@@ -169,7 +167,7 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
                         ref,
                         'add_item_to_list',
                       ),
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
                     ),
                     onSubmitted:
                         (value) => _addItem(userId, showMessage: false),
@@ -208,15 +206,15 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(
+                        const Icon(
                           Icons.shopping_cart_outlined,
                           size: 64,
                           color: AppTheme.secondaryTextColor,
                         ),
-                        SizedBox(height: 16),
+                        const SizedBox(height: 16),
                         Text(
                           AppTranslations.getText(ref, 'list_is_empty'),
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 18,
                             color: AppTheme.secondaryTextColor,
                             fontFamily: AppTheme.primaryFontFamily,
@@ -227,7 +225,7 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
                             ref,
                             'add_items_to_shopping_list',
                           ),
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 14,
                             color: AppTheme.secondaryTextColor,
                             fontFamily: AppTheme.primaryFontFamily,
@@ -315,7 +313,7 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
           backgroundColor = AppTheme.warningColor;
         } else if (e.toString().contains('already exists')) {
           errorMessage = AppTranslations.getText(ref, 'item_already_in_list');
-          backgroundColor = AppTheme.primaryColor.withOpacity(0.8);
+          backgroundColor = AppTheme.primaryColor.withValues(alpha: 0.8);
         } else {
           errorMessage = AppTranslations.getText(
             ref,
@@ -386,7 +384,7 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
             content: Text(
               AppTranslations.getText(ref, 'checked_items_deleted'),
               textAlign: TextAlign.right,
-              style: TextStyle(fontFamily: AppTheme.primaryFontFamily),
+              style: const TextStyle(fontFamily: AppTheme.primaryFontFamily),
             ),
             backgroundColor: AppTheme.primaryColor,
             duration: const Duration(seconds: 2),
@@ -439,6 +437,10 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
       AppTranslations.getText(ref, 'shared_from_recipe_keeper'),
     );
 
-    Share.share(shareText.toString());
+    // Share the shopping list using the updated SharePlus API
+    Share.share(
+      shareText.toString(),
+      subject: AppTranslations.getText(ref, 'shopping_list_share_title'),
+    );
   }
 }

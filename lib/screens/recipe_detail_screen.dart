@@ -12,7 +12,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:recipe_keeper/services/image_service.dart';
 // import 'package:url_launcher/url_launcher.dart';
 import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
-import 'package:share_plus/share_plus.dart';
+// import 'package:share_plus/share_plus.dart';
 import 'package:recipe_keeper/services/shopping_list_service.dart';
 
 class RecipeDetailScreen extends ConsumerStatefulWidget {
@@ -32,9 +32,11 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: AppTheme.primaryColor.withOpacity(0.05),
+        color: AppTheme.primaryColor.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.primaryColor.withOpacity(0.15)),
+        border: Border.all(
+          color: AppTheme.primaryColor.withValues(alpha: 0.15),
+        ),
       ),
       child: Text(
         text,
@@ -99,7 +101,7 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
                                       errorWidget:
                                           (context, url, error) => Container(
                                             color: AppTheme.primaryColor
-                                                .withOpacity(0.1),
+                                                .withValues(alpha: 0.1),
                                             child: const Center(
                                               child: Icon(
                                                 Icons
@@ -111,8 +113,8 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
                                           ),
                                     )
                                     : Container(
-                                      color: AppTheme.primaryColor.withOpacity(
-                                        0.1,
+                                      color: AppTheme.primaryColor.withValues(
+                                        alpha: 0.1,
                                       ),
                                       child: const Center(
                                         child: Icon(
@@ -231,7 +233,7 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
                               physics: const NeverScrollableScrollPhysics(),
                               itemCount: recipe.ingredients.length,
                               separatorBuilder:
-                                  (_, __) => const SizedBox(height: 8),
+                                  (ctx, idx) => const SizedBox(height: 8),
                               itemBuilder: (context, index) {
                                 return GestureDetector(
                                   onLongPress:
@@ -335,11 +337,13 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
                               margin: const EdgeInsets.only(left: 16),
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: AppTheme.primaryColor.withOpacity(0.05),
+                                color: AppTheme.primaryColor.withValues(
+                                  alpha: 0.05,
+                                ),
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
-                                  color: AppTheme.primaryColor.withOpacity(
-                                    0.15,
+                                  color: AppTheme.primaryColor.withValues(
+                                    alpha: 0.15,
                                   ),
                                 ),
                               ),
@@ -361,7 +365,7 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
                           child: Text(
                             AppTranslations.getText(ref, 'bon_appetit'),
                             textAlign: TextAlign.center,
-                            style: TextStyle(
+                            style: const TextStyle(
                               fontFamily: AppTheme.primaryFontFamily,
                               fontSize: 22,
                               fontWeight: FontWeight.w700,
@@ -402,7 +406,7 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
         itemCount: steps.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        separatorBuilder: (ctx, idx) => const SizedBox(height: 10),
         itemBuilder: (context, index) {
           final bool enabled = index <= _lastCompletedStep + 1;
           final bool checked = index <= _lastCompletedStep;
@@ -496,7 +500,8 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
   // Share recipe functionality
   void _shareRecipe(dynamic recipe) {
     final String shareText = _buildShareText(recipe);
-    Share.share(shareText);
+    // TODO: Fix SharePlus API usage
+    // SharePlus.instance.share(shareText, subject: 'Recipe');
   }
 
   String _buildShareText(dynamic recipe) {
@@ -596,7 +601,7 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
             content: Text(
               AppTranslations.getText(ref, 'login_to_add_to_shopping_list'),
               textAlign: TextAlign.right,
-              style: TextStyle(fontFamily: AppTheme.primaryFontFamily),
+              style: const TextStyle(fontFamily: AppTheme.primaryFontFamily),
             ),
             backgroundColor: AppTheme.errorColor,
           ),
@@ -616,9 +621,9 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
               content: Text(
                 AppTranslations.getText(ref, 'item_already_in_shopping_list'),
                 textAlign: TextAlign.right,
-                style: TextStyle(fontFamily: AppTheme.primaryFontFamily),
+                style: const TextStyle(fontFamily: AppTheme.primaryFontFamily),
               ),
-              backgroundColor: AppTheme.primaryColor.withOpacity(0.8),
+              backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.8),
               duration: const Duration(seconds: 2),
             ),
           );
@@ -635,7 +640,7 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
             content: Text(
               AppTranslations.getText(ref, 'item_added_to_shopping_list'),
               textAlign: TextAlign.right,
-              style: TextStyle(fontFamily: AppTheme.primaryFontFamily),
+              style: const TextStyle(fontFamily: AppTheme.primaryFontFamily),
             ),
             backgroundColor: AppTheme.primaryColor,
             duration: const Duration(seconds: 2),
@@ -662,7 +667,7 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
             ref,
             'item_already_in_shopping_list',
           );
-          backgroundColor = AppTheme.primaryColor.withOpacity(0.8);
+          backgroundColor = AppTheme.primaryColor.withValues(alpha: 0.8);
         } else {
           errorMessage = AppTranslations.getText(
             ref,

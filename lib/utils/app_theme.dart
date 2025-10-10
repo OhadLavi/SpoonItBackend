@@ -124,27 +124,27 @@ class AppTheme {
   }
 
   // Legacy Text Styles (for backward compatibility)
-  static final TextStyle headingStyle = TextStyle(
+  static final TextStyle headingStyle = const TextStyle(
     fontFamily: primaryFontFamily,
     fontSize: 24,
     fontWeight: FontWeight.bold,
     color: textColor,
   );
 
-  static final TextStyle subheadingStyle = TextStyle(
+  static final TextStyle subheadingStyle = const TextStyle(
     fontFamily: primaryFontFamily,
     fontSize: 18,
     fontWeight: FontWeight.w600,
     color: textColor,
   );
 
-  static final TextStyle bodyStyle = TextStyle(
+  static final TextStyle bodyStyle = const TextStyle(
     fontFamily: primaryFontFamily,
     fontSize: 16,
     color: textColor,
   );
 
-  static final TextStyle captionStyle = TextStyle(
+  static final TextStyle captionStyle = const TextStyle(
     fontFamily: primaryFontFamily,
     fontSize: 14,
     color: secondaryTextColor,
@@ -156,7 +156,7 @@ class AppTheme {
     foregroundColor: lightAccentColor,
     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-    textStyle: TextStyle(
+    textStyle: const TextStyle(
       fontFamily: primaryFontFamily,
       fontSize: 16,
       fontWeight: FontWeight.w600,
@@ -168,7 +168,7 @@ class AppTheme {
     side: const BorderSide(color: primaryColor),
     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-    textStyle: TextStyle(
+    textStyle: const TextStyle(
       fontFamily: primaryFontFamily,
       fontSize: 16,
       fontWeight: FontWeight.w600,
@@ -289,12 +289,12 @@ class AppTheme {
         borderRadius: BorderRadius.circular(8),
         borderSide: const BorderSide(color: errorColor),
       ),
-      labelStyle: TextStyle(
+      labelStyle: const TextStyle(
         fontFamily: primaryFontFamily,
         fontSize: 16,
         color: secondaryTextColor,
       ),
-      hintStyle: TextStyle(
+      hintStyle: const TextStyle(
         fontFamily: primaryFontFamily,
         fontSize: 16,
         color: secondaryTextColor,
@@ -306,7 +306,7 @@ class AppTheme {
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),
-    appBarTheme: AppBarTheme(
+    appBarTheme: const AppBarTheme(
       backgroundColor: primaryColor,
       foregroundColor: lightAccentColor,
       elevation: 0,
@@ -347,24 +347,24 @@ class AppTheme {
     ),
     scaffoldBackgroundColor: darkBackgroundColor,
     textTheme: const TextTheme().copyWith(
-      displayLarge: TextStyle(
+      displayLarge: const TextStyle(
         fontFamily: primaryFontFamily,
         fontSize: 24,
         fontWeight: FontWeight.bold,
         color: darkTextColor,
       ),
-      displayMedium: TextStyle(
+      displayMedium: const TextStyle(
         fontFamily: primaryFontFamily,
         fontSize: 18,
         fontWeight: FontWeight.w600,
         color: darkTextColor,
       ),
-      bodyLarge: TextStyle(
+      bodyLarge: const TextStyle(
         fontFamily: primaryFontFamily,
         fontSize: 16,
         color: darkTextColor,
       ),
-      bodyMedium: TextStyle(
+      bodyMedium: const TextStyle(
         fontFamily: primaryFontFamily,
         fontSize: 14,
         color: darkSecondaryTextColor,
@@ -376,7 +376,7 @@ class AppTheme {
         foregroundColor: lightAccentColor,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        textStyle: TextStyle(
+        textStyle: const TextStyle(
           fontFamily: primaryFontFamily,
           fontSize: 16,
           fontWeight: FontWeight.w600,
@@ -389,7 +389,7 @@ class AppTheme {
         side: const BorderSide(color: darkPrimaryColor),
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        textStyle: TextStyle(
+        textStyle: const TextStyle(
           fontFamily: primaryFontFamily,
           fontSize: 16,
           fontWeight: FontWeight.w600,
@@ -415,12 +415,12 @@ class AppTheme {
         borderRadius: BorderRadius.circular(8),
         borderSide: const BorderSide(color: errorColor),
       ),
-      labelStyle: TextStyle(
+      labelStyle: const TextStyle(
         fontFamily: primaryFontFamily,
         fontSize: 16,
         color: darkSecondaryTextColor,
       ),
-      hintStyle: TextStyle(
+      hintStyle: const TextStyle(
         fontFamily: primaryFontFamily,
         fontSize: 16,
         color: darkSecondaryTextColor,
@@ -432,7 +432,7 @@ class AppTheme {
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),
-    appBarTheme: AppBarTheme(
+    appBarTheme: const AppBarTheme(
       backgroundColor: darkCardColor,
       foregroundColor: darkTextColor,
       elevation: 0,

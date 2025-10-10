@@ -82,18 +82,22 @@ class ConnectivityWidget extends ConsumerWidget {
         );
       },
       loading: () => child,
-      error: (_, __) => child,
+      error: (err, stack) => child,
     );
   }
 
   Widget _buildOfflineBanner(BuildContext context) {
     return Container(
-      color: AppTheme.errorColor.withOpacity(0.8),
+      color: AppTheme.errorColor.withValues(alpha: 0.8),
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.cloud_off, color: AppTheme.lightAccentColor, size: 18),
+          const Icon(
+            Icons.cloud_off,
+            color: AppTheme.lightAccentColor,
+            size: 18,
+          ),
           const SizedBox(width: 8),
           Flexible(
             child: Text(
@@ -128,7 +132,7 @@ class OfflineAwareBuilder extends ConsumerWidget {
     return connectivity.when(
       data: (isOnline) => builder(context, isOnline),
       loading: () => builder(context, true), // Assume online while loading
-      error: (_, __) => builder(context, true), // Assume online on error
+      error: (err, stack) => builder(context, true), // Assume online on error
     );
   }
 }

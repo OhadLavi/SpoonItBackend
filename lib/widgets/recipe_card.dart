@@ -37,7 +37,7 @@ class RecipeCard extends ConsumerWidget {
           color: isDark ? AppTheme.darkCardColor : AppTheme.backgroundColor,
           boxShadow: [
             BoxShadow(
-              color: AppTheme.dividerColor.withOpacity(0.05),
+              color: AppTheme.dividerColor.withValues(alpha: 0.05),
               spreadRadius: 1,
               blurRadius: 3,
               offset: const Offset(0, 1),
@@ -59,7 +59,7 @@ class RecipeCard extends ConsumerWidget {
                     decoration: BoxDecoration(
                       color:
                           recipe.imageUrl.isEmpty
-                              ? AppTheme.primaryColor.withOpacity(0.1)
+                              ? AppTheme.primaryColor.withValues(alpha: 0.1)
                               : null,
                     ),
                     child:
@@ -73,8 +73,8 @@ class RecipeCard extends ConsumerWidget {
                               height: isCompact ? 120 : 110,
                               placeholder:
                                   (context, url) => Container(
-                                    color: AppTheme.primaryColor.withOpacity(
-                                      0.1,
+                                    color: AppTheme.primaryColor.withValues(
+                                      alpha: 0.1,
                                     ),
                                     child: const Center(
                                       child: CircularProgressIndicator(),
@@ -82,7 +82,9 @@ class RecipeCard extends ConsumerWidget {
                                   ),
                               errorWidget: (context, error, stackTrace) {
                                 return Container(
-                                  color: AppTheme.primaryColor.withOpacity(0.1),
+                                  color: AppTheme.primaryColor.withValues(
+                                    alpha: 0.1,
+                                  ),
                                   child: const Center(
                                     child: Icon(
                                       Icons.image_not_supported_outlined,
@@ -96,7 +98,9 @@ class RecipeCard extends ConsumerWidget {
                             : Container(
                               width: double.infinity,
                               height: isCompact ? 120 : 110,
-                              color: AppTheme.primaryColor.withOpacity(0.1),
+                              color: AppTheme.primaryColor.withValues(
+                                alpha: 0.1,
+                              ),
                               child: const Icon(
                                 Icons.restaurant_menu,
                                 color: AppTheme.primaryColor,
@@ -130,7 +134,7 @@ class RecipeCard extends ConsumerWidget {
                       child: Container(
                         padding: const EdgeInsets.all(5),
                         decoration: BoxDecoration(
-                          color: AppTheme.dividerColor.withOpacity(0.3),
+                          color: AppTheme.dividerColor.withValues(alpha: 0.3),
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
@@ -187,7 +191,7 @@ class RecipeCard extends ConsumerWidget {
                           color:
                               isDark
                                   ? AppTheme.darkSecondaryTextColor
-                                  : AppTheme.textColor.withOpacity(0.87),
+                                  : AppTheme.textColor.withValues(alpha: 0.87),
                         ),
                       ),
                     ],

@@ -51,7 +51,7 @@ class FavoritesScreen extends ConsumerWidget {
                   },
                 ),
                 ListTile(
-                  leading: Icon(Icons.delete, color: AppTheme.errorColor),
+                  leading: const Icon(Icons.delete, color: AppTheme.errorColor),
                   title: Text(AppTranslations.getText(ref, 'delete_recipe')),
                   onTap: () {
                     Navigator.pop(context);
@@ -124,7 +124,7 @@ class FavoritesScreen extends ConsumerWidget {
                 },
                 child: Text(
                   AppTranslations.getText(ref, 'delete'),
-                  style: TextStyle(color: AppTheme.errorColor),
+                  style: const TextStyle(color: AppTheme.errorColor),
                 ),
               ),
             ],
@@ -226,7 +226,7 @@ class FavoritesScreen extends ConsumerWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
+          const Icon(
             Icons.restaurant_menu,
             size: 80,
             color: AppTheme.secondaryTextColor,
@@ -285,7 +285,7 @@ class FavoritesScreen extends ConsumerWidget {
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [
                   BoxShadow(
-                    color: AppTheme.dividerColor.withOpacity(0.04),
+                    color: AppTheme.dividerColor.withValues(alpha: 0.04),
                     blurRadius: 4,
                     offset: const Offset(0, 2),
                   ),
@@ -348,7 +348,7 @@ class FavoritesScreen extends ConsumerWidget {
                       padding: const EdgeInsets.symmetric(horizontal: 8),
                       child: Text(
                         recipe.title,
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w500,
                           color: AppTheme.textColor,
@@ -368,7 +368,7 @@ class FavoritesScreen extends ConsumerWidget {
                       width: 32,
                       height: 32,
                       decoration: BoxDecoration(
-                        color: AppTheme.backgroundColor.withOpacity(0.8),
+                        color: AppTheme.backgroundColor.withValues(alpha: 0.8),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: const Icon(

@@ -126,7 +126,7 @@ class ValidationService {
       SnackBar(
         content: Text(
           message,
-          style: TextStyle(
+          style: const TextStyle(
             fontFamily: AppTheme.primaryFontFamily,
             color: AppTheme.lightAccentColor,
           ),
@@ -145,7 +145,7 @@ class ValidationService {
       SnackBar(
         content: Text(
           message,
-          style: TextStyle(
+          style: const TextStyle(
             fontFamily: AppTheme.primaryFontFamily,
             color: AppTheme.lightAccentColor,
           ),

@@ -98,7 +98,7 @@ class _ImportRecipeScreenState extends ConsumerState<ImportRecipeScreen> {
                           borderRadius: BorderRadius.circular(12),
                           boxShadow: [
                             BoxShadow(
-                              color: AppTheme.dividerColor.withOpacity(0.5),
+                              color: AppTheme.dividerColor.withValues(alpha: 0.5),
                               blurRadius: 10,
                               offset: const Offset(0, 2),
                             ),
@@ -179,7 +179,7 @@ class _ImportRecipeScreenState extends ConsumerState<ImportRecipeScreen> {
                         // Loading state with cooking pot icon
                         Text(
                           AppTranslations.getText(ref, 'loading_recipe'),
-                          style: TextStyle(
+                          style: const TextStyle(
                             color: AppTheme.textColor,
                             fontSize: 18,
                             fontWeight: FontWeight.w500,
@@ -188,7 +188,7 @@ class _ImportRecipeScreenState extends ConsumerState<ImportRecipeScreen> {
                         ),
                         const SizedBox(height: 16),
                         // Waiting SVG icon
-                        Container(
+                        SizedBox(
                           width: 96,
                           height: 96,
                           child: SvgPicture.asset(

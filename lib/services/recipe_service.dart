@@ -213,7 +213,7 @@ class RecipeService {
           await ref.delete();
         } catch (e) {
           // Image might not exist or other error, continue with deletion
-          print('Error deleting image: $e');
+          developer.log('Error deleting image: $e', name: 'RecipeService');
         }
       }
 

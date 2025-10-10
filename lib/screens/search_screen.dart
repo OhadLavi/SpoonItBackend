@@ -66,7 +66,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   },
                 ),
                 ListTile(
-                  leading: Icon(Icons.delete, color: AppTheme.errorColor),
+                  leading: const Icon(Icons.delete, color: AppTheme.errorColor),
                   title: Text(AppTranslations.getText(ref, 'delete_recipe')),
                   onTap: () {
                     Navigator.pop(context);
@@ -100,12 +100,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               TextButton(
                 onPressed: () async {
                   Navigator.pop(context);
+                  final scaffoldMessenger = ScaffoldMessenger.of(context);
                   try {
                     await ref
                         .read(recipeStateProvider.notifier)
                         .deleteRecipe(recipe.id);
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      scaffoldMessenger.showSnackBar(
                         SnackBar(
                           content: Text(
                             AppTranslations.getText(
@@ -119,7 +120,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     }
                   } catch (e) {
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      scaffoldMessenger.showSnackBar(
                         SnackBar(
                           content: Text(
                             AppTranslations.getText(
@@ -135,7 +136,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 },
                 child: Text(
                   AppTranslations.getText(ref, 'delete'),
-                  style: TextStyle(color: AppTheme.errorColor),
+                  style: const TextStyle(color: AppTheme.errorColor),
                 ),
               ),
             ],
@@ -172,14 +173,16 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               _isSearching = false;
               _searchResults = [];
             });
-            Helpers.showSnackBar(
-              context,
-              AppTranslations.getText(
-                ref,
-                'error_searching_recipes',
-              ).replaceAll('{error}', error.toString()),
-              isError: true,
-            );
+            if (mounted) {
+              Helpers.showSnackBar(
+                context,
+                AppTranslations.getText(
+                  ref,
+                  'error_searching_recipes',
+                ).replaceAll('{error}', error.toString()),
+                isError: true,
+              );
+            }
           });
     }
   }
@@ -258,7 +261,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                         Icon(
                           Icons.search_off,
                           size: 80,
-                          color: AppTheme.secondaryTextColor.withOpacity(0.5),
+                          color: AppTheme.secondaryTextColor.withValues(
+                            alpha: 0.5,
+                          ),
                         ),
                         const SizedBox(height: 16),
                         Text(
@@ -266,7 +271,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                             ref,
                             'no_results_found',
                           ).replaceAll('{query}', _searchQuery),
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontFamily: AppTheme.secondaryFontFamily,
                             fontSize: 18,
                             fontWeight: FontWeight.w500,
@@ -276,7 +281,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                         const SizedBox(height: 8),
                         Text(
                           AppTranslations.getText(ref, 'try_different_search'),
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontFamily: AppTheme.secondaryFontFamily,
                             fontSize: 16,
                             color: AppTheme.secondaryTextColor,
@@ -295,7 +300,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                         Icon(
                           Icons.search,
                           size: 80,
-                          color: AppTheme.primaryColor.withOpacity(0.3),
+                          color: AppTheme.primaryColor.withValues(alpha: 0.3),
                         ),
                         const SizedBox(height: 16),
                         Text(
@@ -364,7 +369,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                                         errorWidget: (context, url, error) {
                                           return Container(
                                             color: AppTheme.primaryColor
-                                                .withOpacity(0.1),
+                                                .withValues(alpha: 0.1),
                                             child: const Center(
                                               child: Icon(
                                                 Icons
@@ -382,8 +387,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                                     width: 80,
                                     height: 80,
                                     decoration: BoxDecoration(
-                                      color: AppTheme.primaryColor.withOpacity(
-                                        0.1,
+                                      color: AppTheme.primaryColor.withValues(
+                                        alpha: 0.1,
                                       ),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
@@ -445,7 +450,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                                                       decoration: BoxDecoration(
                                                         color: AppTheme
                                                             .primaryColor
-                                                            .withOpacity(0.1),
+                                                            .withValues(
+                                                              alpha: 0.1,
+                                                            ),
                                                         borderRadius:
                                                             BorderRadius.circular(
                                                               4,

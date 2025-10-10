@@ -73,7 +73,7 @@ class ProfileScreen extends ConsumerWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
+          const Icon(
             Icons.account_circle,
             size: 80,
             color: AppTheme.secondaryTextColor,
@@ -90,7 +90,7 @@ class ProfileScreen extends ConsumerWidget {
           Text(
             AppTranslations.getText(ref, 'sign_in_prompt'),
             style: AppTheme.captionStyle.copyWith(
-              color: AppTheme.textColor.withOpacity(0.7),
+              color: AppTheme.textColor.withValues(alpha: 0.7),
             ),
             textAlign: TextAlign.center,
           ),
@@ -134,7 +134,7 @@ class ProfileScreen extends ConsumerWidget {
                 Text(
                   userData.email,
                   style: AppTheme.captionStyle.copyWith(
-                    color: AppTheme.textColor.withOpacity(0.7),
+                    color: AppTheme.textColor.withValues(alpha: 0.7),
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -156,7 +156,7 @@ class ProfileScreen extends ConsumerWidget {
   Widget _buildProfileImage(String? photoURL) {
     return CircleAvatar(
       radius: 60,
-      backgroundColor: AppTheme.primaryColor.withOpacity(0.1),
+      backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.1),
       backgroundImage:
           photoURL != null && photoURL.isNotEmpty
               ? CachedNetworkImageProvider(
@@ -181,7 +181,7 @@ class ProfileScreen extends ConsumerWidget {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.secondaryTextColor.withOpacity(0.1),
+            color: AppTheme.secondaryTextColor.withValues(alpha: 0.1),
             spreadRadius: 1,
             blurRadius: 4,
             offset: const Offset(0, 2),
@@ -249,7 +249,7 @@ class ProfileScreen extends ConsumerWidget {
         Text(
           label,
           style: AppTheme.captionStyle.copyWith(
-            color: AppTheme.textColor.withOpacity(0.7),
+            color: AppTheme.textColor.withValues(alpha: 0.7),
           ),
         ),
       ],
@@ -266,7 +266,7 @@ class ProfileScreen extends ConsumerWidget {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.secondaryTextColor.withOpacity(0.1),
+            color: AppTheme.secondaryTextColor.withValues(alpha: 0.1),
             spreadRadius: 1,
             blurRadius: 4,
             offset: const Offset(0, 2),
@@ -300,40 +300,32 @@ class ProfileScreen extends ConsumerWidget {
                   builder:
                       (context) => AlertDialog(
                         title: Text(AppTranslations.getText(ref, 'language')),
-                        content: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            RadioListTile<AppLanguage>(
-                              title: Text(
-                                AppTranslations.getText(ref, 'hebrew'),
+                        content: RadioGroup<AppLanguage>(
+                          groupValue: currentLanguage,
+                          onChanged: (value) {
+                            if (value != null) {
+                              ref
+                                  .read(settingsProvider.notifier)
+                                  .toggleLanguage();
+                              Navigator.pop(context);
+                            }
+                          },
+                          child: Column(
+                            children: [
+                              RadioListTile<AppLanguage>(
+                                title: Text(
+                                  AppTranslations.getText(ref, 'hebrew'),
+                                ),
+                                value: AppLanguage.hebrew,
                               ),
-                              value: AppLanguage.hebrew,
-                              groupValue: currentLanguage,
-                              onChanged: (value) {
-                                if (value != null) {
-                                  ref
-                                      .read(settingsProvider.notifier)
-                                      .toggleLanguage();
-                                  Navigator.pop(context);
-                                }
-                              },
-                            ),
-                            RadioListTile<AppLanguage>(
-                              title: Text(
-                                AppTranslations.getText(ref, 'english'),
+                              RadioListTile<AppLanguage>(
+                                title: Text(
+                                  AppTranslations.getText(ref, 'english'),
+                                ),
+                                value: AppLanguage.english,
                               ),
-                              value: AppLanguage.english,
-                              groupValue: currentLanguage,
-                              onChanged: (value) {
-                                if (value != null) {
-                                  ref
-                                      .read(settingsProvider.notifier)
-                                      .toggleLanguage();
-                                  Navigator.pop(context);
-                                }
-                              },
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                 );
@@ -351,55 +343,38 @@ class ProfileScreen extends ConsumerWidget {
                   builder:
                       (context) => AlertDialog(
                         title: Text(AppTranslations.getText(ref, 'theme')),
-                        content: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            RadioListTile<ThemeMode>(
-                              title: Text(
-                                AppTranslations.getText(ref, 'system_theme'),
+                        content: RadioGroup<ThemeMode>(
+                          groupValue: currentTheme,
+                          onChanged: (value) {
+                            if (value != null) {
+                              ref
+                                  .read(settingsProvider.notifier)
+                                  .setThemeMode(value);
+                              Navigator.pop(context);
+                            }
+                          },
+                          child: Column(
+                            children: [
+                              RadioListTile<ThemeMode>(
+                                title: Text(
+                                  AppTranslations.getText(ref, 'system_theme'),
+                                ),
+                                value: ThemeMode.system,
                               ),
-                              value: ThemeMode.system,
-                              groupValue: currentTheme,
-                              onChanged: (value) {
-                                if (value != null) {
-                                  ref
-                                      .read(settingsProvider.notifier)
-                                      .setThemeMode(value);
-                                  Navigator.pop(context);
-                                }
-                              },
-                            ),
-                            RadioListTile<ThemeMode>(
-                              title: Text(
-                                AppTranslations.getText(ref, 'light_theme'),
+                              RadioListTile<ThemeMode>(
+                                title: Text(
+                                  AppTranslations.getText(ref, 'light_theme'),
+                                ),
+                                value: ThemeMode.light,
                               ),
-                              value: ThemeMode.light,
-                              groupValue: currentTheme,
-                              onChanged: (value) {
-                                if (value != null) {
-                                  ref
-                                      .read(settingsProvider.notifier)
-                                      .setThemeMode(value);
-                                  Navigator.pop(context);
-                                }
-                              },
-                            ),
-                            RadioListTile<ThemeMode>(
-                              title: Text(
-                                AppTranslations.getText(ref, 'dark_theme'),
+                              RadioListTile<ThemeMode>(
+                                title: Text(
+                                  AppTranslations.getText(ref, 'dark_theme'),
+                                ),
+                                value: ThemeMode.dark,
                               ),
-                              value: ThemeMode.dark,
-                              groupValue: currentTheme,
-                              onChanged: (value) {
-                                if (value != null) {
-                                  ref
-                                      .read(settingsProvider.notifier)
-                                      .setThemeMode(value);
-                                  Navigator.pop(context);
-                                }
-                              },
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                 );
@@ -486,7 +461,7 @@ class ProfileScreen extends ConsumerWidget {
                 style: TextStyle(
                   fontFamily: AppTheme.secondaryFontFamily,
                   fontSize: 12,
-                  color: AppTheme.textColor.withOpacity(0.6),
+                  color: AppTheme.textColor.withValues(alpha: 0.6),
                 ),
               )
               : null,
@@ -516,7 +491,7 @@ class ProfileScreen extends ConsumerWidget {
                 },
                 child: Text(
                   AppTranslations.getText(ref, 'delete'),
-                  style: TextStyle(color: AppTheme.errorColor),
+                  style: const TextStyle(color: AppTheme.errorColor),
                 ),
               ),
             ],

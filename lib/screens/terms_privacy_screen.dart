@@ -47,7 +47,7 @@ class TermsPrivacyScreen extends ConsumerWidget {
                         '{date}',
                         '${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}',
                       ),
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 12,
                         color: AppTheme.secondaryTextColor,
                       ),

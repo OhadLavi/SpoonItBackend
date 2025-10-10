@@ -275,7 +275,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                         'assets/images/email.svg',
                                         width: 18,
                                         height: 18,
-                                        colorFilter: ColorFilter.mode(
+                                        colorFilter: const ColorFilter.mode(
                                           AppTheme.textColor,
                                           BlendMode.srcIn,
                                         ),
@@ -389,7 +389,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                         'assets/images/password.svg',
                                         width: 18,
                                         height: 18,
-                                        colorFilter: ColorFilter.mode(
+                                        colorFilter: const ColorFilter.mode(
                                           AppTheme.textColor,
                                           BlendMode.srcIn,
                                         ),
@@ -469,7 +469,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   ),
                                   child: Row(
                                     children: [
-                                      Icon(
+                                      const Icon(
                                         Icons.error_outline,
                                         color: AppTheme.errorColor,
                                         size: 20,
@@ -478,7 +478,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                       Expanded(
                                         child: Text(
                                           _errorMessage!,
-                                          style: TextStyle(
+                                          style: const TextStyle(
                                             color: AppTheme.errorColor,
                                             fontSize: 14,
                                             fontWeight: FontWeight.w500,
@@ -666,7 +666,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                         ref,
                                         'register_fun',
                                       ),
-                                      style: TextStyle(
+                                      style: const TextStyle(
                                         color: AppTheme.primaryColor,
                                         fontWeight: FontWeight.bold,
                                         fontFamily: AppTheme.primaryFontFamily,
