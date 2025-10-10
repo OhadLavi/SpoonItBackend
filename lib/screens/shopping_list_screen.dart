@@ -5,6 +5,7 @@ import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
 import 'package:recipe_keeper/utils/app_theme.dart';
 import 'package:recipe_keeper/services/shopping_list_service.dart';
 import 'package:recipe_keeper/providers/auth_provider.dart';
+import 'package:recipe_keeper/providers/settings_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:recipe_keeper/utils/translations.dart';
 
@@ -45,29 +46,7 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
       backgroundColor: AppTheme.backgroundColor,
       body: Column(
         children: [
-          StreamBuilder<List<ShoppingItem>>(
-            stream: _shoppingListService.getShoppingList(userId),
-            builder: (context, snapshot) {
-              final itemCount = snapshot.hasData ? snapshot.data!.length : 0;
-              return AppHeader(
-                title: AppTranslations.getText(ref, 'shopping_list_title'),
-                customContent:
-                    itemCount > 0
-                        ? Text(
-                          AppTranslations.getText(
-                            ref,
-                            'items_count',
-                          ).replaceAll('{count}', itemCount.toString()),
-                          style: const TextStyle(
-                            color: AppTheme.lightAccentColor,
-                            fontSize: 14,
-                            fontFamily: AppTheme.primaryFontFamily,
-                          ),
-                        )
-                        : null,
-              );
-            },
-          ),
+          AppHeader(title: AppTranslations.getText(ref, 'shopping_list_title')),
           // Action buttons row
           StreamBuilder<List<ShoppingItem>>(
             stream: _shoppingListService.getShoppingList(userId),
@@ -75,40 +54,104 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
               final hasItems = snapshot.hasData && snapshot.data!.isNotEmpty;
               if (!hasItems) return const SizedBox.shrink();
 
+              final isHebrew =
+                  ref.watch(settingsProvider).language == AppLanguage.hebrew;
               return Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
                   vertical: 8,
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    // Clear checked items button
-                    TextButton.icon(
-                      onPressed: () => _clearCheckedItems(userId),
-                      icon: const Icon(Icons.clear_all, size: 20),
-                      label: Text(
-                        AppTranslations.getText(ref, 'clear_checked_items'),
-                        style: TextStyle(
-                          fontFamily: AppTheme.primaryFontFamily,
+                height: 48, // Add specific height for Stack
+                child:
+                    isHebrew
+                        ? Stack(
+                          children: [
+                            // Share button (left for Hebrew)
+                            Positioned(
+                              left: 0,
+                              top: 0,
+                              bottom: 0,
+                              child: IconButton(
+                                icon: const Icon(
+                                  Icons.share,
+                                  color: AppTheme.secondaryTextColor,
+                                ),
+                                onPressed:
+                                    () => _shareShoppingList(snapshot.data!),
+                                tooltip: AppTranslations.getText(
+                                  ref,
+                                  'share_list',
+                                ),
+                              ),
+                            ),
+                            // Clear checked items button (right for Hebrew)
+                            Positioned(
+                              right: 0,
+                              top: 0,
+                              bottom: 0,
+                              child: TextButton.icon(
+                                onPressed: () => _clearCheckedItems(userId),
+                                icon: const Icon(Icons.clear_all, size: 20),
+                                label: Text(
+                                  AppTranslations.getText(
+                                    ref,
+                                    'clear_checked_items',
+                                  ),
+                                  style: TextStyle(
+                                    fontFamily: AppTheme.primaryFontFamily,
+                                  ),
+                                ),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: AppTheme.secondaryTextColor,
+                                ),
+                              ),
+                            ),
+                          ],
+                        )
+                        : Stack(
+                          children: [
+                            // Clear checked items button (left for English)
+                            Positioned(
+                              left: 0,
+                              top: 0,
+                              bottom: 0,
+                              child: TextButton.icon(
+                                onPressed: () => _clearCheckedItems(userId),
+                                icon: const Icon(Icons.clear_all, size: 20),
+                                label: Text(
+                                  AppTranslations.getText(
+                                    ref,
+                                    'clear_checked_items',
+                                  ),
+                                  style: TextStyle(
+                                    fontFamily: AppTheme.primaryFontFamily,
+                                  ),
+                                ),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: AppTheme.secondaryTextColor,
+                                ),
+                              ),
+                            ),
+                            // Share button (right for English)
+                            Positioned(
+                              right: 0,
+                              top: 0,
+                              bottom: 0,
+                              child: IconButton(
+                                icon: const Icon(
+                                  Icons.share,
+                                  color: AppTheme.secondaryTextColor,
+                                ),
+                                onPressed:
+                                    () => _shareShoppingList(snapshot.data!),
+                                tooltip: AppTranslations.getText(
+                                  ref,
+                                  'share_list',
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                      style: TextButton.styleFrom(
-                        foregroundColor: AppTheme.secondaryTextColor,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // Share button
-                    IconButton(
-                      icon: const Icon(
-                        Icons.share,
-                        color: AppTheme.secondaryTextColor,
-                      ),
-                      onPressed: () => _shareShoppingList(snapshot.data!),
-                      tooltip: AppTranslations.getText(ref, 'share_list'),
-                    ),
-                  ],
-                ),
               );
             },
           ),

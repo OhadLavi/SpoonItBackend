@@ -203,80 +203,120 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         color: AppTheme.backgroundColor,
         borderRadius: BorderRadius.circular(24),
       ),
-      child: Directionality(
-        textDirection: isHebrew ? TextDirection.rtl : TextDirection.ltr,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              // English: icon on the left
-              if (!isHebrew) ...[
-                Container(
-                  width: 24,
-                  height: 48,
-                  alignment: Alignment.center,
-                  child: SvgPicture.asset(
-                    'assets/images/search.svg',
-                    width: 20,
-                    height: 20,
-                    colorFilter: const ColorFilter.mode(
-                      AppTheme.secondaryTextColor,
-                      BlendMode.srcIn,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child:
+            isHebrew
+                ? Stack(
+                  children: [
+                    // Hebrew: icon on the right using absolute positioning
+                    TextField(
+                      controller: _searchController,
+                      focusNode: _searchFocusNode,
+                      textAlign: TextAlign.right,
+                      textDirection: TextDirection.rtl,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: AppTheme.primaryColor,
+                      ),
+                      cursorColor: AppTheme.primaryColor,
+                      decoration: InputDecoration(
+                        contentPadding: EdgeInsets.only(
+                          left: 16,
+                          right: 32, // Leave space for icon
+                          top: 14,
+                          bottom: 14,
+                        ),
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        hintText: AppTranslations.getText(ref, 'search_hint'),
+                        hintStyle: TextStyle(
+                          color: AppTheme.secondaryTextColor,
+                          fontSize: 16,
+                        ),
+                      ),
+                      onSubmitted: (value) {
+                        if (value.trim().isNotEmpty) {
+                          context.push('/search');
+                        }
+                      },
                     ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-              ],
-              // Text field
-              Expanded(
-                child: TextField(
-                  controller: _searchController,
-                  focusNode: _searchFocusNode,
-                  textAlign: isHebrew ? TextAlign.right : TextAlign.left,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    color: AppTheme.primaryColor,
-                  ),
-                  cursorColor: AppTheme.primaryColor,
-                  decoration: InputDecoration(
-                    contentPadding: EdgeInsets.symmetric(vertical: 14),
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    hintText: AppTranslations.getText(ref, 'search_hint'),
-                    hintStyle: TextStyle(
-                      color: AppTheme.secondaryTextColor,
-                      fontSize: 16,
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      bottom: 0,
+                      child: Container(
+                        width: 24,
+                        alignment: Alignment.center,
+                        child: SvgPicture.asset(
+                          'assets/images/search.svg',
+                          width: 20,
+                          height: 20,
+                          colorFilter: const ColorFilter.mode(
+                            AppTheme.secondaryTextColor,
+                            BlendMode.srcIn,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                  onSubmitted: (value) {
-                    if (value.trim().isNotEmpty) {
-                      context.push('/search');
-                    }
-                  },
-                ),
-              ),
-              // Hebrew: icon on the right
-              if (isHebrew) ...[
-                const SizedBox(width: 8),
-                Container(
-                  width: 24,
-                  height: 48,
-                  alignment: Alignment.center,
-                  child: SvgPicture.asset(
-                    'assets/images/search.svg',
-                    width: 20,
-                    height: 20,
-                    colorFilter: const ColorFilter.mode(
-                      AppTheme.secondaryTextColor,
-                      BlendMode.srcIn,
+                  ],
+                )
+                : Stack(
+                  children: [
+                    // English: icon on the left using absolute positioning
+                    TextField(
+                      controller: _searchController,
+                      focusNode: _searchFocusNode,
+                      textAlign: TextAlign.left,
+                      textDirection: TextDirection.ltr,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: AppTheme.primaryColor,
+                      ),
+                      cursorColor: AppTheme.primaryColor,
+                      decoration: InputDecoration(
+                        contentPadding: EdgeInsets.only(
+                          left: 32, // Leave space for icon
+                          right: 16,
+                          top: 14,
+                          bottom: 14,
+                        ),
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        hintText: AppTranslations.getText(ref, 'search_hint'),
+                        hintStyle: TextStyle(
+                          color: AppTheme.secondaryTextColor,
+                          fontSize: 16,
+                        ),
+                      ),
+                      onSubmitted: (value) {
+                        if (value.trim().isNotEmpty) {
+                          context.push('/search');
+                        }
+                      },
                     ),
-                  ),
+                    Positioned(
+                      left: 0,
+                      top: 0,
+                      bottom: 0,
+                      child: Container(
+                        width: 24,
+                        alignment: Alignment.center,
+                        child: SvgPicture.asset(
+                          'assets/images/search.svg',
+                          width: 20,
+                          height: 20,
+                          colorFilter: const ColorFilter.mode(
+                            AppTheme.secondaryTextColor,
+                            BlendMode.srcIn,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -391,7 +431,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             onLongPress:
                 isDynamic
                     ? () {
-                      _showEditCategoryDialog(context, category);
+                      _showCategoryContextMenu(context, category);
                     }
                     : null,
             child: Container(
@@ -461,6 +501,117 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     showDialog(
       context: context,
       builder: (context) => AddCategoryDialog(categoryToEdit: category),
+    );
+  }
+
+  void _showCategoryContextMenu(BuildContext context, Category category) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder:
+          (context) => Container(
+            decoration: const BoxDecoration(
+              color: AppTheme.backgroundColor,
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(20),
+                topRight: Radius.circular(20),
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 12),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.secondaryTextColor,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                ListTile(
+                  leading: const Icon(Icons.edit, color: AppTheme.primaryColor),
+                  title: Text(AppTranslations.getText(ref, 'edit_category')),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showEditCategoryDialog(context, category);
+                  },
+                ),
+                ListTile(
+                  leading: Icon(Icons.delete, color: AppTheme.errorColor),
+                  title: Text(AppTranslations.getText(ref, 'delete_category')),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showDeleteCategoryConfirmation(context, category);
+                  },
+                ),
+                const SizedBox(height: 20),
+              ],
+            ),
+          ),
+    );
+  }
+
+  void _showDeleteCategoryConfirmation(
+    BuildContext context,
+    Category category,
+  ) {
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: Text(AppTranslations.getText(ref, 'delete_category')),
+            content: Text(
+              AppTranslations.getText(ref, 'delete_category_confirmation'),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(AppTranslations.getText(ref, 'cancel')),
+              ),
+              TextButton(
+                onPressed: () async {
+                  Navigator.pop(context);
+                  try {
+                    final categoryService = ref.read(categoryServiceProvider);
+                    await categoryService.deleteCategory(category.id);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            AppTranslations.getText(
+                              ref,
+                              'category_deleted_successfully',
+                            ),
+                          ),
+                          backgroundColor: AppTheme.successColor,
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            AppTranslations.getText(
+                              ref,
+                              'error_deleting_category',
+                            ).replaceAll('{error}', e.toString()),
+                          ),
+                          backgroundColor: AppTheme.errorColor,
+                        ),
+                      );
+                    }
+                  }
+                },
+                child: Text(
+                  AppTranslations.getText(ref, 'delete'),
+                  style: TextStyle(color: AppTheme.errorColor),
+                ),
+              ),
+            ],
+          ),
     );
   }
 }

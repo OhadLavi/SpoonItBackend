@@ -296,6 +296,12 @@ class AuthNotifier extends Notifier<AuthState> {
       throw StateError('AuthService not ready yet');
     }
   }
+
+  /// Send password reset email
+  Future<void> resetPassword(String email) async {
+    _ensureReady();
+    await _authService!.resetPassword(email);
+  }
 }
 
 // Riverpod 3 NotifierProvider

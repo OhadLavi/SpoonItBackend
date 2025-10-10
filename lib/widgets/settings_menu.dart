@@ -122,6 +122,12 @@ class SettingsMenu extends ConsumerWidget {
           onTap: () => _closeAndGo('/shopping-list'),
           ref: ref,
         ),
+        _buildSettingsMenuItem(
+          icon: Icons.chat,
+          title: AppTranslations.getText(ref, 'chat'),
+          onTap: () => _closeAndGo('/chat'),
+          ref: ref,
+        ),
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 28, 12),
           child: Divider(

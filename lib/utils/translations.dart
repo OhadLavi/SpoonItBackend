@@ -414,6 +414,17 @@ class AppTranslations {
     'category_added_successfully': 'Category added successfully!',
     'error_updating_category': 'Error updating category: {error}',
     'error_adding_category': 'Error adding category: {error}',
+    'delete_category': 'Delete Category',
+    'delete_category_confirmation':
+        'Are you sure you want to delete this category?',
+    'category_deleted_successfully': 'Category deleted successfully',
+    'error_deleting_category': 'Error deleting category: {error}',
+    'chat': 'Chat',
+    'reset_password_title': 'Reset Password',
+    'reset_password_message':
+        'Enter your email address and we\'ll send you a link to reset your password.',
+    'reset_password_success': 'Password reset email sent! Check your inbox.',
+    'reset_password_error': 'Error sending password reset email: {error}',
     // Category labels
     'main_dish': 'Main Dish',
   };
@@ -817,6 +828,17 @@ class AppTranslations {
     'category_added_successfully': 'הקטגוריה נוספה בהצלחה!',
     'error_updating_category': 'שגיאה בעדכון הקטגוריה: {error}',
     'error_adding_category': 'שגיאה בהוספת הקטגוריה: {error}',
+    'delete_category': 'מחק קטגוריה',
+    'delete_category_confirmation': 'האם אתה בטוח שברצונך למחוק את הקטגוריה?',
+    'category_deleted_successfully': 'הקטגוריה נמחקה בהצלחה',
+    'error_deleting_category': 'שגיאה במחיקת הקטגוריה: {error}',
+    'chat': 'צ\'אט',
+    'reset_password_title': 'איפוס סיסמה',
+    'reset_password_message':
+        'הכנס את כתובת האימייל שלך ונשלח לך קישור לאיפוס הסיסמה.',
+    'reset_password_success':
+        'אימייל איפוס סיסמה נשלח! בדוק את תיבת הדואר שלך.',
+    'reset_password_error': 'שגיאה בשליחת אימייל איפוס סיסמה: {error}',
     // Category labels
     'main_dish': 'מנה עיקרית',
   };

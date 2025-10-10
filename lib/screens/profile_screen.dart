@@ -469,12 +469,12 @@ class ProfileScreen extends ConsumerWidget {
     return ListTile(
       leading: Icon(
         icon,
-        color: isDestructive ? AppTheme.errorColor : AppTheme.primaryColor,
+        color: isDestructive ? AppTheme.primaryColor : AppTheme.primaryColor,
       ),
       title: Text(
         title,
         style: TextStyle(
-          color: isDestructive ? AppTheme.errorColor : AppTheme.textColor,
+          color: isDestructive ? AppTheme.textColor : AppTheme.textColor,
           fontFamily: AppTheme.secondaryFontFamily,
           fontWeight: FontWeight.w500,
         ),
@@ -557,7 +557,7 @@ class ProfileScreen extends ConsumerWidget {
     try {
       await ref.read(authProvider.notifier).signOut();
       if (context.mounted) {
-        context.go('/');
+        context.go('/home');
       }
     } catch (e) {
       if (context.mounted) {
