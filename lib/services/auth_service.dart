@@ -9,6 +9,8 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:recipe_keeper/models/app_user.dart';
+import 'package:recipe_keeper/services/input_sanitizer_service.dart';
+import 'package:recipe_keeper/services/audit_logger_service.dart';
 
 /// Build-time define for web client id
 const String kGoogleWebClientId = String.fromEnvironment(
@@ -91,22 +93,36 @@ class AuthService {
     String displayName,
   ) async {
     try {
+      // Sanitize inputs
+      final sanitizedEmail = InputSanitizer.sanitizeEmail(email);
+      final sanitizedDisplayName = InputSanitizer.sanitizeDisplayName(
+        displayName,
+      );
+
+      // Log registration attempt
+      AuditLogger.logRegistrationAttempt(sanitizedEmail, 'email');
+
       if (kDebugMode) {
-        developer.log('Registering email=$email', name: 'AuthService');
+        developer.log('Registering email=$sanitizedEmail', name: 'AuthService');
       }
 
       final cred = await _auth.createUserWithEmailAndPassword(
-        email: email,
+        email: sanitizedEmail,
         password: password,
       );
 
-      await cred.user?.updateDisplayName(displayName);
+      await cred.user?.updateDisplayName(sanitizedDisplayName);
 
       if (cred.user != null) {
-        await _createOrUpdateUserDocumentOnLogin(cred.user!, displayName);
+        await _createOrUpdateUserDocumentOnLogin(
+          cred.user!,
+          sanitizedDisplayName,
+        );
+        AuditLogger.logRegistrationSuccess(sanitizedEmail, 'email');
       }
       return UserCredentialLite(cred.user?.uid);
     } catch (e) {
+      AuditLogger.logRegistrationFailure(email, 'email', e.toString());
       if (kDebugMode) {
         developer.log('Registration error', name: 'AuthService', error: e);
       }
@@ -119,11 +135,17 @@ class AuthService {
     String password,
   ) async {
     try {
+      // Sanitize email input
+      final sanitizedEmail = InputSanitizer.sanitizeEmail(email);
+
+      // Log login attempt
+      AuditLogger.logLoginAttempt(sanitizedEmail, 'email');
+
       if (kDebugMode) {
-        developer.log('Sign in email=$email', name: 'AuthService');
+        developer.log('Sign in email=$sanitizedEmail', name: 'AuthService');
       }
       final cred = await _auth.signInWithEmailAndPassword(
-        email: email,
+        email: sanitizedEmail,
         password: password,
       );
 
@@ -131,9 +153,11 @@ class AuthService {
         await _firestore.collection('users').doc(cred.user!.uid).set({
           'lastLoginAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
+        AuditLogger.logLoginSuccess(sanitizedEmail, 'email');
       }
       return UserCredentialLite(cred.user?.uid);
     } catch (e) {
+      AuditLogger.logLoginFailure(email, 'email', e.toString());
       if (kDebugMode) {
         developer.log('Sign in error', name: 'AuthService', error: e);
       }
@@ -143,6 +167,9 @@ class AuthService {
 
   Future<UserCredentialLite> signInWithGoogle() async {
     try {
+      // Log Google sign-in attempt
+      AuditLogger.logLoginAttempt('google_user', 'google');
+
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
         throw Exception('Google sign-in aborted');
@@ -161,19 +188,24 @@ class AuthService {
         final doc =
             await _firestore.collection('users').doc(userCred.user!.uid).get();
         if (!doc.exists) {
+          final sanitizedDisplayName = InputSanitizer.sanitizeDisplayName(
+            userCred.user!.displayName ?? '',
+          );
           await _createOrUpdateUserDocumentOnLogin(
             userCred.user!,
-            userCred.user!.displayName ?? '',
+            sanitizedDisplayName,
           );
         } else {
           await _firestore.collection('users').doc(userCred.user!.uid).set({
             'lastLoginAt': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
         }
+        AuditLogger.logLoginSuccess(googleUser.email, 'google');
       }
 
       return UserCredentialLite(userCred.user?.uid);
     } on StateError catch (e) {
+      AuditLogger.logLoginFailure('google_user', 'google', e.toString());
       if (kDebugMode) {
         developer.log(
           'Google sign-in state error',
@@ -186,6 +218,7 @@ class AuthService {
       }
       rethrow;
     } catch (e) {
+      AuditLogger.logLoginFailure('google_user', 'google', e.toString());
       if (kDebugMode) {
         developer.log('Google sign-in error', name: 'AuthService', error: e);
       }
@@ -255,12 +288,22 @@ class AuthService {
     User user,
     String displayName,
   ) async {
+    // Sanitize user data before storing
+    final sanitizedEmail = InputSanitizer.sanitizeEmail(user.email ?? '');
+    final sanitizedDisplayName = InputSanitizer.sanitizeDisplayName(
+      displayName,
+    );
+    final sanitizedPhotoUrl =
+        user.photoURL != null
+            ? InputSanitizer.sanitizeUrl(user.photoURL!)
+            : null;
+
     // Use untyped doc for server timestamps and partial merges
     await _firestore.collection('users').doc(user.uid).set({
       'uid': user.uid,
-      'email': user.email ?? '',
-      'displayName': displayName,
-      'photoURL': user.photoURL,
+      'email': sanitizedEmail,
+      'displayName': sanitizedDisplayName,
+      'photoURL': sanitizedPhotoUrl,
       'createdAt': FieldValue.serverTimestamp(),
       'lastLoginAt': FieldValue.serverTimestamp(),
       'recipeCount': 0,
@@ -300,19 +343,27 @@ class AuthService {
 
     try {
       final Map<String, dynamic> updates = {};
+      final List<String> updatedFields = [];
 
-      // Update Firebase Auth profile if needed
+      // Sanitize and update Firebase Auth profile if needed
       if (displayName != null && displayName != user.displayName) {
-        await user.updateDisplayName(displayName);
-        updates['displayName'] = displayName;
+        final sanitizedDisplayName = InputSanitizer.sanitizeDisplayName(
+          displayName,
+        );
+        await user.updateDisplayName(sanitizedDisplayName);
+        updates['displayName'] = sanitizedDisplayName;
+        updatedFields.add('displayName');
       }
       if (photoURL != null && photoURL != user.photoURL) {
-        await user.updatePhotoURL(photoURL);
-        updates['photoURL'] = photoURL;
+        final sanitizedPhotoUrl = InputSanitizer.sanitizeUrl(photoURL);
+        await user.updatePhotoURL(sanitizedPhotoUrl);
+        updates['photoURL'] = sanitizedPhotoUrl;
+        updatedFields.add('photoURL');
       }
 
       if (preferences != null) {
         updates['preferences'] = _sanitizePreferences(preferences);
+        updatedFields.add('preferences');
       }
 
       if (updates.isNotEmpty) {
@@ -321,6 +372,9 @@ class AuthService {
             .collection('users')
             .doc(user.uid)
             .set(updates, SetOptions(merge: true));
+
+        // Log profile update
+        AuditLogger.logProfileUpdate(user.uid, updatedFields);
       }
 
       // Ensure auth stream emits fresh data
@@ -370,6 +424,9 @@ class AuthService {
       );
       await user.reauthenticateWithCredential(cred);
       await user.updatePassword(newPassword);
+
+      // Log password change
+      AuditLogger.logPasswordChange(user.uid);
     } on FirebaseAuthException catch (e) {
       if (kDebugMode) {
         developer.log(
@@ -401,7 +458,9 @@ class AuthService {
   }
 
   Future<void> sendPasswordResetEmail(String email) async {
-    await _auth.sendPasswordResetEmail(email: email);
+    final sanitizedEmail = InputSanitizer.sanitizeEmail(email);
+    await _auth.sendPasswordResetEmail(email: sanitizedEmail);
+    AuditLogger.logPasswordReset(sanitizedEmail);
   }
 
   Future<void> deleteAccount() async {
@@ -411,6 +470,9 @@ class AuthService {
     }
 
     try {
+      // Log account deletion
+      AuditLogger.logAccountDeletion(user.uid, user.email ?? '');
+
       // Delete Firestore first
       await _firestore.collection('users').doc(user.uid).delete();
 
@@ -427,7 +489,9 @@ class AuthService {
   /// Send password reset email
   Future<void> resetPassword(String email) async {
     try {
-      await _auth.sendPasswordResetEmail(email: email);
+      final sanitizedEmail = InputSanitizer.sanitizeEmail(email);
+      await _auth.sendPasswordResetEmail(email: sanitizedEmail);
+      AuditLogger.logPasswordReset(sanitizedEmail);
     } on FirebaseAuthException catch (e) {
       throw Exception('Failed to send password reset email: ${e.message}');
     }

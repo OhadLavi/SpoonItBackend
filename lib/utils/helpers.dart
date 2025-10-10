@@ -105,19 +105,51 @@ class Helpers {
     }
   }
 
-  // Validate email format
+  // Validate email format with enhanced regex
   static bool isValidEmail(String email) {
-    final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
+    if (email.isEmpty) return false;
+
+    // More strict email validation
+    final emailRegex = RegExp(
+      r'^[a-zA-Z0-9.!#$%&*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$',
+    );
+
+    // Additional checks
+    if (email.length > 254) return false; // RFC 5321 limit
+    if (email.startsWith('.') || email.endsWith('.')) return false;
+    if (email.contains('..')) return false; // No consecutive dots
+    if (email.split('@').length != 2) return false; // Exactly one @
+
     return emailRegex.hasMatch(email);
   }
 
-  // Validate URL format
+  // Validate URL format with enhanced validation
   static bool isValidUrl(String url) {
-    final urlRegex = RegExp(
-      r'^(http|https)://([\w-]+\.)+[\w-]+(/[\w- ./?%&=]*)?$',
-      caseSensitive: false,
-    );
-    return urlRegex.hasMatch(url);
+    if (url.isEmpty) return false;
+
+    try {
+      final uri = Uri.parse(url);
+
+      // Check scheme
+      if (!['http', 'https'].contains(uri.scheme)) return false;
+
+      // Check host
+      if (uri.host.isEmpty) return false;
+
+      // Check for valid domain format
+      if (!RegExp(
+        r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$',
+      ).hasMatch(uri.host)) {
+        return false;
+      }
+
+      // Check length limits
+      if (url.length > 2048) return false; // RFC 7230 limit
+
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   // Extract domain from URL

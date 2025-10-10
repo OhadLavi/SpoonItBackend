@@ -245,10 +245,34 @@ class AppTranslations {
     'current_password_required': 'Please enter your current password',
     'new_password_required': 'Please enter a new password',
     'confirm_password_required': 'Please confirm your new password',
-    'password_too_short': 'Password must be at least 6 characters',
+    'password_too_short': 'Password must be at least 8 characters',
     'passwords_do_not_match': 'Passwords do not match',
     'password_changed_successfully': 'Password changed successfully!',
     'error_changing_password': 'Error changing password',
+
+    // Password validation messages
+    'uppercase_required': 'Password must contain at least one uppercase letter',
+    'lowercase_required': 'Password must contain at least one lowercase letter',
+    'number_required': 'Password must contain at least one number',
+    'special_char_required':
+        'Password must contain at least one special character (@\$!%*?&)',
+    'common_password':
+        'This password is too common. Please choose a stronger password',
+    'password_weak': 'Weak',
+    'password_medium': 'Medium',
+    'password_strong': 'Strong',
+
+    // Rate limiting messages
+    'too_many_attempts': 'Too many login attempts',
+    'account_locked':
+        'Account temporarily locked due to too many failed attempts',
+    'try_again_later': 'Please try again later',
+    'lockout_remaining': 'Account locked for {minutes} more minutes',
+
+    // Security messages
+    'security_event_logged': 'Security event has been logged',
+    'suspicious_activity_detected': 'Suspicious activity detected',
+    'login_attempt_blocked': 'Login attempt blocked due to rate limiting',
     'user_preferences': 'Preferences',
     'enter_preferences_placeholder': 'e.g., dietary needs, favorite cuisines',
     'custom_recipe': 'Custom Recipe',
@@ -668,6 +692,27 @@ class AppTranslations {
     'passwords_do_not_match': 'הסיסמאות אינן תואמות',
     'password_changed_successfully': 'הסיסמה שונתה בהצלחה!',
     'error_changing_password': 'שגיאה בשינוי הסיסמה',
+
+    // Password validation messages
+    'uppercase_required': 'הסיסמה חייבת להכיל לפחות אות גדולה אחת',
+    'lowercase_required': 'הסיסמה חייבת להכיל לפחות אות קטנה אחת',
+    'number_required': 'הסיסמה חייבת להכיל לפחות מספר אחד',
+    'special_char_required': 'הסיסמה חייבת להכיל לפחות תו מיוחד אחד (@\$!%*?&)',
+    'common_password': 'הסיסמה הזו נפוצה מדי. בחר סיסמה חזקה יותר',
+    'password_weak': 'חלש',
+    'password_medium': 'בינוני',
+    'password_strong': 'חזק',
+
+    // Rate limiting messages
+    'too_many_attempts': 'יותר מדי ניסיונות התחברות',
+    'account_locked': 'החשבון נחסם זמנית עקב יותר מדי ניסיונות כושלים',
+    'try_again_later': 'אנא נסה שוב מאוחר יותר',
+    'lockout_remaining': 'החשבון חסום עוד {minutes} דקות',
+
+    // Security messages
+    'security_event_logged': 'אירוע אבטחה נרשם',
+    'suspicious_activity_detected': 'זוהתה פעילות חשודה',
+    'login_attempt_blocked': 'ניסיון התחברות נחסם עקב הגבלת קצב',
     'user_preferences': 'העדפות',
     'enter_preferences_placeholder': 'לדוגמה: צרכים תזונתיים, מטבחים מועדפים',
     'custom_recipe': 'מתכון מותאם אישית',

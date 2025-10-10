@@ -8,6 +8,8 @@ import 'package:recipe_keeper/utils/helpers.dart';
 import 'package:recipe_keeper/utils/translations.dart';
 import 'package:recipe_keeper/widgets/auth_widgets.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:recipe_keeper/services/password_validator_service.dart';
+import 'package:recipe_keeper/services/input_sanitizer_service.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
@@ -27,6 +29,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   bool _isConfirmPasswordVisible = false;
   bool _isLoading = false;
   String? _errorMessage;
+  PasswordStrength _passwordStrength = PasswordStrength.weak;
 
   @override
   void dispose() {
@@ -39,6 +42,15 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
   Future<void> _registerWithEmailAndPassword() async {
     if (_formKey.currentState!.validate()) {
+      // Sanitize inputs
+      final sanitizedName = InputSanitizer.sanitizeDisplayName(
+        _nameController.text.trim(),
+      );
+      final sanitizedEmail = InputSanitizer.sanitizeEmail(
+        _emailController.text.trim(),
+      );
+      final password = _passwordController.text.trim();
+
       setState(() {
         _isLoading = true;
         _errorMessage = null;
@@ -48,9 +60,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         await ref
             .read(authProvider.notifier)
             .registerWithEmailAndPassword(
-              _nameController.text.trim(),
-              _emailController.text.trim(),
-              _passwordController.text.trim(),
+              sanitizedName,
+              sanitizedEmail,
+              password,
             );
 
         final authState = ref.read(authProvider);
@@ -533,7 +545,14 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                     color: mainTextColor,
                                     fontWeight: FontWeight.w300,
                                   ),
-                                  onChanged: (value) => setState(() {}),
+                                  onChanged: (value) {
+                                    setState(() {
+                                      _passwordStrength =
+                                          PasswordValidator.calculateStrength(
+                                            value,
+                                          );
+                                    });
+                                  },
                                   decoration: InputDecoration(
                                     hintText: AppTranslations.getText(
                                       ref,
@@ -606,10 +625,74 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                         'password_required',
                                       );
                                     }
+
+                                    // Use password validator
+                                    final validationError =
+                                        PasswordValidator.validatePassword(
+                                          value,
+                                        );
+                                    if (validationError != null) {
+                                      return AppTranslations.getText(
+                                        ref,
+                                        validationError,
+                                      );
+                                    }
+
                                     return null;
                                   },
                                 ),
                               ),
+
+                              // Password strength indicator
+                              if (_passwordController.text.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: PasswordValidator.getStrengthColor(
+                                      _passwordStrength,
+                                    ).withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: PasswordValidator.getStrengthColor(
+                                        _passwordStrength,
+                                      ).withValues(alpha: 0.3),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.security,
+                                        color:
+                                            PasswordValidator.getStrengthColor(
+                                              _passwordStrength,
+                                            ),
+                                        size: 16,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        AppTranslations.getText(
+                                          ref,
+                                          PasswordValidator.getStrengthText(
+                                            _passwordStrength,
+                                          ),
+                                        ),
+                                        style: TextStyle(
+                                          color:
+                                              PasswordValidator.getStrengthColor(
+                                                _passwordStrength,
+                                              ),
+                                          fontWeight: FontWeight.w500,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
 
                               // Confirm password
                               Container(
@@ -727,19 +810,19 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                     ),
                                   ),
                                   validator: (value) {
-                                    if (value == null || value.isEmpty) {
-                                      return AppTranslations.getText(
-                                        ref,
-                                        'confirm_password_required',
-                                      );
-                                    }
-                                    if (value != _passwordController.text) {
-                                      return AppTranslations.getText(
-                                        ref,
-                                        'passwords_dont_match',
-                                      );
-                                    }
-                                    return null;
+                                    return PasswordValidator.validatePasswordConfirmation(
+                                              _passwordController.text,
+                                              value ?? '',
+                                            ) !=
+                                            null
+                                        ? AppTranslations.getText(
+                                          ref,
+                                          PasswordValidator.validatePasswordConfirmation(
+                                            _passwordController.text,
+                                            value ?? '',
+                                          )!,
+                                        )
+                                        : null;
                                   },
                                 ),
                               ),

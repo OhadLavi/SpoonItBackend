@@ -10,6 +10,8 @@ import 'package:recipe_keeper/widgets/auth_widgets.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:recipe_keeper/utils/responsive_utils.dart';
 import 'package:recipe_keeper/utils/language_utils.dart';
+import 'package:recipe_keeper/services/rate_limit_service.dart';
+import 'package:recipe_keeper/services/audit_logger_service.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -36,6 +38,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<void> _signInWithEmailAndPassword() async {
     if (!_formKey.currentState!.validate()) return;
 
+    final email = _emailController.text.trim();
+
+    // Check rate limiting
+    final canAttempt = await RateLimitService.canAttemptLoginAsync(email);
+    if (!canAttempt) {
+      setState(() {
+        _errorMessage = AppTranslations.getText(ref, 'account_locked');
+        _isLoading = false;
+      });
+      AuditLogger.logRateLimitExceeded(email, 5);
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -44,12 +59,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     try {
       await ref
           .read(authProvider.notifier)
-          .signInWithEmailAndPassword(
-            _emailController.text.trim(),
-            _passwordController.text,
-          );
+          .signInWithEmailAndPassword(email, _passwordController.text);
+
+      // Clear rate limiting on successful login
+      await RateLimitService.clearAttemptsAsync(email);
+
       if (mounted) context.go('/home');
     } catch (e) {
+      // Record failed attempt
+      await RateLimitService.recordFailedAttemptAsync(email);
+
       setState(() {
         _errorMessage = e.toString().replaceFirst('Exception: ', '');
         _isLoading = false;
@@ -92,14 +111,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Future<void> _resetPassword() async {
-    if (_emailController.text.trim().isEmpty) {
+    final email = _emailController.text.trim();
+
+    if (email.isEmpty) {
       setState(() {
         _errorMessage = AppTranslations.getText(ref, 'email_required');
       });
       return;
     }
 
-    if (!Helpers.isValidEmail(_emailController.text.trim())) {
+    if (!Helpers.isValidEmail(email)) {
       setState(() {
         _errorMessage = AppTranslations.getText(ref, 'invalid_email');
       });
@@ -112,9 +133,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
 
     try {
-      await ref
-          .read(authProvider.notifier)
-          .resetPassword(_emailController.text.trim());
+      await ref.read(authProvider.notifier).resetPassword(email);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
