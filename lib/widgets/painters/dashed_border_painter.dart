@@ -60,3 +60,4 @@ class DashedBorderPainter extends CustomPainter {
         oldDelegate.borderRadius != borderRadius;
   }
 }
+

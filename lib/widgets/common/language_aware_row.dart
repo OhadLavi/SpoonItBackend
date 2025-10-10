@@ -30,3 +30,4 @@ class LanguageAwareRow extends ConsumerWidget {
     );
   }
 }
+

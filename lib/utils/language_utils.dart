@@ -95,3 +95,4 @@ class LanguageUtils {
     return isHebrew(ref) ? hebrewWidget : englishWidget;
   }
 }
+

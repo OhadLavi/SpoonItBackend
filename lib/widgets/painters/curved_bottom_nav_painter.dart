@@ -80,3 +80,4 @@ class CurvedBottomNavPainter extends CustomPainter {
         oldDelegate.smoothness != smoothness;
   }
 }
+

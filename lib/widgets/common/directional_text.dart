@@ -33,3 +33,4 @@ class DirectionalText extends ConsumerWidget {
     );
   }
 }
+

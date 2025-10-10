@@ -687,7 +687,7 @@ class AppTranslations {
     'confirm_new_password': 'אשר סיסמה חדשה',
     'current_password_required': 'אנא הזן את סיסמתך הנוכחית',
     'new_password_required': 'אנא הזן סיסמה חדשה',
-    'confirm_password_required': 'אנא אשר את סיסמתך החדשה',
+    'confirm_password_required': 'אנא אשר את הסיסמה',
     'password_too_short': 'הסיסמה חייבת להכיל לפחות 6 תווים',
     'passwords_do_not_match': 'הסיסמאות אינן תואמות',
     'password_changed_successfully': 'הסיסמה שונתה בהצלחה!',

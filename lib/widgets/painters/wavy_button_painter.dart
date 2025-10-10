@@ -62,3 +62,4 @@ class WavyButtonPainter extends CustomPainter {
         oldDelegate.controlPoint2 != controlPoint2;
   }
 }
+

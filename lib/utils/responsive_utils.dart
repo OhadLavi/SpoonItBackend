@@ -178,3 +178,4 @@ class ResponsiveUtils {
 
 /// Breakpoint types for responsive design
 enum BreakpointType { mobile, tablet, desktop }
+
