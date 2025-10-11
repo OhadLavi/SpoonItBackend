@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:recipe_keeper/models/category.dart';
+import 'package:spoonit/models/category.dart';
 
 class CategoryService {
   final _db = FirebaseFirestore.instance;

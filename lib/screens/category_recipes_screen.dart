@@ -1,15 +1,16 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
-import 'package:recipe_keeper/providers/auth_provider.dart';
-import 'package:recipe_keeper/providers/recipe_provider.dart';
-import 'package:recipe_keeper/models/recipe.dart';
+import 'package:spoonit/utils/app_theme.dart';
+import 'package:spoonit/providers/auth_provider.dart';
+import 'package:spoonit/providers/recipe_provider.dart';
+import 'package:spoonit/models/recipe.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:recipe_keeper/services/image_service.dart';
-import 'package:recipe_keeper/widgets/app_header.dart';
-import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
-import 'package:recipe_keeper/utils/translations.dart';
+import 'package:spoonit/services/image_service.dart';
+import 'package:spoonit/widgets/app_header.dart';
+import 'package:spoonit/widgets/app_bottom_nav.dart';
+import 'package:spoonit/utils/translations.dart';
 
 class CategoryRecipesScreen extends ConsumerStatefulWidget {
   final String categoryName;
@@ -162,7 +163,24 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
       error: (error, stack) => AsyncValue<List<Recipe>>.error(error, stack),
     );
 
+    // ---- DYNAMIC bottom padding so list never slides under the curved bar ----
+    final media = MediaQuery.of(context);
+    final double safeBottom = [
+      media.padding.bottom,
+      media.viewPadding.bottom,
+      media.systemGestureInsets.bottom,
+    ].reduce(math.max);
+
+    const double kBarHeight = 60.0;
+    const double kFabOverlap = 28.0; // matches AppBottomNav
+    // Extra breathing room so last card isn't glued to the bar
+    const double kListBottomExtra = 24.0;
+
+    final double bottomListPadding =
+        kBarHeight + kFabOverlap + safeBottom + kListBottomExtra;
+
     return Scaffold(
+      extendBody: true, // keep: body can draw under the bottom bar
       backgroundColor: AppTheme.backgroundColor,
       body: Column(
         children: [
@@ -255,22 +273,19 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
                     context,
                   ).copyWith(scrollbars: false),
                   child: ListView.builder(
-                    padding: const EdgeInsets.only(
+                    padding: EdgeInsets.only(
                       left: 16,
                       right: 16,
                       top: 16,
-                      bottom: 100,
+                      bottom: bottomListPadding,
                     ),
                     itemCount: filteredRecipes.length,
                     itemBuilder: (context, index) {
                       final recipe = filteredRecipes[index];
                       return GestureDetector(
-                        onTap: () {
-                          context.push('/recipe/${recipe.id}');
-                        },
-                        onLongPress: () {
-                          _showRecipeContextMenu(context, recipe);
-                        },
+                        onTap: () => context.push('/recipe/${recipe.id}'),
+                        onLongPress:
+                            () => _showRecipeContextMenu(context, recipe),
                         child: Card(
                           margin: const EdgeInsets.only(bottom: 16),
                           color: AppTheme.cardColor,

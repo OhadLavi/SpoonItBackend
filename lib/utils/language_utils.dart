@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:recipe_keeper/providers/settings_provider.dart';
+import 'package:spoonit/providers/settings_provider.dart';
 
 /// Language and directionality utilities for consistent RTL/LTR handling
 class LanguageUtils {

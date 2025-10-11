@@ -6,8 +6,8 @@ import 'package:path/path.dart' as path;
 import 'package:uuid/uuid.dart';
 import 'dart:developer' as developer;
 import 'package:html/parser.dart' as html_parser;
-import 'package:recipe_keeper/models/recipe.dart';
-import 'package:recipe_keeper/services/firebase_service.dart';
+import 'package:spoonit/models/recipe.dart';
+import 'package:spoonit/services/firebase_service.dart';
 
 class RecipeService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;

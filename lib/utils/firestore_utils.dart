@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:developer' as developer;
-import 'package:recipe_keeper/services/firebase_service.dart';
+import 'package:spoonit/services/firebase_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 /// Utility class to handle Firestore operations with proper error handling and retry logic

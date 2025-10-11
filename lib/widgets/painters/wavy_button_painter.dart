@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:spoonit/utils/app_theme.dart';
 
 /// Wavy button painter for custom shaped buttons
 class WavyButtonPainter extends CustomPainter {

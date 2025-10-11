@@ -2,16 +2,16 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:recipe_keeper/models/app_user.dart';
-import 'package:recipe_keeper/providers/auth_provider.dart';
-import 'package:recipe_keeper/services/auth_service.dart';
-import 'package:recipe_keeper/services/image_service.dart';
-import 'package:recipe_keeper/utils/translations.dart';
+import 'package:spoonit/models/app_user.dart';
+import 'package:spoonit/providers/auth_provider.dart';
+import 'package:spoonit/services/auth_service.dart';
+import 'package:spoonit/services/image_service.dart';
+import 'package:spoonit/utils/translations.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:recipe_keeper/widgets/app_header.dart';
-import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
+import 'package:spoonit/widgets/app_header.dart';
+import 'package:spoonit/widgets/app_bottom_nav.dart';
 import 'package:go_router/go_router.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:spoonit/utils/app_theme.dart';
 
 class EditProfileScreen extends ConsumerStatefulWidget {
   final AppUser user;

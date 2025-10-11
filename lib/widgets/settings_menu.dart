@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:recipe_keeper/providers/auth_provider.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:spoonit/providers/auth_provider.dart';
+import 'package:spoonit/utils/app_theme.dart';
 import 'dart:developer' as developer;
-import 'package:recipe_keeper/utils/translations.dart';
-import 'package:recipe_keeper/utils/language_utils.dart';
-import 'package:recipe_keeper/widgets/common/directional_text.dart';
-import 'package:recipe_keeper/widgets/common/directional_icon.dart';
+import 'package:spoonit/utils/translations.dart';
+import 'package:spoonit/utils/language_utils.dart';
+import 'package:spoonit/widgets/common/directional_text.dart';
+import 'package:spoonit/widgets/common/directional_icon.dart';
 
 class SettingsMenu extends ConsumerWidget {
   const SettingsMenu({super.key, required this.hostContext});

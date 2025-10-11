@@ -1,5 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:recipe_keeper/providers/settings_provider.dart';
+import 'package:spoonit/providers/settings_provider.dart';
 
 class AppTranslations {
   static String getText(WidgetRef ref, String key) {
@@ -332,6 +332,7 @@ class AppTranslations {
     'error_deleting_item': 'Error deleting item',
     'checked_items_deleted': 'Checked items deleted',
     'error_deleting_items': 'Error deleting items',
+    'please_enter_item_name': 'Please enter an item name',
     'shopping_list_share_title': 'Shopping List',
     'items_to_buy': 'Items to buy',
     'items_bought': 'Items bought',
@@ -771,6 +772,7 @@ class AppTranslations {
     'error_deleting_item': 'שגיאה במחיקת הפריט',
     'checked_items_deleted': 'הפריטים שסומנו נמחקו',
     'error_deleting_items': 'שגיאה במחיקת הפריטים',
+    'please_enter_item_name': 'אנא הכנס שם פריט',
     'shopping_list_share_title': 'רשימת קניות',
     'items_to_buy': 'פריטים לקנות',
     'items_bought': 'פריטים שנקנו',

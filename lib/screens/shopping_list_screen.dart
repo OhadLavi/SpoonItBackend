@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:recipe_keeper/widgets/app_header.dart';
-import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
-import 'package:recipe_keeper/services/shopping_list_service.dart';
-import 'package:recipe_keeper/providers/auth_provider.dart';
-import 'package:recipe_keeper/providers/settings_provider.dart';
+import 'package:spoonit/widgets/app_header.dart';
+import 'package:spoonit/widgets/app_bottom_nav.dart';
+import 'package:spoonit/utils/app_theme.dart';
+import 'package:spoonit/services/shopping_list_service.dart';
+import 'package:spoonit/providers/auth_provider.dart';
+import 'package:spoonit/providers/settings_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:recipe_keeper/utils/translations.dart';
+import 'package:spoonit/utils/translations.dart';
 
 class ShoppingListScreen extends ConsumerStatefulWidget {
   const ShoppingListScreen({super.key});
@@ -284,7 +284,22 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
 
   Future<void> _addItem(String userId, {bool showMessage = true}) async {
     final item = _itemController.text.trim();
-    if (item.isEmpty) return;
+    if (item.isEmpty) {
+      if (showMessage && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              AppTranslations.getText(ref, 'please_enter_item_name'),
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontFamily: AppTheme.primaryFontFamily),
+            ),
+            backgroundColor: AppTheme.warningColor,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
 
     try {
       await _shoppingListService.addItem(userId, item);

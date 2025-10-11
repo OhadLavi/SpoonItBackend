@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
-import 'package:recipe_keeper/utils/translations.dart';
-import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
-import 'package:recipe_keeper/widgets/recipe_form_base.dart';
+import 'package:spoonit/utils/app_theme.dart';
+import 'package:spoonit/utils/translations.dart';
+import 'package:spoonit/widgets/app_bottom_nav.dart';
+import 'package:spoonit/widgets/recipe_form_base.dart';
 
 class CreateRecipeScreen extends ConsumerWidget {
   const CreateRecipeScreen({super.key});

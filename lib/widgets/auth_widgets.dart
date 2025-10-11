@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:spoonit/utils/app_theme.dart';
 
 /// Top colored band used on auth screens.
 class AuthHeader extends StatelessWidget {

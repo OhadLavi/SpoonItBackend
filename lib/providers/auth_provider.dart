@@ -7,8 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart'
     show User; // for StreamSubscription<User?>
 
-import 'package:recipe_keeper/models/app_user.dart';
-import 'package:recipe_keeper/services/auth_service.dart';
+import 'package:spoonit/models/app_user.dart';
+import 'package:spoonit/services/auth_service.dart';
 
 enum AuthStatus { initial, loading, authenticated, unauthenticated, error }
 

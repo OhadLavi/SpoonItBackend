@@ -1,11 +1,11 @@
 {
-    "name": "recipe_keeper",
-    "short_name": "recipe_keeper",
+    "name": "SpoonIt",
+    "short_name": "SpoonIt",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#hexcode",
+    "theme_color": "#hexcode",
+    "description": "SpoonIt - A modern recipe keeper app that allows users to save and manage recipes.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

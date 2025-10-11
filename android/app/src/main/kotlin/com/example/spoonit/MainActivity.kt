@@ -1,4 +1,4 @@
-package com.example.recipe_keeper
+package com.example.spoonit
 
 import io.flutter.embedding.android.FlutterActivity
 

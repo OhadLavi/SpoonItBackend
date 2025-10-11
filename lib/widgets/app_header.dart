@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
-import 'package:recipe_keeper/utils/language_utils.dart';
-import 'package:recipe_keeper/utils/navigation_helpers.dart';
+import 'package:spoonit/utils/app_theme.dart';
+import 'package:spoonit/utils/language_utils.dart';
+import 'package:spoonit/utils/navigation_helpers.dart';
 
 class AppHeader extends ConsumerWidget {
   final String? title;

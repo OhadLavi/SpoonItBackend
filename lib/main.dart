@@ -10,13 +10,13 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:recipe_keeper/firebase_options.dart';
-import 'package:recipe_keeper/utils/app_router.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
-import 'package:recipe_keeper/widgets/connectivity_widget.dart';
-import 'package:recipe_keeper/providers/settings_provider.dart';
-import 'package:recipe_keeper/providers/auth_provider.dart';
-import 'package:recipe_keeper/services/firebase_service.dart';
+import 'package:spoonit/firebase_options.dart';
+import 'package:spoonit/utils/app_router.dart';
+import 'package:spoonit/utils/app_theme.dart';
+import 'package:spoonit/widgets/connectivity_widget.dart';
+import 'package:spoonit/providers/settings_provider.dart';
+import 'package:spoonit/providers/auth_provider.dart';
+import 'package:spoonit/services/firebase_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

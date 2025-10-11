@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:developer' as developer;
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:recipe_keeper/firebase_options.dart';
+import 'package:spoonit/firebase_options.dart';
 
 class FirebaseService {
   static bool _isInitialized = false;

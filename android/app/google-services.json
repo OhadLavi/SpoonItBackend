@@ -9,7 +9,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:682017024777:android:60351fed0ebb4eab8601d8",
         "android_client_info": {
-          "package_name": "com.example.recipe_keeper"
+          "package_name": "com.example.spoonit"
         }
       },
       "oauth_client": [
@@ -34,7 +34,7 @@
               "client_id": "682017024777-on5ondrk2tinfabj0b4smecc16jpbuo4.apps.googleusercontent.com",
               "client_type": 2,
               "ios_info": {
-                "bundle_id": "com.example.recipeKeeper"
+                "bundle_id": "com.example.spoonit"
               }
             }
           ]

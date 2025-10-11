@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:recipe_keeper/services/chat_service.dart';
-import 'package:recipe_keeper/utils/translations.dart';
-import 'package:recipe_keeper/widgets/app_header.dart';
-import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
-import 'package:recipe_keeper/utils/language_utils.dart';
-import 'package:recipe_keeper/widgets/common/directional_text.dart';
+import 'package:spoonit/services/chat_service.dart';
+import 'package:spoonit/utils/translations.dart';
+import 'package:spoonit/widgets/app_header.dart';
+import 'package:spoonit/widgets/app_bottom_nav.dart';
+import 'package:spoonit/utils/app_theme.dart';
+import 'package:spoonit/utils/language_utils.dart';
+import 'package:spoonit/widgets/common/directional_text.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({super.key});

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:spoonit/utils/app_theme.dart';
 
 /// Curved bottom navigation painter with FAB notch
 class CurvedBottomNavPainter extends CustomPainter {
@@ -80,4 +80,3 @@ class CurvedBottomNavPainter extends CustomPainter {
         oldDelegate.smoothness != smoothness;
   }
 }
-

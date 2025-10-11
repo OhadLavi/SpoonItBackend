@@ -1,10 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:developer' as developer;
-import 'package:recipe_keeper/models/recipe.dart';
-import 'package:recipe_keeper/services/recipe_service.dart';
-import 'package:recipe_keeper/services/auth_service.dart';
-import 'package:recipe_keeper/providers/auth_provider.dart' as auth;
+import 'package:spoonit/models/recipe.dart';
+import 'package:spoonit/services/recipe_service.dart';
+import 'package:spoonit/services/auth_service.dart';
+import 'package:spoonit/providers/auth_provider.dart' as auth;
 
 // State provider for tracking favorite states with immediate UI feedback
 class FavoritesUINotifier extends Notifier<Map<String, bool>> {

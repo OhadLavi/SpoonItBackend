@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:recipe_keeper/utils/language_utils.dart';
+import 'package:spoonit/utils/language_utils.dart';
 
 /// Text widget that automatically aligns based on language
 class DirectionalText extends ConsumerWidget {

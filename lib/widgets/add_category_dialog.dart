@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:recipe_keeper/services/category_service.dart';
-import 'package:recipe_keeper/models/category.dart';
+import 'package:spoonit/services/category_service.dart';
+import 'package:spoonit/models/category.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
-import 'package:recipe_keeper/utils/translations.dart';
-import 'package:recipe_keeper/services/category_icon_service.dart';
+import 'package:spoonit/utils/app_theme.dart';
+import 'package:spoonit/utils/translations.dart';
+import 'package:spoonit/services/category_icon_service.dart';
 
 class AddCategoryDialog extends ConsumerStatefulWidget {
   final Category? categoryToEdit;

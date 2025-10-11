@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart' as url_launcher;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:recipe_keeper/utils/translations.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:spoonit/utils/translations.dart';
+import 'package:spoonit/utils/app_theme.dart';
 
 class Helpers {
   // Format a DateTime to a readable string

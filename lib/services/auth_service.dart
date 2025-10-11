@@ -8,15 +8,15 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-import 'package:recipe_keeper/models/app_user.dart';
-import 'package:recipe_keeper/services/input_sanitizer_service.dart';
-import 'package:recipe_keeper/services/audit_logger_service.dart';
+import 'package:spoonit/models/app_user.dart';
+import 'package:spoonit/services/input_sanitizer_service.dart';
+import 'package:spoonit/services/audit_logger_service.dart';
 
 /// Build-time define for web client id
 const String kGoogleWebClientId = String.fromEnvironment(
   'GOOGLE_WEB_CLIENT_ID',
   defaultValue:
-      '682017024777-on5ondrk2tinfabj0b4smecc16jpbuo4.apps.googleusercontent.com',
+      '682017024777-qr6b3m3v5q99jeahqe7ru6f1qjcnd078.apps.googleusercontent.com',
 );
 
 // Minimal wrapper so providers don’t depend on Firebase’s UserCredential directly

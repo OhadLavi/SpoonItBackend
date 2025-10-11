@@ -5,7 +5,7 @@ import 'package:uuid/uuid.dart';
 import 'package:path/path.dart' as path;
 import 'dart:developer' as developer;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:recipe_keeper/config/env_config.dart';
+import 'package:spoonit/config/env_config.dart';
 
 // Define the provider
 final imageServiceProvider = Provider<ImageService>((ref) => ImageService());

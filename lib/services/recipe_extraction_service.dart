@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:recipe_keeper/models/recipe.dart';
+import 'package:spoonit/models/recipe.dart';
 import 'dart:developer' as developer;
-import 'package:recipe_keeper/config/env_config.dart';
+import 'package:spoonit/config/env_config.dart';
 
 class RecipeExtractionService {
   String get baseUrl => EnvConfig.apiBaseUrl;

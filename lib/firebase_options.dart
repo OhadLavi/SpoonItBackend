@@ -64,8 +64,9 @@ class DefaultFirebaseOptions {
     messagingSenderId: '682017024777',
     projectId: 'recipekeeper-d436a',
     storageBucket: 'recipekeeper-d436a.firebasestorage.app',
-    iosClientId: '682017024777-on5ondrk2tinfabj0b4smecc16jpbuo4.apps.googleusercontent.com',
-    iosBundleId: 'com.example.recipeKeeper',
+    iosClientId:
+        '682017024777-on5ondrk2tinfabj0b4smecc16jpbuo4.apps.googleusercontent.com',
+    iosBundleId: 'com.example.spoonit',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
@@ -74,8 +75,9 @@ class DefaultFirebaseOptions {
     messagingSenderId: '682017024777',
     projectId: 'recipekeeper-d436a',
     storageBucket: 'recipekeeper-d436a.firebasestorage.app',
-    iosClientId: '682017024777-on5ondrk2tinfabj0b4smecc16jpbuo4.apps.googleusercontent.com',
-    iosBundleId: 'com.example.recipeKeeper',
+    iosClientId:
+        '682017024777-on5ondrk2tinfabj0b4smecc16jpbuo4.apps.googleusercontent.com',
+    iosBundleId: 'com.example.spoonit',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(

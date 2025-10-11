@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:recipe_keeper/services/firebase_service.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:spoonit/services/firebase_service.dart';
+import 'package:spoonit/utils/app_theme.dart';
 
 final connectivityProvider = StreamProvider<bool>((ref) {
   final controller = StreamController<bool>();

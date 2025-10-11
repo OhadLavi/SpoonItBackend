@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
-import 'package:recipe_keeper/widgets/painters/dashed_border_painter.dart';
+import 'package:spoonit/utils/app_theme.dart';
+import 'package:spoonit/widgets/painters/dashed_border_painter.dart';
 
 /// Dotted border card widget for add-category and similar use cases
 class DottedBorderCard extends StatelessWidget {

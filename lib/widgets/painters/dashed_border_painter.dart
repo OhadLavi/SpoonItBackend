@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:spoonit/utils/app_theme.dart';
 
 /// Unified dashed border painter for consistent styling
 class DashedBorderPainter extends CustomPainter {

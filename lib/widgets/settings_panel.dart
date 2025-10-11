@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:recipe_keeper/widgets/settings_menu.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
-import 'package:recipe_keeper/providers/settings_provider.dart';
+import 'package:spoonit/widgets/settings_menu.dart';
+import 'package:spoonit/utils/app_theme.dart';
+import 'package:spoonit/providers/settings_provider.dart';
 
 /// Shows the settings panel used across the app.
 /// Slides from right in Hebrew, left in English.

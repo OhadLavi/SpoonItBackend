@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:recipe_keeper/providers/auth_provider.dart';
-import 'package:recipe_keeper/utils/translations.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:spoonit/providers/auth_provider.dart';
+import 'package:spoonit/utils/translations.dart';
+import 'package:spoonit/utils/app_theme.dart';
 
 /// Service for handling validation logic across the app
 class ValidationService {

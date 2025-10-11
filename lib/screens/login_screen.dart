@@ -1,17 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:recipe_keeper/providers/auth_provider.dart';
-import 'package:recipe_keeper/providers/settings_provider.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
-import 'package:recipe_keeper/utils/helpers.dart';
-import 'package:recipe_keeper/utils/translations.dart';
-import 'package:recipe_keeper/widgets/auth_widgets.dart';
+import 'package:spoonit/providers/auth_provider.dart';
+import 'package:spoonit/providers/settings_provider.dart';
+import 'package:spoonit/utils/app_theme.dart';
+import 'package:spoonit/utils/helpers.dart';
+import 'package:spoonit/utils/translations.dart';
+import 'package:spoonit/widgets/auth_widgets.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:recipe_keeper/utils/responsive_utils.dart';
-import 'package:recipe_keeper/utils/language_utils.dart';
-import 'package:recipe_keeper/services/rate_limit_service.dart';
-import 'package:recipe_keeper/services/audit_logger_service.dart';
+import 'package:spoonit/utils/responsive_utils.dart';
+import 'package:spoonit/utils/language_utils.dart';
+import 'package:spoonit/services/rate_limit_service.dart';
+import 'package:spoonit/services/audit_logger_service.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});

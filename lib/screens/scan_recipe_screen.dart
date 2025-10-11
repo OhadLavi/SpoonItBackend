@@ -3,14 +3,14 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:recipe_keeper/utils/translations.dart';
-import 'package:recipe_keeper/models/recipe.dart';
-import 'package:recipe_keeper/widgets/recipe_form.dart';
-import 'package:recipe_keeper/widgets/app_header.dart';
-import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
+import 'package:spoonit/utils/translations.dart';
+import 'package:spoonit/models/recipe.dart';
+import 'package:spoonit/widgets/recipe_form.dart';
+import 'package:spoonit/widgets/app_header.dart';
+import 'package:spoonit/widgets/app_bottom_nav.dart';
+import 'package:spoonit/utils/app_theme.dart';
 import 'package:go_router/go_router.dart';
-import 'package:recipe_keeper/config/env_config.dart';
+import 'package:spoonit/config/env_config.dart';
 
 class ScanRecipeScreen extends ConsumerStatefulWidget {
   const ScanRecipeScreen({super.key});

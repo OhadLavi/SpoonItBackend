@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:recipe_keeper/utils/app_theme.dart';
-import 'package:recipe_keeper/utils/translations.dart';
+import 'package:spoonit/utils/app_theme.dart';
+import 'package:spoonit/utils/translations.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:recipe_keeper/widgets/app_header.dart';
-import 'package:recipe_keeper/widgets/app_bottom_nav.dart';
-import 'package:recipe_keeper/config/env_config.dart';
+import 'package:spoonit/widgets/app_header.dart';
+import 'package:spoonit/widgets/app_bottom_nav.dart';
+import 'package:spoonit/config/env_config.dart';
 
 class CustomRecipeScreen extends ConsumerStatefulWidget {
   const CustomRecipeScreen({super.key});

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:recipe_keeper/utils/language_utils.dart';
+import 'package:spoonit/utils/language_utils.dart';
 
 /// Icon widget that automatically handles RTL flipping
 class DirectionalIcon extends ConsumerWidget {
