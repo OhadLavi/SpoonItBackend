@@ -5,7 +5,6 @@ import 'package:spoonit/providers/auth_provider.dart';
 import 'package:spoonit/utils/app_theme.dart';
 import 'dart:developer' as developer;
 import 'package:spoonit/utils/translations.dart';
-import 'package:spoonit/utils/language_utils.dart';
 import 'package:spoonit/widgets/common/directional_text.dart';
 import 'package:spoonit/widgets/common/directional_icon.dart';
 
