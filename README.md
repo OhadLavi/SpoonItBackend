@@ -104,11 +104,37 @@ final response = await http.post(
 
 ## Deployment
 
-This backend can be deployed to various platforms:
+### Google Cloud Run (Recommended)
+
+This backend is configured for Google Cloud Run deployment with a custom Dockerfile:
+
+1. Make sure you have the Google Cloud CLI installed and authenticated
+2. Set your project ID:
+```bash
+gcloud config set project YOUR_PROJECT_ID
+```
+
+3. Deploy to Cloud Run:
+```bash
+gcloud run deploy spoonitbackend \
+  --source . \
+  --region europe-west1 \
+  --allow-unauthenticated \
+  --set-env-vars GEMINI_API_KEY=your_api_key_here
+```
+
+The Dockerfile includes all necessary dependencies including Playwright browsers and Tesseract OCR.
+
+### Other Platforms
+
+This backend can also be deployed to:
 - Railway
 - Render
 - Heroku
 - DigitalOcean App Platform
 - AWS/GCP/Azure
 
-Make sure to set the `PORT` environment variable (most platforms do this automatically) and configure your `GEMINI_API_KEY` in the platform's environment variables. 
+Make sure to:
+1. Set the `PORT` environment variable (most platforms do this automatically)
+2. Configure your `GEMINI_API_KEY` in the platform's environment variables
+3. Ensure Playwright browsers are installed (may require custom buildpack or Dockerfile) 
