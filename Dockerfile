@@ -56,5 +56,6 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 8080
 
 # Run the application using uvicorn directly (ASGI server for FastAPI)
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Use ENTRYPOINT to ensure this cannot be overridden
+ENTRYPOINT ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
 
