@@ -1615,4 +1615,7 @@ async def proxy_image(url: str):
 # Entrypoint
 # =============================================================================
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    # Use PORT environment variable for cloud deployments (Google Cloud Run, etc.)
+    # Falls back to 8001 for local development
+    port = int(os.getenv("PORT", 8001))
+    uvicorn.run(app, host="0.0.0.0", port=port)
