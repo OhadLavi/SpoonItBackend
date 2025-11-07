@@ -55,6 +55,6 @@ ENV PYTHONUNBUFFERED=1
 # Expose the port
 EXPOSE 8080
 
-# Run the application
-CMD ["python", "main.py"]
+# Run the application using uvicorn directly (ASGI server for FastAPI)
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
 
