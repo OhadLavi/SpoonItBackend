@@ -49,7 +49,7 @@ RUN playwright install-deps chromium
 COPY . .
 
 # Set environment variables
-ENV PORT=8080
+# Note: PORT is set automatically by Cloud Run, don't override it
 ENV PYTHONUNBUFFERED=1
 
 # Expose the port
@@ -57,5 +57,6 @@ EXPOSE 8080
 
 # Run the application using uvicorn directly (ASGI server for FastAPI)
 # Use ENTRYPOINT to ensure this cannot be overridden
-ENTRYPOINT ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+# PORT is read from environment variable (set by Cloud Run)
+ENTRYPOINT ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]
 
