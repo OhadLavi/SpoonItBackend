@@ -1122,12 +1122,8 @@ async def call_gemini_llm(prompt: str, system_prompt: str = None) -> str:
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
     
-    # Prepare content - combine system prompt and user prompt
-    full_prompt = prompt
-    if system_prompt:
-        full_prompt = f"{system_prompt}\n\n{prompt}"
-    
-    full_prompt += "\n\nIMPORTANT: Return ONLY valid JSON, no markdown, no code blocks, just the raw JSON object."
+    # Prepare user prompt
+    user_prompt = prompt + "\n\nIMPORTANT: Return ONLY valid JSON, no markdown, no code blocks, just the raw JSON object."
     
     # Try different configurations: v1beta with responseMimeType, then v1beta without, then v1
     configs = [
@@ -1154,12 +1150,25 @@ async def call_gemini_llm(prompt: str, system_prompt: str = None) -> str:
             if config["use_response_mime_type"] and api_version == "v1beta":
                 generation_config["responseMimeType"] = "application/json"
             
+            # Build payload with systemInstruction if system_prompt is provided
+            # Prepare the actual prompt text to use
+            actual_prompt = user_prompt
+            if system_prompt and api_version != "v1":
+                # For v1beta, combine with user prompt
+                actual_prompt = f"{system_prompt}\n\n{user_prompt}"
+            
             payload = {
                 "contents": [{
-                    "parts": [{"text": full_prompt}]
+                    "parts": [{"text": actual_prompt}]
                 }],
                 "generationConfig": generation_config
             }
+            
+            # Add systemInstruction if system_prompt is provided (for v1 API)
+            if system_prompt and api_version == "v1":
+                payload["systemInstruction"] = {
+                    "parts": [{"text": system_prompt}]
+                }
             
             # Use x-goog-api-key header as per official documentation
             headers = {
@@ -1172,13 +1181,40 @@ async def call_gemini_llm(prompt: str, system_prompt: str = None) -> str:
                 r.raise_for_status()
                 data = r.json()
                 
-                # Gemini returns JSON in candidates[0].content.parts[0].text
+                # Check for blocking reasons first
                 if "candidates" in data and len(data["candidates"]) > 0:
-                    content = data["candidates"][0]["content"]["parts"][0]["text"]
-                    logger.info(f"[GEMINI] Success with {api_version} API (responseMimeType={config['use_response_mime_type']})")
-                    return content
+                    candidate = data["candidates"][0]
+                    
+                    # Check if response was blocked
+                    if "finishReason" in candidate:
+                        finish_reason = candidate["finishReason"]
+                        if finish_reason not in ["STOP", "MAX_TOKENS"]:
+                            raise ValueError(f"Response blocked with finishReason: {finish_reason}")
+                    
+                    # Extract content from response
+                    if "content" in candidate:
+                        if "parts" in candidate["content"]:
+                            if len(candidate["content"]["parts"]) > 0:
+                                part = candidate["content"]["parts"][0]
+                                if "text" in part:
+                                    content = part["text"]
+                                    logger.info(f"[GEMINI] Success with {api_version} API (responseMimeType={config['use_response_mime_type']})")
+                                    return content
+                                else:
+                                    raise ValueError(f"Part does not contain 'text' field: {part}")
+                            else:
+                                raise ValueError(f"Empty parts array in response: {candidate['content']}")
+                        else:
+                            raise ValueError(f"Content does not contain 'parts' field: {candidate['content']}")
+                    else:
+                        raise ValueError(f"Candidate does not contain 'content' field: {candidate}")
                 else:
-                    raise ValueError("No candidates in Gemini response")
+                    # Check if there's a promptFeedback indicating blocking
+                    if "promptFeedback" in data:
+                        feedback = data["promptFeedback"]
+                        if "blockReason" in feedback:
+                            raise ValueError(f"Prompt blocked: {feedback['blockReason']}")
+                    raise ValueError(f"No candidates in Gemini response: {data}")
                     
         except httpx.HTTPStatusError as e:
             error_data = {}
@@ -1205,6 +1241,11 @@ async def call_gemini_llm(prompt: str, system_prompt: str = None) -> str:
                 last_error = e
                 continue
                 
+        except KeyError as e:
+            # Handle missing keys in response structure
+            logger.warning(f"[GEMINI] KeyError with {api_version}: {e}, response structure may be different, trying next config...")
+            last_error = e
+            continue
         except Exception as e:
             logger.warning(f"[GEMINI] Exception with {api_version}: {e}, trying next config...")
             last_error = e
