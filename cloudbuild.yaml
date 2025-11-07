@@ -21,6 +21,10 @@ steps:
       - '--platform'
       - 'managed'
       - '--allow-unauthenticated'
+      - '--port'
+      - '8080'
+      - '--set-env-vars'
+      - 'PORT=8080'
 
 substitutions:
   _SERVICE_NAME: spoonitbackend
