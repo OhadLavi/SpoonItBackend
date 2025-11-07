@@ -71,3 +71,4 @@ tests/
 # Buildpack files that might interfere
 Procfile
 runtime.txt
+.python-version
