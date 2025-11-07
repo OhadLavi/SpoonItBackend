@@ -1162,12 +1162,19 @@ def create_recipe_extraction_prompt(section_text: str) -> Tuple[str, str]:
         "7) CRITICAL: ingredients array must contain ONLY food items/measurements, NOT preparation instructions or navigation text; "
         "8) Remove any text like 'הוראות הכנה', '#layout', menus; 9) instructions array must contain ONLY cooking steps; "
         "10) If some fields are not explicitly stated, infer reasonable values, but do not invent. "
-        "11) Prefer Hebrew labels (e.g., 'רכיבים', 'אופן ההכנה') when present; otherwise, use context."
+        "11) Prefer Hebrew labels (e.g., 'רכיבים', 'אופן ההכנה') when present; otherwise, use context. "
+        "12) MANDATORY: You MUST extract at least 2 ingredients and 2 instructions. If you cannot find them, "
+        "look more carefully in the text - ingredients often have measurements (numbers, cups, spoons, grams), "
+        "and instructions are usually numbered steps or paragraphs describing cooking actions."
     )
     
     user_prompt = (
         "Extract the recipe from this text. The text may include a compact section followed by broader page text.\n\n"
-        f"{section_text}\n\nReturn only the JSON object."
+        f"{section_text}\n\n"
+        "IMPORTANT: You must extract ingredients and instructions. Look for:\n"
+        "- Ingredients: lines with measurements (numbers, cups, spoons, grams, etc.) and food items\n"
+        "- Instructions: numbered steps or paragraphs describing how to prepare/cook the recipe\n"
+        "Return only the JSON object with at least 2 ingredients and 2 instructions."
     )
     
     return system_prompt, user_prompt
@@ -1183,11 +1190,17 @@ async def call_gemini_llm(prompt: str, system_prompt: str = None) -> str:
     # Prepare user prompt
     user_prompt = prompt + "\n\nIMPORTANT: Return ONLY valid JSON, no markdown, no code blocks, just the raw JSON object."
     
-    # Try different configurations: v1beta with responseMimeType, then v1beta without, then v1
+    # Combine system and user prompts for all API versions (simpler and more reliable)
+    if system_prompt:
+        combined_prompt = f"{system_prompt}\n\n{user_prompt}"
+    else:
+        combined_prompt = user_prompt
+    
+    # Try different configurations: v1beta with responseMimeType, then v1beta without
+    # Skip v1 API as it has compatibility issues with systemInstruction
     configs = [
         {"version": "v1beta", "use_response_mime_type": True},
         {"version": "v1beta", "use_response_mime_type": False},
-        {"version": "v1", "use_response_mime_type": False},
     ]
     
     last_error = None
@@ -1208,25 +1221,13 @@ async def call_gemini_llm(prompt: str, system_prompt: str = None) -> str:
             if config["use_response_mime_type"] and api_version == "v1beta":
                 generation_config["responseMimeType"] = "application/json"
             
-            # Build payload with systemInstruction if system_prompt is provided
-            # Prepare the actual prompt text to use
-            actual_prompt = user_prompt
-            if system_prompt and api_version != "v1":
-                # For v1beta, combine with user prompt
-                actual_prompt = f"{system_prompt}\n\n{user_prompt}"
-            
+            # Build payload - always combine prompts for simplicity
             payload = {
                 "contents": [{
-                    "parts": [{"text": actual_prompt}]
+                    "parts": [{"text": combined_prompt}]
                 }],
                 "generationConfig": generation_config
             }
-            
-            # Add systemInstruction if system_prompt is provided (for v1 API)
-            if system_prompt and api_version == "v1":
-                payload["systemInstruction"] = {
-                    "parts": [{"text": system_prompt}]
-                }
             
             # Use x-goog-api-key header as per official documentation
             headers = {
@@ -1249,23 +1250,39 @@ async def call_gemini_llm(prompt: str, system_prompt: str = None) -> str:
                         if finish_reason not in ["STOP", "MAX_TOKENS"]:
                             raise ValueError(f"Response blocked with finishReason: {finish_reason}")
                     
-                    # Extract content from response
+                    # Extract content from response - handle different response structures
+                    content_text = None
+                    
+                    # Try standard structure: candidate.content.parts[0].text
                     if "content" in candidate:
-                        if "parts" in candidate["content"]:
-                            if len(candidate["content"]["parts"]) > 0:
-                                part = candidate["content"]["parts"][0]
-                                if "text" in part:
-                                    content = part["text"]
-                                    logger.info(f"[GEMINI] Success with {api_version} API (responseMimeType={config['use_response_mime_type']})")
-                                    return content
-                                else:
-                                    raise ValueError(f"Part does not contain 'text' field: {part}")
-                            else:
-                                raise ValueError(f"Empty parts array in response: {candidate['content']}")
-                        else:
-                            raise ValueError(f"Content does not contain 'parts' field: {candidate['content']}")
+                        content_obj = candidate["content"]
+                        # Handle both dict and list structures
+                        if isinstance(content_obj, dict):
+                            if "parts" in content_obj:
+                                parts = content_obj["parts"]
+                                if isinstance(parts, list) and len(parts) > 0:
+                                    part = parts[0]
+                                    if isinstance(part, dict) and "text" in part:
+                                        content_text = part["text"]
+                        elif isinstance(content_obj, list):
+                            # Sometimes content is a list
+                            for item in content_obj:
+                                if isinstance(item, dict) and "parts" in item:
+                                    parts = item["parts"]
+                                    if isinstance(parts, list) and len(parts) > 0:
+                                        part = parts[0]
+                                        if isinstance(part, dict) and "text" in part:
+                                            content_text = part["text"]
+                                            break
+                    
+                    # If we found content, return it
+                    if content_text:
+                        logger.info(f"[GEMINI] Success with {api_version} API (responseMimeType={config['use_response_mime_type']})")
+                        return content_text
                     else:
-                        raise ValueError(f"Candidate does not contain 'content' field: {candidate}")
+                        # Log the actual structure for debugging
+                        logger.warning(f"[GEMINI] Unexpected response structure: {candidate}")
+                        raise ValueError(f"Could not extract text from response structure: {candidate}")
                 else:
                     # Check if there's a promptFeedback indicating blocking
                     if "promptFeedback" in data:
@@ -1283,9 +1300,9 @@ async def call_gemini_llm(prompt: str, system_prompt: str = None) -> str:
             
             error_msg = error_data.get('error', {}).get('message', str(e))
             
-            # If 400 and it's about responseMimeType, try next config
-            if e.response.status_code == 400 and "responseMimeType" in error_msg:
-                logger.warning(f"[GEMINI] responseMimeType not supported in this config, trying next...")
+            # If 400 and it's about responseMimeType or systemInstruction, try next config
+            if e.response.status_code == 400 and ("responseMimeType" in error_msg or "systemInstruction" in error_msg):
+                logger.warning(f"[GEMINI] Configuration issue with {api_version}: {error_msg}, trying next...")
                 last_error = e
                 continue
             # If 404, try next config
@@ -1299,9 +1316,9 @@ async def call_gemini_llm(prompt: str, system_prompt: str = None) -> str:
                 last_error = e
                 continue
                 
-        except KeyError as e:
-            # Handle missing keys in response structure
-            logger.warning(f"[GEMINI] KeyError with {api_version}: {e}, response structure may be different, trying next config...")
+        except (KeyError, ValueError) as e:
+            # Handle missing keys in response structure or value errors
+            logger.warning(f"[GEMINI] Error with {api_version}: {e}, trying next config...")
             last_error = e
             continue
         except Exception as e:
@@ -1554,13 +1571,31 @@ async def extract_recipe(req: RecipeExtractionRequest):
         logger.info("[FLOW] done via LLM | title='%s' ings=%d steps=%d prep=%d cook=%d",
                     recipe_model.title, len(recipe_model.ingredients), len(recipe_model.instructions),
                     recipe_model.prepTime, recipe_model.cookTime)
+        
         # Backfill from Hebrew section parser if LLM missed fields
         if (not recipe_model.ingredients) or (not recipe_model.instructions):
             heb_ings, heb_steps = _extract_hebrew_sections_from_text(page_text)
             if not recipe_model.ingredients and heb_ings:
                 recipe_model.ingredients = heb_ings
+                logger.info("[FLOW] Backfilled %d ingredients from Hebrew parser", len(heb_ings))
             if not recipe_model.instructions and heb_steps:
                 recipe_model.instructions = heb_steps
+                logger.info("[FLOW] Backfilled %d instructions from Hebrew parser", len(heb_steps))
+        
+        # Validate that we have at least some recipe content
+        if not recipe_model.ingredients and not recipe_model.instructions:
+            logger.warning("[FLOW] Empty recipe extracted - no ingredients or instructions found")
+            raise HTTPException(
+                status_code=400,
+                detail="Could not extract recipe ingredients or instructions from the page. "
+                       "Please make sure the URL points to a recipe page with ingredient lists and cooking instructions."
+            )
+        
+        # Warn if we have very few ingredients or instructions
+        if len(recipe_model.ingredients) < 2 or len(recipe_model.instructions) < 2:
+            logger.warning("[FLOW] Recipe has very few items: %d ingredients, %d instructions", 
+                          len(recipe_model.ingredients), len(recipe_model.instructions))
+        
         return recipe_model.model_dump()
 
     except HTTPException:
