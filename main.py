@@ -1098,19 +1098,22 @@ def create_recipe_extraction_prompt(section_text: str) -> Tuple[str, str]:
     For Ollama, concatenate them.
     """
     system_prompt = (
-        "You are an expert recipe extraction assistant. Extract recipe information "
-        "from the provided text and return ONLY a valid JSON object with these exact keys: "
+        "You are an expert recipe extraction assistant. The content may be in Hebrew or English. "
+        "Extract recipe information and return ONLY a valid JSON object with these exact keys: "
         "title, description, ingredients, instructions, prepTime, cookTime, servings, tags, imageUrl, source. "
         "Rules: 1) Return JSON only (no markdown, no code blocks); 2) Numbers as integers (not strings); "
         "3) No trailing commas; 4) ingredients and instructions are arrays of clean strings (no numbering/bullets); "
         "5) prepTime/cookTime in whole minutes (integers); 6) servings as integer; "
-        "7) CRITICAL: ingredients array must contain ONLY actual food items/measurements, "
-        "NOT preparation instructions or navigation text; "
-        "8) Remove any text like 'הוראות הכנה', '#layout', navigation menus, or cooking steps from ingredients; "
-        "9) instructions array must contain ONLY cooking steps, NOT ingredient lists."
+        "7) CRITICAL: ingredients array must contain ONLY food items/measurements, NOT preparation instructions or navigation text; "
+        "8) Remove any text like 'הוראות הכנה', '#layout', menus; 9) instructions array must contain ONLY cooking steps; "
+        "10) If some fields are not explicitly stated, infer reasonable values, but do not invent. "
+        "11) Prefer Hebrew labels (e.g., 'רכיבים', 'אופן ההכנה') when present; otherwise, use context."
     )
     
-    user_prompt = f"Extract the recipe from this text:\n\n{section_text}\n\nReturn only the JSON object."
+    user_prompt = (
+        "Extract the recipe from this text. The text may include a compact section followed by broader page text.\n\n"
+        f"{section_text}\n\nReturn only the JSON object."
+    )
     
     return system_prompt, user_prompt
 
@@ -1360,7 +1363,23 @@ def _build_filtered_section_for_llm(soup: BeautifulSoup) -> str:
         parts.append("רכיבים:\n" + "\n".join(ings))
     if steps:
         parts.append("אופן ההכנה:\n" + "\n".join(steps))
-    return "\n\n".join(parts)
+
+    filtered = "\n\n".join(parts).strip()
+
+    # If filtered content is too short or sparse, include a broader page text snippet
+    if len(filtered) < 300 or (len(ings) < 3 and len(steps) < 3):
+        # Extract broader page text, lightly normalized
+        page_text = soup.get_text(separator="\n", strip=True)
+        # Remove extremely long runs of whitespace
+        page_text = re.sub(r"\s+", " ", page_text)
+        # Limit size to keep payload reasonable
+        page_text = _limit_size(page_text, 6000)
+        if filtered:
+            filtered = f"{filtered}\n\nטקסט דף נוסף:\n{page_text}"
+        else:
+            filtered = page_text
+
+    return filtered
 
 def _extract_generic_from_html(html: str) -> Optional[RecipeModel]:
     soup = BeautifulSoup(html, "html.parser")
