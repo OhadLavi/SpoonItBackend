@@ -890,6 +890,61 @@ def extract_recipe_content(html_content: str) -> str:
     text = _limit_size(text, 120_000)
     return text
 
+def _extract_hebrew_sections_from_text(text: str) -> Tuple[List[str], List[str]]:
+    """Best-effort parse for Hebrew pages that use common section headers.
+    Recognizes headers like:
+    - "מצרכים" (ingredients)
+    - "למילוי", "לציפוי" (sub-ingredients)
+    - "אופן ההכנה" (instructions)
+    Returns (ingredients, instructions).
+    """
+    # Normalize quotes and whitespace
+    s = _collapse_whitespace(text.replace("\r", "\n"))
+    # Restore some newlines around headers to make splitting easier
+    s = re.sub(r"(מצרכים[^\n]*:)", r"\n\1\n", s)
+    s = re.sub(r"(למילוי[^\n]*:)", r"\n\1\n", s)
+    s = re.sub(r"(לציפוי[^\n]*:)", r"\n\1\n", s)
+    s = re.sub(r"(אופן ההכנה[^\n]*:)", r"\n\1\n", s)
+
+    lines = [ln.strip() for ln in s.split("\n") if ln.strip()]
+    ingredients: List[str] = []
+    instructions: List[str] = []
+
+    current = None  # 'ings' or 'steps'
+    INGS_HEADERS = ["מצרכים", "למילוי", "לציפוי"]
+    STEPS_HEADERS = ["אופן ההכנה", "הוראות הכנה", "אופן ההכנה:"]
+
+    def is_header(line: str) -> bool:
+        plain = line.rstrip(":")
+        return plain in INGS_HEADERS or plain in STEPS_HEADERS
+
+    for ln in lines:
+        key = ln.rstrip(":")
+        if key in INGS_HEADERS:
+            current = 'ings'
+            continue
+        if key in STEPS_HEADERS:
+            current = 'steps'
+            continue
+        # Stop collecting on obvious unrelated site noise
+        if any(tok in ln for tok in ["תגובות", "צילום", "לחצו כאן", "ספטמבר", "אוקטובר", "נובמבר"]):
+            continue
+        if current == 'ings':
+            # Filter out very long non-ingredient lines
+            if len(ln) > 180:
+                continue
+            # Avoid adding the exact word headers or decorative copy
+            if not is_header(ln):
+                ingredients.append(clean_html(ln))
+        elif current == 'steps':
+            if not is_header(ln):
+                instructions.append(clean_html(ln))
+
+    # Post-filter ingredients to remove accidental instruction-like sentences
+    ingredients = [ing for ing in ingredients if not _looks_like_instruction_paragraph(ing)]
+
+    return (ingredients, instructions)
+
 # =============================================================================
 # LLM JSON repair helpers
 # =============================================================================
@@ -910,7 +965,7 @@ def _normalize_quotes(text: str) -> str:
     return (
         text.replace("\u201c", '"').replace("\u201d", '"')
         .replace("\u2018", "'").replace("\u2019", "'")
-        .replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
+        .replace(""", '"').replace(""", '"').replace("'", "'").replace("'", "'")
     )
 
 def _remove_trailing_commas(s: str) -> str:
@@ -1453,8 +1508,9 @@ async def extract_recipe(req: RecipeExtractionRequest):
 
         # 3) LLM fallback with filtered section
         section_text = _build_filtered_section_for_llm(soup)
+        page_text = extract_recipe_content(html)
         if len(section_text) < 80:
-            section_text = extract_recipe_content(html)  # desperate fallback
+            section_text = page_text  # desperate fallback
 
         logger.info("[FOCUS] section len=%d", len(section_text))
         
@@ -1498,6 +1554,13 @@ async def extract_recipe(req: RecipeExtractionRequest):
         logger.info("[FLOW] done via LLM | title='%s' ings=%d steps=%d prep=%d cook=%d",
                     recipe_model.title, len(recipe_model.ingredients), len(recipe_model.instructions),
                     recipe_model.prepTime, recipe_model.cookTime)
+        # Backfill from Hebrew section parser if LLM missed fields
+        if (not recipe_model.ingredients) or (not recipe_model.instructions):
+            heb_ings, heb_steps = _extract_hebrew_sections_from_text(page_text)
+            if not recipe_model.ingredients and heb_ings:
+                recipe_model.ingredients = heb_ings
+            if not recipe_model.instructions and heb_steps:
+                recipe_model.instructions = heb_steps
         return recipe_model.model_dump()
 
     except HTTPException:
