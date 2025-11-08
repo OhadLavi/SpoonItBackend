@@ -332,11 +332,12 @@ async def _httpx_fetch(url: str) -> str:
         return text.strip()
 
 async def _playwright_fetch(url: str) -> str:
-    # Lazy import so container boots even if playwright is not installed.
-    try:
-        from playwright.async_api import async_playwright
-    except Exception as e:
-        raise RuntimeError(f"Playwright is not available: {e}")
+    if os.getenv("DISABLE_PLAYWRIGHT_FETCH", "").lower() in ("1", "true", "yes"):
+        raise RuntimeError("Playwright fetch disabled by env")
+
+    # Allow overriding the per-try timeout via env; default ~45s per your logs
+    per_try_timeout_ms = int(os.getenv("PLAYWRIGHT_TIMEOUT_MS", str(PLAYWRIGHT_TIMEOUT_MS)))
+    max_retries = 2  # total 3 tries: 0,1,2
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -349,97 +350,130 @@ async def _playwright_fetch(url: str) -> str:
             ],
         )
         try:
-            context = await browser.new_context(
-                user_agent=random.choice(BROWSER_UAS),
-                locale="he-IL",
-                extra_http_headers=_default_headers(),
-                bypass_csp=True,
-                viewport={"width": 1366, "height": 900},
-            )
-            page = await context.new_page()
+            for attempt in range(max_retries + 1):
+                context = await browser.new_context(
+                    user_agent=random.choice(BROWSER_UAS),
+                    locale="he-IL",
+                    extra_http_headers=_default_headers(),
+                    bypass_csp=True,
+                    viewport={"width": 1366, "height": 900},
+                )
 
-            # small stealth
-            await page.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                window.chrome = { runtime: {} };
-                Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3] });
-                Object.defineProperty(navigator, 'languages', { get: () => ['he-IL', 'he', 'en-US', 'en'] });
-            """)
+                # Block heavy/irrelevant resources so we don’t wait forever on fonts/ads/media.
+                # This speeds up and avoids never-Idle pages. Docs: page.route / Route.abort
+                # https://playwright.dev/python/docs/api/class-route
+                await context.route(
+                    "**/*",
+                    lambda route: asyncio.create_task(
+                        route.abort()
+                        if route.request.resource_type in {"image", "media", "font", "stylesheet"}
+                        else route.continue_()
+                    ),
+                )
 
-            # IMPORTANT: wait_until="networkidle" to let lazy content settle
-            await page.goto(url, wait_until="networkidle", timeout=PLAYWRIGHT_TIMEOUT_MS)  # docs show valid values inc. 'networkidle' :contentReference[oaicite:3]{index=3}
+                page = await context.new_page()
 
-            # Try to accept obvious cookie banners
-            try:
-                sel = "button:has-text('מסכים'), button:has-text('מאשר'), button:has-text('Accept'), button:has-text('I agree')"
-                btn = await page.query_selector(sel)
-                if btn:
-                    await btn.click()
-                    await page.wait_for_timeout(500)
-            except Exception:
-                pass
+                # Light stealth
+                await page.add_init_script("""
+                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                    window.chrome = { runtime: {} };
+                    Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3] });
+                    Object.defineProperty(navigator, 'languages', { get: () => ['he-IL','he','en-US','en'] });
+                """)
 
-            # Scroll to trigger lazy content
-            for _ in range(4):
-                await page.mouse.wheel(0, 1200)
-                await page.wait_for_timeout(400)
+                # Some sites never reach "networkidle". Prefer domcontentloaded → load → (last resort) networkidle.
+                wait_chain = ["domcontentloaded", "load", "networkidle"]
 
-            # Prefer visible, user-facing text for LLM
-            content_text = ""
-            for sel in ["main", "article", "[role='main']", ".entry-content", ".post-content", ".recipe", "body"]:
                 try:
-                    el = await page.query_selector(sel)
-                    if el:
-                        t = await el.inner_text()
-                        if t and len(t) > len(content_text):
-                            content_text = t
-                except Exception:
-                    continue
+                    last_error = None
+                    for wu in wait_chain:
+                        try:
+                            await page.goto(url, wait_until=wu, timeout=per_try_timeout_ms)
+                            break
+                        except Exception as e:
+                            last_error = e
+                    else:
+                        raise last_error or TimeoutError("page.goto failed for all wait states")
 
-            # Fallback to body.innerText
-            if len(content_text) < 400:
-                try:
-                    content_text = await page.evaluate("document.body ? document.body.innerText : ''")
-                except Exception:
-                    content_text = content_text or ""
+                    # Try element-based readiness; often more reliable than load states.
+                    # Docs suggest waiting for specific selectors instead of global load (h1, main/article, body).
+                    # https://autify.com/blog/playwright-wait-for-page-to-load  (concept) 
+                    sel = "main, article, [role='main'], .entry-content, .post-content, .recipe, body"
+                    try:
+                        await page.wait_for_selector(sel, timeout=3000)
+                    except Exception:
+                        pass
 
-            # If still tiny, take full HTML and strip tags
-            if len((content_text or "")) < 600:
-                try:
-                    raw_html = await page.content()
-                    raw_html = re.sub(r'<script[^>]*>.*?</script>', '', raw_html, flags=re.DOTALL | re.IGNORECASE)
-                    raw_html = re.sub(r'<style[^>]*>.*?</style>', '', raw_html, flags=re.DOTALL | re.IGNORECASE)
-                    content_text = re.sub(r'<[^>]+>', ' ', raw_html)
-                except Exception:
-                    pass
+                    # Scroll a bit to trigger lazy content
+                    for _ in range(3):
+                        await page.mouse.wheel(0, 1200)
+                        await page.wait_for_timeout(300)
 
-            text = re.sub(r"\s+", " ", (content_text or "")).strip()
-            if len(text.encode("utf-8")) > 50_000:
-                text = text[:50_000]
-            return text
+                    # Prefer meaningful containers
+                    content_text = ""
+                    for candidate in ["main", "article", "[role='main']", ".entry-content", ".post-content", ".recipe", "body"]:
+                        try:
+                            el = await page.query_selector(candidate)
+                            if el:
+                                t = await el.inner_text()
+                                if t and len(t) > len(content_text):
+                                    content_text = t
+                        except Exception:
+                            continue
+
+                    # Fallback to full HTML text-stripping if still small
+                    if len(content_text or "") < 600:
+                        raw_html = await page.content()
+                        raw_html = re.sub(r'<script[^>]*>.*?</script>', '', raw_html, flags=re.DOTALL | re.IGNORECASE)
+                        raw_html = re.sub(r'<style[^>]*>.*?</style>', '', raw_html, flags=re.DOTALL | re.IGNORECASE)
+                        content_text = re.sub(r'<[^>]+>', ' ', raw_html)
+
+                    text = re.sub(r"\s+", " ", (content_text or "")).strip()
+                    if len(text.encode("utf-8")) > 50_000:
+                        text = text[:50_000]
+
+                    # If the body looks like a block page, try an APIRequestContext fetch that shares cookies.
+                    # https://playwright.dev/python/docs/api/class-apirequestcontext
+                    if _looks_blocked(text):
+                        try:
+                            resp = await context.request.get(url, headers=_default_headers(), timeout=per_try_timeout_ms/1000)
+                            if resp.ok:
+                                html = await resp.text()
+                                html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+                                html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
+                                tx = re.sub(r'<[^>]+>', ' ', html)
+                                tx = re.sub(r'\s+', ' ', tx)
+                                text = tx.strip()
+                        except Exception:
+                            pass
+
+                    await context.close()
+                    return text
+                except Exception as e:
+                    try:
+                        await context.close()
+                    except Exception:
+                        pass
+                    if attempt < max_retries:
+                        await asyncio.sleep(0.8 * (attempt + 1))
+                        continue
+                    raise e
         finally:
             await browser.close()
 
-async def fetch_html_content(url: str) -> Tuple[Optional[str], Optional[dict]]:
-    """
-    Returns (page_text, error_payload_if_blocked_or_failed)
-    - If blocked (403/anti-bot), we return (None, {...standard JSON error...})
-    - Caller then returns HTTP 200 with that JSON, so the app can fallback to client-side fetch.
-    """
+async def fetch_html_content(url: str) -> str:
     try:
         text = await _httpx_fetch(url)
         if _looks_blocked(text):
-            logger.warning("[FETCH] httpx content looks blocked/too short (%d chars). Trying Playwright.", len(text))
+            logger.warning("[FETCH] httpx content looks blocked/short (%d chars). Trying Playwright.", len(text))
             text = await _playwright_fetch(url)
-        # Final check post-Playwright
         if _looks_blocked(text):
-            return None, {
-                "error": "FETCH_FORBIDDEN",
-                "html_required": True,
-                "message": "The website is blocking Cloud Run. Please fetch the page on the client and resend as html_content.",
-                "url": url,
-            }
-        return text, None
+            raise APIError(
+                "Remote site is blocking server fetch (403). Ask client to supply html_content.",
+                status_code=403,
+                details={"code": "FETCH_FORBIDDEN", "url": url},
+            )
+        return text
     except httpx.HTTPStatusError as e:
         status = e.response.status_code
         logger.warning("[FETCH] httpx status=%s for %s", status, url)
@@ -447,26 +481,27 @@ async def fetch_html_content(url: str) -> Tuple[Optional[str], Optional[dict]]:
             try:
                 text = await _playwright_fetch(url)
                 if _looks_blocked(text):
-                    return None, {
-                        "error": "FETCH_FORBIDDEN",
-                        "html_required": True,
-                        "message": "The website is blocking Cloud Run. Please fetch the page on the client and resend as html_content.",
-                        "url": url,
-                    }
-                return text, None
+                    raise APIError(
+                        "Remote site is blocking server fetch (403). Ask client to supply html_content.",
+                        status_code=403,
+                        details={"code": "FETCH_FORBIDDEN", "url": url},
+                    )
+                return text
+            except APIError:
+                raise
             except Exception as e2:
-                logger.warning("[FETCH] playwright fallback failed: %s", e2, exc_info=True)
-                return None, {
-                    "error": "FETCH_FORBIDDEN",
-                    "html_required": True,
-                    "message": "The website is blocking Cloud Run. Please fetch the page on the client and resend as html_content.",
-                    "url": url,
-                }
-        # Other HTTP errors: still return 200 with a JSON error body
-        return None, {"error": "FETCH_FAILED", "status": status, "url": url}
-    except Exception as e:
-        logger.error("[FETCH] unexpected error: %s", e, exc_info=True)
-        return None, {"error": "FETCH_UNEXPECTED", "message": str(e), "url": url}
+                logger.warning("[FETCH] Playwright fallback failed: %s", e2, exc_info=True)
+                raise APIError(
+                    "Remote site is blocking server fetch (403). Ask client to supply html_content.",
+                    status_code=403,
+                    details={"code": "FETCH_FORBIDDEN", "url": url},
+                )
+        raise APIError(
+            f"Fetch failed with status {status}.",
+            status_code=status,
+            details={"code": "FETCH_FAILED", "url": url},
+        )
+
 
 # =============================================================================
 # FastAPI app
