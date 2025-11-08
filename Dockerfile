@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxdamage1 libxext6 \
     libxfixes3 libxrandr2 libxshmfence1 libxkbcommon0 \
     libpango-1.0-0 libpangocairo-1.0-0 libatspi2.0-0 \
-    fonts-liberation fonts-ubuntu fonts-unifont \
+    fonts-liberation fonts-dejavu-core fonts-noto \
     wget xdg-utils \
  && rm -rf /var/lib/apt/lists/*
 
