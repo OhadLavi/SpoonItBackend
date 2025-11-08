@@ -26,7 +26,7 @@ env/
 ENV/
 .venv
 
-# Environment variables
+# Environment variables (will be set in Cloud Run)
 .env
 .env.local
 .env.*.local
@@ -46,7 +46,11 @@ recipe_keeper.log
 .DS_Store
 Thumbs.db
 
-# Playwright
+# Git
+.git/
+.gitignore
+
+# Playwright cache (we'll install fresh in container)
 .playwright/
 
 # Temporary files
@@ -54,3 +58,17 @@ Thumbs.db
 *.bak
 *.cache
 
+# Documentation
+README.md
+
+# CI/CD
+.github/
+
+# Testing
+tests/
+*.test.py
+
+# Buildpack files that might interfere
+Procfile
+runtime.txt
+.python-version

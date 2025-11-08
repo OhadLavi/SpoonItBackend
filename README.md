@@ -1,119 +1,65 @@
-# SpoonIt
+# SpoonIt Backend
 
-A Flutter application for storing, organizing, and sharing your favorite recipes.
+This is the backend server for the SpoonIt application that communicates with Ollama's Gemma 3B model.
 
-## Features
+## Prerequisites
 
-- User authentication (sign up, login, password reset)
-- Create, edit, and delete recipes
-- Search recipes by title, ingredients, or tags
-- Mark recipes as favorites
-- Import recipes from URLs
-- Take photos of recipes to digitize them
-- User profiles with statistics
-- Responsive design for mobile and web
+- Python 3.8 or higher
+- Ollama installed and running with Gemma 3B model
+- Ollama should be running on http://127.0.0.1:11434
 
-## Getting Started
+## Setup
 
-### Prerequisites
-
-- Flutter SDK (latest stable version)
-- Firebase account
-- Android Studio / VS Code with Flutter extensions
-
-### Setup
-
-1. Clone this repository
-2. Navigate to the project directory:
-   ```
-   cd recipe_keeper
-   ```
-3. Install dependencies:
-   ```
-   flutter pub get
-   ```
-
-### Firebase Configuration
-
-1. Create a new Firebase project at [Firebase Console](https://console.firebase.google.com/)
-2. Enable Authentication with Email/Password
-3. Create a Firestore database
-4. Set up Firebase Storage
-5. Update the Firebase configuration:
-   - Update the `.firebaserc` file with your Firebase project ID
-   - For Android: Download the `google-services.json` file and place it in `android/app/`
-   - For iOS: Download the `GoogleService-Info.plist` file and place it in `ios/Runner/`
-   - For Web: Update the Firebase configuration in `web/index.html`
-
-### Firestore Security Rules
-
-Add the following security rules to your Firestore database:
-
+1. Create a virtual environment (recommended):
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-    }
-    match /recipes/{recipeId} {
-      allow read: if request.auth != null && (resource.data.userId == request.auth.uid || resource.data.isPublic == true);
-      allow write: if request.auth != null && (resource.data.userId == request.auth.uid || request.resource.data.userId == request.auth.uid);
-      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
-    }
-  }
+
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+## Running the Server
+
+1. Make sure Ollama is running with the Gemma 3B model
+2. Start the server:
+```bash
+python main.py
+```
+
+The server will start on http://localhost:8000
+
+## API Endpoints
+
+### POST /chat
+Send a message to the Gemma 3B model and get a response.
+
+Request body:
+```json
+{
+    "message": "Your message here"
 }
 ```
 
-### Storage Security Rules
-
-Add the following security rules to your Firebase Storage:
-
-```
-rules_version = '2';
-service firebase.storage {
-  match /b/{bucket}/o {
-    match /recipeImages/{userId}/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
-    }
-    match /profileImages/{userId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
-    }
-  }
+Response:
+```json
+{
+    "response": "Model's response",
+    "model": "gemma:3b"
 }
 ```
 
-## Running the App
+## Integration with Flutter App
 
-### Development
+The backend is configured to accept CORS requests from any origin. In production, you should restrict this to your Flutter app's domain.
 
-```
-flutter run
-```
-
-### Web Deployment
-
-1. Build the web version:
-   ```
-   flutter build web
-   ```
-
-2. Deploy to Firebase Hosting:
-   ```
-   firebase deploy --only hosting
-   ```
-
-## Architecture
-
-- **Models**: Data models for the application
-- **Providers**: State management using Riverpod
-- **Screens**: UI screens for different parts of the app
-- **Services**: Business logic and Firebase interactions
-- **Widgets**: Reusable UI components
-- **Utils**: Helper functions and utilities
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+Example Flutter API call:
+```dart
+final response = await http.post(
+  Uri.parse('http://localhost:8000/chat'),
+  headers: {'Content-Type': 'application/json'},
+  body: jsonEncode({'message': 'Your message here'}),
+);
+``` 
