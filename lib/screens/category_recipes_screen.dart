@@ -11,6 +11,8 @@ import 'package:spoonit/services/image_service.dart';
 import 'package:spoonit/widgets/app_header.dart';
 import 'package:spoonit/widgets/app_bottom_nav.dart';
 import 'package:spoonit/utils/translations.dart';
+import 'package:spoonit/widgets/feedback/app_loading_indicator.dart';
+import 'package:spoonit/widgets/feedback/app_empty_state.dart';
 
 class CategoryRecipesScreen extends ConsumerStatefulWidget {
   final String categoryName;
@@ -191,12 +193,7 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
           ),
           Expanded(
             child: recipesAsync.when(
-              loading:
-                  () => const Center(
-                    child: CircularProgressIndicator(
-                      color: AppTheme.primaryColor,
-                    ),
-                  ),
+              loading: () => const Center(child: AppLoadingIndicator()),
               error:
                   (error, stack) => Center(
                     child: Column(
@@ -227,43 +224,17 @@ class _CategoryRecipesScreenState extends ConsumerState<CategoryRecipesScreen> {
 
                 if (filteredRecipes.isEmpty) {
                   return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.restaurant_menu,
-                          size: 80,
-                          color: AppTheme.secondaryTextColor.withValues(
-                            alpha: 0.5,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          AppTranslations.getText(
-                            ref,
-                            'no_recipes_in_category',
-                          ),
-                          style: const TextStyle(
-                            fontFamily: AppTheme.secondaryFontFamily,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w500,
-                            color: AppTheme.textColor,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          AppTranslations.getText(
-                            ref,
-                            'add_recipes_with_tag',
-                          ).replaceAll('{tag}', widget.categoryName),
-                          style: const TextStyle(
-                            fontFamily: AppTheme.secondaryFontFamily,
-                            fontSize: 16,
-                            color: AppTheme.secondaryTextColor,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
+                    child: AppEmptyState(
+                      title: AppTranslations.getText(
+                        ref,
+                        'no_recipes_in_category',
+                      ),
+                      subtitle: AppTranslations.getText(
+                        ref,
+                        'add_recipes_with_tag',
+                      ).replaceAll('{tag}', widget.categoryName),
+                      icon: Icons.restaurant_menu,
+                      padding: const EdgeInsets.only(bottom: 100),
                     ),
                   );
                 }

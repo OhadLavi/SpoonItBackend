@@ -5,6 +5,10 @@ import 'package:spoonit/widgets/app_header.dart';
 import 'package:spoonit/widgets/app_bottom_nav.dart';
 import 'package:spoonit/utils/app_theme.dart';
 import 'package:spoonit/utils/translations.dart';
+import 'package:spoonit/widgets/forms/app_text_field.dart';
+import 'package:spoonit/widgets/forms/app_form_container.dart';
+import 'package:spoonit/widgets/buttons/app_primary_button.dart';
+import 'package:spoonit/widgets/buttons/app_text_button.dart';
 
 class SupportScreen extends ConsumerStatefulWidget {
   const SupportScreen({super.key});
@@ -206,97 +210,20 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                           ),
                           const SizedBox(height: 16),
                           // Title field
-                          Container(
-                            decoration: BoxDecoration(
-                              color: AppTheme.cardColor,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: TextField(
+                          AppFormContainer(
+                            child: AppTextField(
                               controller: _titleController,
-                              decoration: InputDecoration(
-                                labelText: AppTranslations.getText(
-                                  ref,
-                                  'title',
-                                ),
-                                labelStyle: const TextStyle(
-                                  color: AppTheme.textColor,
-                                  fontFamily: AppTheme.secondaryFontFamily,
-                                ),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide.none,
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide(
-                                    color: AppTheme.textColor.withValues(
-                                      alpha: 0.2,
-                                    ),
-                                    width: 1,
-                                  ),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: const BorderSide(
-                                    color: AppTheme.primaryColor,
-                                    width: 2,
-                                  ),
-                                ),
-                                filled: true,
-                                fillColor: Colors.transparent,
-                                contentPadding: const EdgeInsets.all(12),
-                              ),
-                              style: const TextStyle(
-                                color: AppTheme.textColor,
-                                fontFamily: AppTheme.secondaryFontFamily,
-                              ),
+                              labelText: AppTranslations.getText(ref, 'title'),
                             ),
                           ),
                           const SizedBox(height: 12),
                           // Message field
-                          Container(
-                            decoration: BoxDecoration(
-                              color: AppTheme.cardColor,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: TextField(
+                          AppFormContainer(
+                            child: AppTextField(
                               controller: _messageController,
-                              decoration: InputDecoration(
-                                labelText: AppTranslations.getText(
-                                  ref,
-                                  'message',
-                                ),
-                                labelStyle: const TextStyle(
-                                  color: AppTheme.textColor,
-                                  fontFamily: AppTheme.secondaryFontFamily,
-                                ),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide.none,
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide(
-                                    color: AppTheme.textColor.withValues(
-                                      alpha: 0.2,
-                                    ),
-                                    width: 1,
-                                  ),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: const BorderSide(
-                                    color: AppTheme.primaryColor,
-                                    width: 2,
-                                  ),
-                                ),
-                                filled: true,
-                                fillColor: Colors.transparent,
-                                contentPadding: const EdgeInsets.all(12),
-                              ),
-                              style: const TextStyle(
-                                color: AppTheme.textColor,
-                                fontFamily: AppTheme.secondaryFontFamily,
+                              labelText: AppTranslations.getText(
+                                ref,
+                                'message',
                               ),
                               maxLines: 4,
                             ),
@@ -325,17 +252,11 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                     ),
                   ),
                   actions: [
-                    TextButton(
+                    AppTextButton(
                       onPressed: () => Navigator.pop(context),
-                      child: Text(
-                        AppTranslations.getText(ref, 'cancel'),
-                        style: const TextStyle(
-                          color: AppTheme.textColor,
-                          fontFamily: AppTheme.secondaryFontFamily,
-                        ),
-                      ),
+                      text: AppTranslations.getText(ref, 'cancel'),
                     ),
-                    ElevatedButton(
+                    AppPrimaryButton(
                       onPressed:
                           (_isNotRobot &&
                                   (_titleController.text.trim().isNotEmpty ||
@@ -344,22 +265,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                                           .isNotEmpty))
                               ? () => _launchEmail(context)
                               : null,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primaryColor,
-                        foregroundColor: AppTheme.backgroundColor,
-                        disabledBackgroundColor: AppTheme.dividerColor
-                            .withValues(alpha: 0.3),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      child: Text(
-                        AppTranslations.getText(ref, 'send_email'),
-                        style: const TextStyle(
-                          fontFamily: AppTheme.secondaryFontFamily,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                      text: AppTranslations.getText(ref, 'send_email'),
                     ),
                   ],
                 ),

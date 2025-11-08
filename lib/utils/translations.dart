@@ -41,6 +41,7 @@ class AppTranslations {
     'type_message': 'Type your message...',
     'error': 'Error',
     'error_occurred': 'An error occurred',
+    'cannot_open_url': 'Cannot open URL',
     'try_again': 'Try again',
     'loading': 'Loading...',
     'no_messages': 'No messages yet',
@@ -68,8 +69,11 @@ class AppTranslations {
     'search_recipe': 'Search for recipes...',
     'search_for_recipes': 'Search for Recipes',
     'find_recipes_by': 'Find recipes by name, ingredient, or tag',
+    'no_results_found_title': 'No results found',
     'no_results_found': 'No results found for "{query}"',
+    'search_results': 'Search Results',
     'try_different_search': 'Try a different search term',
+    'clear_search': 'Clear Search',
     'login_to_view_favorites': 'You need to be logged in to view favorites',
     'no_favorites': 'No Favorites Yet',
     'favorites_description': 'Recipes you mark as favorites will appear here',
@@ -350,6 +354,7 @@ class AppTranslations {
     'add_category': 'Add Category',
     // Recipe form
     'category': 'Category',
+    'category_required': 'Please select a category',
     'select_category': 'Select category',
     // Support screen
     'support_title': 'Support',
@@ -397,6 +402,12 @@ class AppTranslations {
     // Edit recipe
     'edit_recipe_title': 'Edit Recipe',
     'error_loading_recipe': 'Error loading recipe',
+    'failed_to_extract_recipe': 'Failed to extract recipe',
+    'recipe_extraction_error': 'Could not extract recipe from this URL. Please try another recipe link.',
+    'api_error': 'API error. Please try again later.',
+    'server_error': 'Server error. Please try again later.',
+    'client_error': 'Invalid request. Please check the URL and try again.',
+    'timeout_error': 'Request timed out. Please try again.',
     // Login/Register screens
     'hello': 'Hello!',
     'welcome_to_spoonit': 'Welcome to SpoonIt',
@@ -452,6 +463,19 @@ class AppTranslations {
     'reset_password_error': 'Error sending password reset email: {error}',
     // Category labels
     'main_dish': 'Main Dish',
+    // Auth error messages
+    'invalid_credentials': 'Invalid email or password. Please try again.',
+    'user_not_found': 'No account found with this email address.',
+    'email_already_in_use': 'This email is already registered.',
+    'weak_password': 'Password is too weak. Please choose a stronger password.',
+    'too_many_requests': 'Too many attempts. Please try again later.',
+    'account_disabled': 'This account has been disabled. Please contact support.',
+    'auth_error': 'An authentication error occurred. Please try again.',
+    'operation_not_allowed': 'This sign-in method is not enabled.',
+    'requires_recent_login': 'Please sign out and sign back in to continue.',
+    'quota_exceeded': 'Service quota exceeded. Please try again later.',
+    'auth_config_error': 'Authentication configuration error. Please contact support.',
+    'network_error': 'Network error. Please check your connection and try again.',
   };
 
   static final Map<String, String> _hebrewTranslations = {
@@ -483,6 +507,7 @@ class AppTranslations {
     'chat_title': 'צ\'אט עם בינה מלאכותית',
     'type_message': 'הקלד/י את ההודעה שלך...',
     'error': 'שגיאה',
+    'cannot_open_url': 'לא ניתן לפתוח את הקישור',
     'error_occurred': 'אירעה שגיאה',
     'try_again': 'נסה שוב',
     'loading': 'טוען...',
@@ -512,8 +537,11 @@ class AppTranslations {
     'search_recipe': 'חפש מתכונים...',
     'search_for_recipes': 'חפש מתכונים',
     'find_recipes_by': 'חפש מתכונים לפי שם, רכיב או תגית',
+    'no_results_found_title': 'לא נמצאו תוצאות',
     'no_results_found': 'לא נמצאו תוצאות עבור "{query}"',
+    'search_results': 'תוצאות חיפוש',
     'try_different_search': 'נסה מילות חיפוש אחרות',
+    'clear_search': 'נקה חיפוש',
     'login_to_view_favorites': 'עליך להתחבר כדי לצפות במועדפים',
     'no_favorites': 'אין עדיין מועדפים',
     'favorites_description': 'מתכונים שתסמן כמועדפים יופיעו כאן',
@@ -790,6 +818,7 @@ class AppTranslations {
     'add_category': 'הוסף קטגוריה',
     // Recipe form
     'category': 'קטגוריה',
+    'category_required': 'אנא בחר/י קטגוריה',
     'select_category': 'בחר קטגוריה',
     // Support screen
     'support_title': 'תמיכה',
@@ -833,6 +862,12 @@ class AppTranslations {
     // Edit recipe
     'edit_recipe_title': 'עריכת מתכון',
     'error_loading_recipe': 'שגיאה בטעינת המתכון',
+    'failed_to_extract_recipe': 'נכשל בחילוץ המתכון',
+    'recipe_extraction_error': 'לא ניתן לחלץ מתכון מכתובת זו. אנא נסה קישור מתכון אחר.',
+    'api_error': 'שגיאת API. אנא נסה שוב מאוחר יותר.',
+    'server_error': 'שגיאת שרת. אנא נסה שוב מאוחר יותר.',
+    'client_error': 'בקשה לא תקינה. אנא בדוק את הכתובת ונסה שוב.',
+    'timeout_error': 'הבקשה ארכה זמן רב מדי. אנא נסה שוב.',
     // Login/Register screens
     'hello': 'שלום!',
     'welcome_to_spoonit': 'ברוכים הבאים ל-SpoonIt',
@@ -888,5 +923,18 @@ class AppTranslations {
     'reset_password_error': 'שגיאה בשליחת אימייל איפוס סיסמה: {error}',
     // Category labels
     'main_dish': 'מנה עיקרית',
+    // Auth error messages
+    'invalid_credentials': 'אימייל או סיסמה שגויים. אנא נסה שוב.',
+    'user_not_found': 'לא נמצא חשבון עם כתובת האימייל הזו.',
+    'email_already_in_use': 'כתובת האימייל הזו כבר רשומה.',
+    'weak_password': 'הסיסמה חלשה מדי. אנא בחר סיסמה חזקה יותר.',
+    'too_many_requests': 'יותר מדי ניסיונות. אנא נסה שוב מאוחר יותר.',
+    'account_disabled': 'החשבון הזה הושבת. אנא פנה לתמיכה.',
+    'auth_error': 'אירעה שגיאת אימות. אנא נסה שוב.',
+    'operation_not_allowed': 'שיטת ההתחברות הזו אינה מופעלת.',
+    'requires_recent_login': 'אנא התנתק והתחבר שוב כדי להמשיך.',
+    'quota_exceeded': 'מכסה שירות הוגדרה. אנא נסה שוב מאוחר יותר.',
+    'auth_config_error': 'שגיאת תצורת אימות. אנא פנה לתמיכה.',
+    'network_error': 'שגיאת רשת. אנא בדוק את החיבור שלך ונסה שוב.',
   };
 }

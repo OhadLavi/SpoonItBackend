@@ -10,6 +10,12 @@ import 'package:spoonit/widgets/auth_widgets.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:spoonit/services/password_validator_service.dart';
 import 'package:spoonit/services/input_sanitizer_service.dart';
+import 'package:spoonit/widgets/forms/app_text_field.dart';
+import 'package:spoonit/widgets/forms/app_password_field.dart';
+import 'package:spoonit/widgets/forms/app_form_container.dart';
+import 'package:spoonit/widgets/buttons/app_primary_button.dart';
+import 'package:spoonit/widgets/feedback/app_error_container.dart';
+import 'package:spoonit/services/error_handler_service.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
@@ -25,8 +31,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
 
-  bool _isPasswordVisible = false;
-  bool _isConfirmPasswordVisible = false;
   bool _isLoading = false;
   String? _errorMessage;
   PasswordStrength _passwordStrength = PasswordStrength.weak;
@@ -72,16 +76,19 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         } else if (authState.status == AuthStatus.error) {
           if (mounted) {
             setState(() {
-              _errorMessage = Helpers.simplifyAuthError(
-                authState.errorMessage ?? 'Unknown error',
-              );
+              _errorMessage =
+                  ErrorHandlerService.handleAuthError(
+                    authState.errorMessage ?? 'Unknown error',
+                    ref,
+                  ).userMessage;
             });
           }
         }
       } catch (e) {
         if (mounted) {
           setState(() {
-            _errorMessage = Helpers.simplifyAuthError(e.toString());
+            _errorMessage =
+                ErrorHandlerService.handleAuthError(e, ref).userMessage;
           });
         }
       } finally {
@@ -277,95 +284,17 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                               const SizedBox(height: 24),
 
                               // Name
-                              Container(
-                                margin: const EdgeInsets.only(bottom: 16),
-                                decoration: BoxDecoration(
-                                  color:
-                                      isDark
-                                          ? AppTheme.darkCardColor
-                                          : AppTheme.backgroundColor,
-                                  borderRadius: BorderRadius.circular(24),
-                                  border: Border.all(
-                                    color:
-                                        isDark
-                                            ? AppTheme.darkDividerColor
-                                            : AppTheme.dividerColor,
-                                    width: 1,
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: AppTheme.dividerColor.withValues(
-                                        alpha: 0.04,
-                                      ),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: TextFormField(
+                              AppFormContainer(
+                                child: AppTextField(
                                   controller: _nameController,
-                                  textAlign:
-                                      isHebrew
-                                          ? TextAlign.right
-                                          : TextAlign.left,
-                                  textDirection:
-                                      isHebrew
-                                          ? TextDirection.rtl
-                                          : TextDirection.ltr,
-                                  style: TextStyle(
-                                    color: mainTextColor,
-                                    fontWeight: FontWeight.w300,
+                                  hintText: AppTranslations.getText(
+                                    ref,
+                                    'name_hint',
                                   ),
-                                  decoration: InputDecoration(
-                                    hintText: AppTranslations.getText(
-                                      ref,
-                                      'name_hint',
-                                    ),
-                                    hintStyle: TextStyle(
-                                      color: mainTextColor,
-                                      fontWeight: FontWeight.w300,
-                                    ),
-                                    prefixIcon: Padding(
-                                      padding: const EdgeInsets.all(12.0),
-                                      child: SvgPicture.asset(
-                                        'assets/images/profile.svg',
-                                        width: 18,
-                                        height: 18,
-                                        colorFilter: const ColorFilter.mode(
-                                          AppTheme.textColor,
-                                          BlendMode.srcIn,
-                                        ),
-                                      ),
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    errorBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    focusedErrorBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    disabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 20,
-                                      vertical: 18,
-                                    ),
-                                  ),
+                                  prefixSvgAsset: 'assets/images/profile.svg',
+                                  textAlignOverride: isHebrew && Helpers.isEnglishText(_nameController.text) ? TextAlign.left : null,
+                                  textDirectionOverride: isHebrew && Helpers.isEnglishText(_nameController.text) ? TextDirection.ltr : null,
+                                  onChanged: (value) => setState(() {}),
                                   validator: (value) {
                                     if (value == null || value.isEmpty) {
                                       return AppTranslations.getText(
@@ -379,105 +308,18 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                               ),
 
                               // Email
-                              Container(
-                                margin: const EdgeInsets.only(bottom: 16),
-                                decoration: BoxDecoration(
-                                  color:
-                                      isDark
-                                          ? AppTheme.darkCardColor
-                                          : AppTheme.backgroundColor,
-                                  borderRadius: BorderRadius.circular(24),
-                                  border: Border.all(
-                                    color:
-                                        isDark
-                                            ? AppTheme.darkDividerColor
-                                            : AppTheme.dividerColor,
-                                    width: 1,
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: AppTheme.dividerColor.withValues(
-                                        alpha: 0.04,
-                                      ),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: TextFormField(
+                              AppFormContainer(
+                                child: AppTextField(
                                   controller: _emailController,
+                                  hintText: AppTranslations.getText(
+                                    ref,
+                                    'email_hint',
+                                  ),
+                                  prefixSvgAsset: 'assets/images/email.svg',
                                   keyboardType: TextInputType.emailAddress,
-                                  textAlign:
-                                      _emailController.text.isEmpty
-                                          ? (isHebrew
-                                              ? TextAlign.right
-                                              : TextAlign.left)
-                                          : (isHebrew
-                                              ? TextAlign.left
-                                              : TextAlign.left),
-                                  textDirection:
-                                      _emailController.text.isEmpty
-                                          ? (isHebrew
-                                              ? TextDirection.rtl
-                                              : TextDirection.ltr)
-                                          : (isHebrew
-                                              ? TextDirection.ltr
-                                              : TextDirection.ltr),
-                                  style: TextStyle(
-                                    color: mainTextColor,
-                                    fontWeight: FontWeight.w300,
-                                  ),
+                                  textAlignOverride: isHebrew ? null : TextAlign.left,
+                                  textDirectionOverride: TextDirection.ltr,
                                   onChanged: (value) => setState(() {}),
-                                  decoration: InputDecoration(
-                                    hintText: AppTranslations.getText(
-                                      ref,
-                                      'email_hint',
-                                    ),
-                                    hintStyle: TextStyle(
-                                      color: mainTextColor,
-                                      fontWeight: FontWeight.w300,
-                                    ),
-                                    prefixIcon: Padding(
-                                      padding: const EdgeInsets.all(12.0),
-                                      child: SvgPicture.asset(
-                                        'assets/images/email.svg',
-                                        width: 18,
-                                        height: 18,
-                                        colorFilter: const ColorFilter.mode(
-                                          AppTheme.textColor,
-                                          BlendMode.srcIn,
-                                        ),
-                                      ),
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    errorBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    focusedErrorBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    disabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 20,
-                                      vertical: 18,
-                                    ),
-                                  ),
                                   validator: (value) {
                                     if (value == null || value.isEmpty) {
                                       return AppTranslations.getText(
@@ -497,54 +339,15 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                               ),
 
                               // Password
-                              Container(
-                                margin: const EdgeInsets.only(bottom: 16),
-                                decoration: BoxDecoration(
-                                  color:
-                                      isDark
-                                          ? AppTheme.darkCardColor
-                                          : AppTheme.backgroundColor,
-                                  borderRadius: BorderRadius.circular(24),
-                                  border: Border.all(
-                                    color:
-                                        isDark
-                                            ? AppTheme.darkDividerColor
-                                            : AppTheme.dividerColor,
-                                    width: 1,
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: AppTheme.dividerColor.withValues(
-                                        alpha: 0.04,
-                                      ),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: TextFormField(
+                              AppFormContainer(
+                                child: AppPasswordField(
                                   controller: _passwordController,
-                                  obscureText: !_isPasswordVisible,
-                                  textAlign:
-                                      _passwordController.text.isEmpty
-                                          ? (isHebrew
-                                              ? TextAlign.right
-                                              : TextAlign.left)
-                                          : (isHebrew
-                                              ? TextAlign.left
-                                              : TextAlign.left),
-                                  textDirection:
-                                      _passwordController.text.isEmpty
-                                          ? (isHebrew
-                                              ? TextDirection.rtl
-                                              : TextDirection.ltr)
-                                          : (isHebrew
-                                              ? TextDirection.ltr
-                                              : TextDirection.ltr),
-                                  style: TextStyle(
-                                    color: mainTextColor,
-                                    fontWeight: FontWeight.w300,
+                                  hintText: AppTranslations.getText(
+                                    ref,
+                                    'password_hint',
                                   ),
+                                  textAlignOverride: isHebrew ? null : TextAlign.left,
+                                  textDirectionOverride: TextDirection.ltr,
                                   onChanged: (value) {
                                     setState(() {
                                       _passwordStrength =
@@ -553,71 +356,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                           );
                                     });
                                   },
-                                  decoration: InputDecoration(
-                                    hintText: AppTranslations.getText(
-                                      ref,
-                                      'password_hint',
-                                    ),
-                                    hintStyle: TextStyle(
-                                      color: mainTextColor,
-                                      fontWeight: FontWeight.w300,
-                                    ),
-                                    prefixIcon: Padding(
-                                      padding: const EdgeInsets.all(12.0),
-                                      child: SvgPicture.asset(
-                                        'assets/images/password.svg',
-                                        width: 18,
-                                        height: 18,
-                                        colorFilter: const ColorFilter.mode(
-                                          AppTheme.textColor,
-                                          BlendMode.srcIn,
-                                        ),
-                                      ),
-                                    ),
-                                    suffixIcon: IconButton(
-                                      icon: Icon(
-                                        _isPasswordVisible
-                                            ? Icons.visibility_outlined
-                                            : Icons.visibility_off_outlined,
-                                        color: mainTextColor,
-                                        size: 18,
-                                      ),
-                                      onPressed: () {
-                                        setState(() {
-                                          _isPasswordVisible =
-                                              !_isPasswordVisible;
-                                        });
-                                      },
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    errorBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    focusedErrorBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    disabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 20,
-                                      vertical: 18,
-                                    ),
-                                  ),
                                   validator: (value) {
                                     if (value == null || value.isEmpty) {
                                       return AppTranslations.getText(
@@ -625,8 +363,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                         'password_required',
                                       );
                                     }
-
-                                    // Use password validator
                                     final validationError =
                                         PasswordValidator.validatePassword(
                                           value,
@@ -637,178 +373,43 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                         validationError,
                                       );
                                     }
-
                                     return null;
                                   },
                                 ),
                               ),
 
-                              // Password strength indicator
+                              // Password strength indicator (tightly below password field)
                               if (_passwordController.text.isNotEmpty) ...[
-                                const SizedBox(height: 8),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 8,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: PasswordValidator.getStrengthColor(
-                                      _passwordStrength,
-                                    ).withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: PasswordValidator.getStrengthColor(
+                                const SizedBox(height: 4),
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 16),
+                                  child: Text(
+                                    AppTranslations.getText(
+                                      ref,
+                                      PasswordValidator.getStrengthText(
                                         _passwordStrength,
-                                      ).withValues(alpha: 0.3),
+                                      ),
                                     ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.security,
-                                        color:
-                                            PasswordValidator.getStrengthColor(
-                                              _passwordStrength,
-                                            ),
-                                        size: 16,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        AppTranslations.getText(
-                                          ref,
-                                          PasswordValidator.getStrengthText(
-                                            _passwordStrength,
-                                          ),
-                                        ),
-                                        style: TextStyle(
-                                          color:
-                                              PasswordValidator.getStrengthColor(
-                                                _passwordStrength,
-                                              ),
-                                          fontWeight: FontWeight.w500,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
+                                    style: TextStyle(
+                                      color: AppTheme.errorColor,
+                                      fontWeight: FontWeight.w400,
+                                      fontSize: 12,
+                                      fontFamily: AppTheme.secondaryFontFamily,
+                                    ),
                                   ),
                                 ),
                               ],
 
                               // Confirm password
-                              Container(
+                              AppFormContainer(
                                 margin: const EdgeInsets.only(bottom: 24),
-                                decoration: BoxDecoration(
-                                  color:
-                                      isDark
-                                          ? AppTheme.darkCardColor
-                                          : AppTheme.backgroundColor,
-                                  borderRadius: BorderRadius.circular(24),
-                                  border: Border.all(
-                                    color:
-                                        isDark
-                                            ? AppTheme.darkDividerColor
-                                            : AppTheme.dividerColor,
-                                    width: 1,
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: AppTheme.dividerColor.withValues(
-                                        alpha: 0.04,
-                                      ),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: TextFormField(
+                                child: AppPasswordField(
                                   controller: _confirmPasswordController,
-                                  obscureText: !_isConfirmPasswordVisible,
-                                  textAlign:
-                                      _confirmPasswordController.text.isEmpty
-                                          ? (isHebrew
-                                              ? TextAlign.right
-                                              : TextAlign.left)
-                                          : (isHebrew
-                                              ? TextAlign.left
-                                              : TextAlign.left),
-                                  textDirection:
-                                      _confirmPasswordController.text.isEmpty
-                                          ? (isHebrew
-                                              ? TextDirection.rtl
-                                              : TextDirection.ltr)
-                                          : (isHebrew
-                                              ? TextDirection.ltr
-                                              : TextDirection.ltr),
-                                  style: TextStyle(
-                                    color: mainTextColor,
-                                    fontWeight: FontWeight.w300,
+                                  hintText: AppTranslations.getText(
+                                    ref,
+                                    'confirm_password_hint',
                                   ),
                                   onChanged: (value) => setState(() {}),
-                                  decoration: InputDecoration(
-                                    hintText: AppTranslations.getText(
-                                      ref,
-                                      'confirm_password_hint',
-                                    ),
-                                    hintStyle: TextStyle(
-                                      color: mainTextColor,
-                                      fontWeight: FontWeight.w300,
-                                    ),
-                                    prefixIcon: Padding(
-                                      padding: const EdgeInsets.all(12.0),
-                                      child: SvgPicture.asset(
-                                        'assets/images/password.svg',
-                                        width: 18,
-                                        height: 18,
-                                        colorFilter: const ColorFilter.mode(
-                                          AppTheme.textColor,
-                                          BlendMode.srcIn,
-                                        ),
-                                      ),
-                                    ),
-                                    suffixIcon: IconButton(
-                                      icon: Icon(
-                                        _isConfirmPasswordVisible
-                                            ? Icons.visibility_outlined
-                                            : Icons.visibility_off_outlined,
-                                        color: mainTextColor,
-                                        size: 18,
-                                      ),
-                                      onPressed: () {
-                                        setState(() {
-                                          _isConfirmPasswordVisible =
-                                              !_isConfirmPasswordVisible;
-                                        });
-                                      },
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    errorBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    focusedErrorBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    disabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 20,
-                                      vertical: 18,
-                                    ),
-                                  ),
                                   validator: (value) {
                                     return PasswordValidator.validatePasswordConfirmation(
                                               _passwordController.text,
@@ -828,76 +429,28 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                               ),
 
                               // Error
-                              if (_errorMessage != null) ...[
-                                const SizedBox(height: 16),
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.errorColor.withValues(
-                                      alpha: 0.1,
-                                    ),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: AppTheme.errorColor.withValues(
-                                        alpha: 0.3,
-                                      ),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      const Icon(
-                                        Icons.error_outline,
-                                        color: AppTheme.errorColor,
-                                        size: 20,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Text(
-                                          _errorMessage!,
-                                          style: const TextStyle(
-                                            color: AppTheme.errorColor,
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                              if (_errorMessage != null)
+                                AppErrorContainer(
+                                  message: _errorMessage!,
+                                  onDismiss:
+                                      () =>
+                                          setState(() => _errorMessage = null),
                                 ),
-                              ],
                               const SizedBox(height: 8),
 
                               // Register
-                              SizedBox(
+                              AppPrimaryButton(
+                                text: AppTranslations.getText(
+                                  ref,
+                                  'lets_start',
+                                ),
+                                onPressed:
+                                    _isLoading
+                                        ? null
+                                        : _registerWithEmailAndPassword,
+                                isLoading: _isLoading,
                                 width: double.infinity,
                                 height: 44,
-                                child: ElevatedButton(
-                                  onPressed:
-                                      _isLoading
-                                          ? null
-                                          : _registerWithEmailAndPassword,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: AppTheme.primaryColor,
-                                    foregroundColor: AppTheme.backgroundColor,
-                                    disabledBackgroundColor:
-                                        AppTheme.primaryColor,
-                                    disabledForegroundColor:
-                                        AppTheme.backgroundColor,
-                                    shadowColor: Colors.transparent,
-                                    elevation: 0,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                    ),
-                                    textStyle: const TextStyle(
-                                      fontFamily: AppTheme.primaryFontFamily,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                  child: Text(
-                                    AppTranslations.getText(ref, 'lets_start'),
-                                  ),
-                                ),
                               ),
                             ],
                           ),

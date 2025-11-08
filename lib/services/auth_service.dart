@@ -11,6 +11,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:spoonit/models/app_user.dart';
 import 'package:spoonit/services/input_sanitizer_service.dart';
 import 'package:spoonit/services/audit_logger_service.dart';
+import 'package:spoonit/services/category_service.dart';
+import 'package:spoonit/models/category.dart';
+import 'package:spoonit/services/category_icon_service.dart';
 
 /// Build-time define for web client id
 const String kGoogleWebClientId = String.fromEnvironment(
@@ -118,6 +121,8 @@ class AuthService {
           cred.user!,
           sanitizedDisplayName,
         );
+        // Create default categories for new user
+        await _createDefaultCategories(cred.user!.uid);
         AuditLogger.logRegistrationSuccess(sanitizedEmail, 'email');
       }
       return UserCredentialLite(cred.user?.uid);
@@ -314,6 +319,43 @@ class AuthService {
     }, SetOptions(merge: true));
   }
 
+  Future<void> _createDefaultCategories(String userId) async {
+    final categoryService = CategoryService();
+    
+    final defaultCategories = [
+      {'label': 'pastries', 'iconKey': 'pastries'},
+      {'label': 'main_dishes', 'iconKey': 'main'},
+      {'label': 'sides', 'iconKey': 'sides'},
+      {'label': 'cookies', 'iconKey': 'cookies'},
+      {'label': 'cakes', 'iconKey': 'cakes'},
+      {'label': 'salads', 'iconKey': 'salads'},
+      {'label': 'breads', 'iconKey': 'bread'},
+    ];
+    
+    for (final categoryData in defaultCategories) {
+      try {
+        final iconKey = categoryData['iconKey'] as String;
+        final icon = CategoryIconService.getIconPath(iconKey) ?? CategoryIconService.getIconPath('main')!;
+        final category = Category(
+          id: '${userId}_${categoryData['label']}',
+          name: categoryData['label'] as String,
+          icon: icon,
+          userId: userId,
+        );
+        await categoryService.addCategory(category);
+      } catch (e) {
+        if (kDebugMode) {
+          developer.log(
+            'Error creating default category: ${categoryData['label']}',
+            name: 'AuthService',
+            error: e,
+          );
+        }
+        // Continue with other categories even if one fails
+      }
+    }
+  }
+
   Future<AppUser?> getUserData(String uid) async {
     try {
       final doc = await _usersRefTyped.doc(uid).get();
@@ -435,16 +477,8 @@ class AuthService {
           error: e,
         );
       }
-      if (e.code == 'wrong-password') {
-        throw Exception('Incorrect current password.');
-      } else if (e.code == 'weak-password') {
-        throw Exception('The new password is too weak.');
-      } else if (e.code == 'requires-recent-login') {
-        throw Exception(
-          'This operation requires a recent login. Please sign out and sign back in.',
-        );
-      }
-      throw Exception('An error occurred while changing password.');
+      // Rethrow FirebaseAuthException so it can be properly handled by ErrorHandlerService
+      rethrow;
     } catch (e) {
       if (kDebugMode) {
         developer.log(
@@ -479,9 +513,7 @@ class AuthService {
       // Then delete auth user
       await user.delete();
     } on FirebaseAuthException catch (e) {
-      if (e.code == 'requires-recent-login') {
-        throw Exception('Please reauthenticate to delete your account.');
-      }
+      // Rethrow FirebaseAuthException so it can be properly handled by ErrorHandlerService
       rethrow;
     }
   }
@@ -493,7 +525,8 @@ class AuthService {
       await _auth.sendPasswordResetEmail(email: sanitizedEmail);
       AuditLogger.logPasswordReset(sanitizedEmail);
     } on FirebaseAuthException catch (e) {
-      throw Exception('Failed to send password reset email: ${e.message}');
+      // Rethrow FirebaseAuthException so it can be properly handled by ErrorHandlerService
+      rethrow;
     }
   }
 }

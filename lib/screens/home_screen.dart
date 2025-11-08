@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:spoonit/services/category_service.dart';
 import 'package:spoonit/models/category.dart';
@@ -11,11 +10,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:spoonit/utils/app_theme.dart';
 import 'package:spoonit/services/category_icon_service.dart';
 import 'package:spoonit/utils/translations.dart';
-import 'package:spoonit/utils/language_utils.dart';
 import 'package:spoonit/utils/responsive_utils.dart';
 import 'package:spoonit/utils/navigation_helpers.dart';
 import 'package:spoonit/widgets/common/dotted_border_card.dart';
 import 'package:spoonit/widgets/common/directional_text.dart';
+import 'package:spoonit/widgets/forms/app_text_field.dart';
+import 'package:spoonit/widgets/forms/app_form_container.dart';
+import 'package:spoonit/widgets/feedback/app_loading_indicator.dart';
 
 final gridViewProvider = Provider<bool>((ref) => false);
 final favoritesUIProvider = Provider<Set<String>>((ref) => <String>{});
@@ -39,6 +40,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   int selectedCategoryIndex = -1;
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
+  bool _hasUserInteracted = false;
 
   // Default categories for new users using SVG icons
   final List<Map<String, dynamic>> _defaultCategories = [
@@ -52,8 +54,41 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    // Listen to focus changes to reset interaction flag
+    _searchFocusNode.addListener(() {
+      if (!_searchFocusNode.hasFocus) {
+        // Reset flag when field loses focus
+        _hasUserInteracted = false;
+      }
+    });
+    // Unfocus search field when screen loads
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_searchFocusNode.hasFocus && !_hasUserInteracted) {
+        _searchFocusNode.unfocus();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _searchFocusNode.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
+    
+    // Unfocus search field when navigating back to home screen
+    // Only if user hasn't intentionally focused it
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _searchFocusNode.hasFocus && !_hasUserInteracted) {
+        _searchFocusNode.unfocus();
+      }
+    });
 
     return Scaffold(
       extendBody: true,
@@ -115,128 +150,37 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildSearchBox(BuildContext context) {
-    final isHebrew = LanguageUtils.isHebrew(ref);
-
-    return Container(
-      height: 48,
-      decoration: BoxDecoration(
-        color: AppTheme.backgroundColor,
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child:
-            isHebrew
-                ? Stack(
-                  children: [
-                    // Hebrew: icon on the right using absolute positioning
-                    TextField(
-                      controller: _searchController,
-                      focusNode: _searchFocusNode,
-                      textAlign: TextAlign.right,
-                      textDirection: TextDirection.rtl,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        color: AppTheme.primaryColor,
-                      ),
-                      cursorColor: AppTheme.primaryColor,
-                      decoration: InputDecoration(
-                        contentPadding: const EdgeInsets.only(
-                          left: 16,
-                          right: 32, // Leave space for icon
-                          top: 14,
-                          bottom: 14,
-                        ),
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        hintText: AppTranslations.getText(ref, 'search_hint'),
-                        hintStyle: const TextStyle(
-                          color: AppTheme.secondaryTextColor,
-                          fontSize: 16,
-                        ),
-                      ),
-                      onSubmitted: (value) {
-                        if (value.trim().isNotEmpty) {
-                          context.push('/search');
-                        }
-                      },
-                    ),
-                    Positioned(
-                      right: 0,
-                      top: 0,
-                      bottom: 0,
-                      child: Container(
-                        width: 24,
-                        alignment: Alignment.center,
-                        child: SvgPicture.asset(
-                          'assets/images/search.svg',
-                          width: 20,
-                          height: 20,
-                          colorFilter: const ColorFilter.mode(
-                            AppTheme.secondaryTextColor,
-                            BlendMode.srcIn,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                )
-                : Stack(
-                  children: [
-                    // English: icon on the left using absolute positioning
-                    TextField(
-                      controller: _searchController,
-                      focusNode: _searchFocusNode,
-                      textAlign: TextAlign.left,
-                      textDirection: TextDirection.ltr,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        color: AppTheme.primaryColor,
-                      ),
-                      cursorColor: AppTheme.primaryColor,
-                      decoration: InputDecoration(
-                        contentPadding: const EdgeInsets.only(
-                          left: 32, // Leave space for icon
-                          right: 16,
-                          top: 14,
-                          bottom: 14,
-                        ),
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        hintText: AppTranslations.getText(ref, 'search_hint'),
-                        hintStyle: const TextStyle(
-                          color: AppTheme.secondaryTextColor,
-                          fontSize: 16,
-                        ),
-                      ),
-                      onSubmitted: (value) {
-                        if (value.trim().isNotEmpty) {
-                          context.push('/search');
-                        }
-                      },
-                    ),
-                    Positioned(
-                      left: 0,
-                      top: 0,
-                      bottom: 0,
-                      child: Container(
-                        width: 24,
-                        alignment: Alignment.center,
-                        child: SvgPicture.asset(
-                          'assets/images/search.svg',
-                          width: 20,
-                          height: 20,
-                          colorFilter: const ColorFilter.mode(
-                            AppTheme.secondaryTextColor,
-                            BlendMode.srcIn,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+    return AppFormContainer(
+      child: AppTextField(
+        controller: _searchController,
+        focusNode: _searchFocusNode,
+        hintText: AppTranslations.getText(ref, 'search_hint'),
+        prefixSvgAsset: 'assets/images/search.svg',
+        textInputAction: TextInputAction.search,
+        onTap: () {
+          _hasUserInteracted = true;
+        },
+        onFieldSubmitted: (value) {
+          if (value.trim().isNotEmpty) {
+            // Navigate to search screen with the query
+            context.push('/search?q=${Uri.encodeComponent(value.trim())}');
+          }
+        },
+        suffixIcon: IconButton(
+          icon: const Icon(
+            Icons.search,
+            color: AppTheme.primaryColor,
+          ),
+          onPressed: () {
+            final query = _searchController.text.trim();
+            if (query.isNotEmpty) {
+              context.push('/search?q=${Uri.encodeComponent(query)}');
+            } else {
+              context.push('/search');
+            }
+          },
+          iconSize: 20,
+        ),
       ),
     );
   }
@@ -252,12 +196,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         }
         return _buildCategoriesList(context, categories, true);
       },
-      loading:
-          () => const Center(
-            child: CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryColor),
-            ),
-          ),
+      loading: () => const Center(child: AppLoadingIndicator()),
       error:
           (error, stack) => Center(
             child: Text(

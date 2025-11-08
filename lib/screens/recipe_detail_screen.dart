@@ -4,16 +4,18 @@ import 'package:go_router/go_router.dart';
 import 'package:spoonit/utils/app_theme.dart';
 // import 'package:spoonit/utils/helpers.dart';
 // import 'package:spoonit/models/recipe.dart';
-import 'package:spoonit/providers/recipe_provider.dart'
-    as recipe_providers;
+import 'package:spoonit/providers/recipe_provider.dart' as recipe_providers;
 import 'package:spoonit/providers/auth_provider.dart';
 import 'package:spoonit/utils/translations.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:spoonit/services/image_service.dart';
-// import 'package:url_launcher/url_launcher.dart';
+import 'package:spoonit/utils/language_utils.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:spoonit/widgets/app_bottom_nav.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:spoonit/services/shopping_list_service.dart';
+import 'package:spoonit/widgets/feedback/app_loading_indicator.dart';
+import 'package:spoonit/widgets/feedback/app_error_container.dart';
 
 class RecipeDetailScreen extends ConsumerStatefulWidget {
   final String recipeId;
@@ -69,6 +71,8 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
                   return const Center(child: Text('Recipe not found'));
                 }
 
+                final sourceLink = _getRecipeSourceLink(recipe);
+                final isHebrew = LanguageUtils.isHebrew(ref);
                 return ScrollConfiguration(
                   behavior: ScrollConfiguration.of(
                     context,
@@ -133,17 +137,20 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
                           child: Row(
                             children: [
                               Expanded(
-                                child: Text(
-                                  recipe.title,
-                                  textAlign: TextAlign.right,
-                                  style: const TextStyle(
-                                    fontFamily: AppTheme.primaryFontFamily,
-                                    fontSize: 24,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppTheme.textColor,
+                                child: Align(
+                                  alignment: Alignment.centerRight,
+                                  child: Text(
+                                    recipe.title,
+                                    textAlign: TextAlign.right,
+                                    style: const TextStyle(
+                                      fontFamily: AppTheme.primaryFontFamily,
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.textColor,
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               // Share button for all users
@@ -359,6 +366,145 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
                               ),
                             ),
                           ),
+// Source link
+if (sourceLink.isNotEmpty)
+  Padding(
+    padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+    child: Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _openSourceUrl(sourceLink),
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 14,
+          ),
+          decoration: BoxDecoration(
+            color: AppTheme.primaryColor.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: AppTheme.primaryColor.withValues(alpha: 0.15),
+              width: 1,
+            ),
+          ),
+          child: Directionality(
+            textDirection:
+                isHebrew ? TextDirection.ltr : TextDirection.rtl,
+            child: isHebrew
+                ? Row(
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      // icon on the right (because RTL)
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Icon(
+                          Icons.link,
+                          color: AppTheme.primaryColor,
+                          size: 18,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      // text block, right aligned
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              AppTranslations.getText(
+                                ref,
+                                'recipe_source',
+                              ),
+                              textAlign: TextAlign.right,
+                              style: const TextStyle(
+                                fontFamily: AppTheme.primaryFontFamily,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textColor,
+                                height: 1.2,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              _formatUrl(sourceLink, showFull: true),
+                              textAlign: TextAlign.right,
+                              style: const TextStyle(
+                                fontFamily: AppTheme.secondaryFontFamily,
+                                fontSize: 13,
+                                color: AppTheme.secondaryTextColor,
+                                height: 1.3,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              // URL itself should stay LTR even in RTL
+                              textDirection: TextDirection.ltr,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Icon(
+                        Icons.open_in_new,
+                        color: AppTheme.primaryColor,
+                        size: 20,
+                      ),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                AppTranslations.getText(
+                                  ref,
+                                  'recipe_source',
+                                ),
+                                style: const TextStyle(
+                                  fontFamily: AppTheme.primaryFontFamily,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.textColor,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                _formatUrl(sourceLink),
+                                style: const TextStyle(
+                                  fontFamily: AppTheme.secondaryFontFamily,
+                                  fontSize: 12,
+                                  color: AppTheme.secondaryTextColor,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const Icon(
+                        Icons.link,
+                        color: AppTheme.primaryColor,
+                        size: 24,
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      ),
+    ),
+  ),
+
 
                         const SizedBox(height: 24),
                         Center(
@@ -379,15 +525,13 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
                   ),
                 );
               },
-              loading:
-                  () => const Center(
-                    child: CircularProgressIndicator(
-                      color: AppTheme.primaryColor,
+              loading: () => const Center(child: AppLoadingIndicator()),
+              error:
+                  (error, stackTrace) => Center(
+                    child: AppErrorContainer(
+                      message: 'Error: ${error.toString()}',
                     ),
                   ),
-              error:
-                  (error, stackTrace) =>
-                      Center(child: Text('Error: ${error.toString()}')),
             ),
           ),
         ],
@@ -689,5 +833,118 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
         );
       }
     }
+  }
+
+  // Open source URL in browser
+  Future<void> _openSourceUrl(String url) async {
+    final uri = _normalizeUrlForLaunch(url);
+    if (uri == null) {
+      _showCannotOpenUrl();
+      return;
+    }
+
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        _showCannotOpenUrl();
+      }
+    } catch (_) {
+      _showCannotOpenUrl();
+    }
+  }
+
+  void _showCannotOpenUrl() {
+    if (!mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          AppTranslations.getText(ref, 'cannot_open_url'),
+          textAlign: TextAlign.right,
+          style: const TextStyle(fontFamily: AppTheme.primaryFontFamily),
+        ),
+        backgroundColor: AppTheme.errorColor,
+      ),
+    );
+  }
+
+  // Format URL for display (remove protocol, truncate if needed)
+  String _formatUrl(String url, {bool showFull = false}) {
+    final uri = _normalizeUrlForLaunch(url);
+
+    if (uri == null) {
+      final trimmed = url.trim();
+      if (showFull || trimmed.length <= 50) {
+        return trimmed;
+      }
+      return '${trimmed.substring(0, 47)}...';
+    }
+
+    if (showFull) {
+      // For full display, show www + domain + path but decode properly
+      var fullUrl = uri.host;
+      // Add www if not present
+      if (!fullUrl.startsWith('www.')) {
+        fullUrl = 'www.$fullUrl';
+      }
+      if (uri.path.isNotEmpty && uri.path != '/') {
+        // Decode the path for better readability
+        fullUrl += Uri.decodeComponent(uri.path);
+      }
+      return fullUrl;
+    }
+
+    // For compact display, show just domain or domain + short path
+    var display = uri.host;
+    if (uri.path.isNotEmpty && uri.path != '/') {
+      // Only show path if it's short enough
+      final decodedPath = Uri.decodeComponent(uri.path);
+      if (decodedPath.length <= 30) {
+        display += decodedPath;
+      } else {
+        // Show first part of path
+        display += '${decodedPath.substring(0, 27)}...';
+      }
+    }
+
+    if (display.length > 60) {
+      display = '${display.substring(0, 57)}...';
+    }
+    return display;
+  }
+
+  Uri? _normalizeUrlForLaunch(String url) {
+    var trimmed = url.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+
+    if (!trimmed.startsWith(RegExp(r'https?://', caseSensitive: false))) {
+      trimmed = 'https://$trimmed';
+    }
+
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null || uri.host.isEmpty) {
+      return null;
+    }
+
+    return uri;
+  }
+
+  String _getRecipeSourceLink(dynamic recipe) {
+    final sourceUrl = (recipe.sourceUrl ?? '').toString().trim();
+    if (_normalizeUrlForLaunch(sourceUrl) != null) {
+      return sourceUrl;
+    }
+
+    final source = (recipe.source ?? '').toString().trim();
+    if (_normalizeUrlForLaunch(source) != null) {
+      return source;
+    }
+
+    return '';
   }
 }

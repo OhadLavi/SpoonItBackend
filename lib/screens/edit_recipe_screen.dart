@@ -7,6 +7,8 @@ import 'package:spoonit/widgets/app_header.dart';
 import 'package:spoonit/widgets/app_bottom_nav.dart';
 import 'package:spoonit/utils/app_theme.dart';
 import 'package:spoonit/utils/translations.dart';
+import 'package:spoonit/widgets/feedback/app_loading_indicator.dart';
+import 'package:spoonit/widgets/feedback/app_error_container.dart';
 
 class EditRecipeScreen extends ConsumerStatefulWidget {
   final String recipeId;
@@ -89,13 +91,7 @@ class _EditRecipeScreenState extends ConsumerState<EditRecipeScreen> {
                   showBackButton: true,
                   onBackPressed: () => context.pop(),
                 ),
-                const Expanded(
-                  child: Center(
-                    child: CircularProgressIndicator(
-                      color: AppTheme.primaryColor,
-                    ),
-                  ),
-                ),
+                const Expanded(child: Center(child: AppLoadingIndicator())),
               ],
             ),
             bottomNavigationBar: const AppBottomNav(currentIndex: -1),
@@ -112,37 +108,9 @@ class _EditRecipeScreenState extends ConsumerState<EditRecipeScreen> {
                 ),
                 Expanded(
                   child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.error_outline,
-                          size: 80,
-                          color: AppTheme.secondaryTextColor.withValues(
-                            alpha: 0.5,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          AppTranslations.getText(ref, 'error_loading_recipe'),
-                          style: const TextStyle(
-                            fontFamily: AppTheme.secondaryFontFamily,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w500,
-                            color: AppTheme.textColor,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          error.toString(),
-                          style: const TextStyle(
-                            fontFamily: AppTheme.secondaryFontFamily,
-                            fontSize: 14,
-                            color: AppTheme.secondaryTextColor,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
+                    child: AppErrorContainer(
+                      message:
+                          '${AppTranslations.getText(ref, 'error_loading_recipe')}\n${error.toString()}',
                     ),
                   ),
                 ),

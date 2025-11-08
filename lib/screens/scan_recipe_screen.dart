@@ -11,6 +11,9 @@ import 'package:spoonit/widgets/app_bottom_nav.dart';
 import 'package:spoonit/utils/app_theme.dart';
 import 'package:go_router/go_router.dart';
 import 'package:spoonit/config/env_config.dart';
+import 'package:spoonit/widgets/buttons/app_primary_button.dart';
+import 'package:spoonit/widgets/buttons/app_text_button.dart';
+import 'package:spoonit/widgets/feedback/app_loading_indicator.dart';
 
 class ScanRecipeScreen extends ConsumerStatefulWidget {
   const ScanRecipeScreen({super.key});
@@ -223,35 +226,30 @@ class _ScanRecipeScreenState extends ConsumerState<ScanRecipeScreen> {
                       ),
                       const SizedBox(height: 16),
                       if (_isProcessing)
-                        const CircularProgressIndicator(
-                          color: AppTheme.primaryColor,
-                        )
+                        const AppLoadingIndicator()
                       else if (!_hasImage)
-                        ElevatedButton.icon(
+                        AppPrimaryButton(
                           onPressed: _pickImage,
+                          text: AppTranslations.getText(ref, 'select_image'),
                           icon: const Icon(Icons.add_photo_alternate),
-                          label: Text(
-                            AppTranslations.getText(ref, 'select_image'),
-                          ),
                         )
                       else
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            TextButton.icon(
+                            AppTextButton(
                               onPressed: _pickImage,
-                              icon: const Icon(Icons.refresh),
-                              label: Text(
-                                AppTranslations.getText(ref, 'change_image'),
+                              text: AppTranslations.getText(
+                                ref,
+                                'change_image',
                               ),
+                              icon: const Icon(Icons.refresh),
                             ),
                             const SizedBox(width: 16),
-                            ElevatedButton.icon(
+                            AppPrimaryButton(
                               onPressed: _scanRecipe,
+                              text: AppTranslations.getText(ref, 'scan_image'),
                               icon: const Icon(Icons.document_scanner),
-                              label: Text(
-                                AppTranslations.getText(ref, 'scan_image'),
-                              ),
                             ),
                           ],
                         ),

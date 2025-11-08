@@ -7,6 +7,9 @@ import 'dart:convert';
 import 'package:spoonit/widgets/app_header.dart';
 import 'package:spoonit/widgets/app_bottom_nav.dart';
 import 'package:spoonit/config/env_config.dart';
+import 'package:spoonit/widgets/forms/app_text_field.dart';
+import 'package:spoonit/widgets/forms/app_form_container.dart';
+import 'package:spoonit/widgets/buttons/app_primary_button.dart';
 
 class CustomRecipeScreen extends ConsumerStatefulWidget {
   const CustomRecipeScreen({super.key});
@@ -77,11 +80,11 @@ class _CustomRecipeScreenState extends ConsumerState<CustomRecipeScreen> {
                     style: AppTheme.headingStyle,
                   ),
                   const SizedBox(height: 8),
-                  TextField(
-                    controller: _groceriesController,
-                    decoration: InputDecoration(
+                  AppFormContainer(
+                    child: AppTextField(
+                      controller: _groceriesController,
                       hintText: AppTranslations.getText(ref, 'groceries_hint'),
-                      border: const OutlineInputBorder(),
+                      maxLines: 3,
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -90,29 +93,22 @@ class _CustomRecipeScreenState extends ConsumerState<CustomRecipeScreen> {
                     style: AppTheme.headingStyle,
                   ),
                   const SizedBox(height: 8),
-                  TextField(
-                    controller: _descriptionController,
-                    decoration: InputDecoration(
+                  AppFormContainer(
+                    child: AppTextField(
+                      controller: _descriptionController,
                       hintText: AppTranslations.getText(
                         ref,
                         'recipe_description_hint',
                       ),
-                      border: const OutlineInputBorder(),
+                      maxLines: 3,
                     ),
                   ),
                   const SizedBox(height: 16),
-                  Center(
-                    child: ElevatedButton(
-                      onPressed: _loading ? null : _generateRecipe,
-                      child:
-                          _loading
-                              ? const CircularProgressIndicator(
-                                color: AppTheme.primaryColor,
-                              )
-                              : Text(
-                                AppTranslations.getText(ref, 'generate_recipe'),
-                              ),
-                    ),
+                  AppPrimaryButton(
+                    text: AppTranslations.getText(ref, 'generate_recipe'),
+                    onPressed: _loading ? null : _generateRecipe,
+                    isLoading: _loading,
+                    width: double.infinity,
                   ),
                   const SizedBox(height: 24),
                   if (_generatedRecipe.isNotEmpty)

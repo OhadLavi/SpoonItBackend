@@ -12,6 +12,11 @@ import 'package:spoonit/widgets/app_header.dart';
 import 'package:spoonit/widgets/app_bottom_nav.dart';
 import 'package:go_router/go_router.dart';
 import 'package:spoonit/utils/app_theme.dart';
+import 'package:spoonit/widgets/forms/app_text_field.dart';
+import 'package:spoonit/widgets/forms/app_password_field.dart';
+import 'package:spoonit/widgets/forms/app_form_container.dart';
+import 'package:spoonit/widgets/buttons/app_primary_button.dart';
+import 'package:spoonit/services/error_handler_service.dart';
 
 class EditProfileScreen extends ConsumerStatefulWidget {
   final AppUser user;
@@ -29,9 +34,6 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   File? _imageFile;
   String? _currentImageUrl;
   bool _isLoading = false;
-  bool _obscureCurrentPassword = true;
-  bool _obscureNewPassword = true;
-  bool _obscureConfirmPassword = true;
   final ImagePicker _picker = ImagePicker();
   final _formKey = GlobalKey<FormState>();
 
@@ -70,11 +72,11 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     } catch (e) {
       // Handle errors, e.g., permissions
       if (mounted) {
+        final appError = ErrorHandlerService.handleFileError(e, ref);
         scaffoldMessenger.showSnackBar(
           SnackBar(
-            content: Text(
-              '${AppTranslations.getText(ref, 'error_selecting_image')}: $e',
-            ),
+            content: Text(appError.userMessage),
+            backgroundColor: AppTheme.errorColor,
           ),
         );
       }
@@ -169,11 +171,11 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
             setState(() {
               _isLoading = false;
             });
+            // Use ErrorHandlerService to get localized error messages
+            final appError = ErrorHandlerService.handleAuthError(e, ref);
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text(
-                  '${AppTranslations.getText(ref, 'error_changing_password')}: $e',
-                ),
+                content: Text(appError.userMessage),
                 backgroundColor: AppTheme.errorColor,
               ),
             );
@@ -206,11 +208,11 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       }
     } catch (e) {
       if (mounted) {
+        // Use ErrorHandlerService to get localized error messages
+        final appError = ErrorHandlerService.handleAuthError(e, ref);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              '${AppTranslations.getText(ref, 'error_updating_profile')}: $e',
-            ),
+            content: Text(appError.userMessage),
             backgroundColor: AppTheme.errorColor,
           ),
         );
@@ -291,46 +293,16 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                       ),
                     ),
                     const SizedBox(height: 24),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: AppTheme.cardColor,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppTheme.secondaryTextColor.withValues(
-                              alpha: 0.1,
-                            ),
-                            spreadRadius: 1,
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: TextFormField(
+                    AppFormContainer(
+                      child: AppTextField(
                         controller: _displayNameController,
-                        decoration: InputDecoration(
-                          labelText: AppTranslations.getText(ref, 'name'),
-                          labelStyle: const TextStyle(
-                            color: AppTheme.textColor,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
-                          ),
-                          filled: true,
-                          fillColor: Colors.transparent,
-                          contentPadding: const EdgeInsets.all(16),
-                        ),
-                        style: const TextStyle(
-                          color: AppTheme.textColor,
-                          fontFamily: AppTheme.secondaryFontFamily,
-                        ),
+                        labelText: AppTranslations.getText(ref, 'name'),
                         validator: (value) {
                           if (value == null || value.trim().isEmpty) {
                             return AppTranslations.getText(
                               ref,
                               'name_required',
-                            ); // Add translation if needed
+                            );
                           }
                           return null;
                         },
@@ -338,58 +310,13 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                     ),
                     const SizedBox(height: 16),
                     // Current Password Field
-                    Container(
-                      decoration: BoxDecoration(
-                        color: AppTheme.cardColor,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppTheme.secondaryTextColor.withValues(
-                              alpha: 0.1,
-                            ),
-                            spreadRadius: 1,
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: TextFormField(
+                    AppFormContainer(
+                      child: AppPasswordField(
                         controller: _currentPasswordController,
-                        decoration: InputDecoration(
-                          labelText: AppTranslations.getText(
-                            ref,
-                            'current_password',
-                          ),
-                          labelStyle: const TextStyle(
-                            color: AppTheme.textColor,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
-                          ),
-                          filled: true,
-                          fillColor: Colors.transparent,
-                          contentPadding: const EdgeInsets.all(16),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscureCurrentPassword
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
-                              color: AppTheme.textColor,
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _obscureCurrentPassword =
-                                    !_obscureCurrentPassword;
-                              });
-                            },
-                          ),
+                        labelText: AppTranslations.getText(
+                          ref,
+                          'current_password',
                         ),
-                        style: const TextStyle(
-                          color: AppTheme.textColor,
-                          fontFamily: AppTheme.secondaryFontFamily,
-                        ),
-                        obscureText: _obscureCurrentPassword,
                         validator: (value) {
                           if (_newPasswordController.text.isNotEmpty &&
                               (value == null || value.isEmpty)) {
@@ -404,57 +331,10 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                     ),
                     const SizedBox(height: 16),
                     // New Password Field
-                    Container(
-                      decoration: BoxDecoration(
-                        color: AppTheme.cardColor,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppTheme.secondaryTextColor.withValues(
-                              alpha: 0.1,
-                            ),
-                            spreadRadius: 1,
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: TextFormField(
+                    AppFormContainer(
+                      child: AppPasswordField(
                         controller: _newPasswordController,
-                        decoration: InputDecoration(
-                          labelText: AppTranslations.getText(
-                            ref,
-                            'new_password',
-                          ),
-                          labelStyle: const TextStyle(
-                            color: AppTheme.textColor,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
-                          ),
-                          filled: true,
-                          fillColor: Colors.transparent,
-                          contentPadding: const EdgeInsets.all(16),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscureNewPassword
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
-                              color: AppTheme.textColor,
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _obscureNewPassword = !_obscureNewPassword;
-                              });
-                            },
-                          ),
-                        ),
-                        style: const TextStyle(
-                          color: AppTheme.textColor,
-                          fontFamily: AppTheme.secondaryFontFamily,
-                        ),
-                        obscureText: _obscureNewPassword,
+                        labelText: AppTranslations.getText(ref, 'new_password'),
                         validator: (value) {
                           if (value != null &&
                               value.isNotEmpty &&
@@ -470,58 +350,13 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                     ),
                     const SizedBox(height: 16),
                     // Confirm Password Field
-                    Container(
-                      decoration: BoxDecoration(
-                        color: AppTheme.cardColor,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppTheme.secondaryTextColor.withValues(
-                              alpha: 0.1,
-                            ),
-                            spreadRadius: 1,
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: TextFormField(
+                    AppFormContainer(
+                      child: AppPasswordField(
                         controller: _confirmPasswordController,
-                        decoration: InputDecoration(
-                          labelText: AppTranslations.getText(
-                            ref,
-                            'confirm_new_password',
-                          ),
-                          labelStyle: const TextStyle(
-                            color: AppTheme.textColor,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
-                          ),
-                          filled: true,
-                          fillColor: Colors.transparent,
-                          contentPadding: const EdgeInsets.all(16),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscureConfirmPassword
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
-                              color: AppTheme.textColor,
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _obscureConfirmPassword =
-                                    !_obscureConfirmPassword;
-                              });
-                            },
-                          ),
+                        labelText: AppTranslations.getText(
+                          ref,
+                          'confirm_new_password',
                         ),
-                        style: const TextStyle(
-                          color: AppTheme.textColor,
-                          fontFamily: AppTheme.secondaryFontFamily,
-                        ),
-                        obscureText: _obscureConfirmPassword,
                         validator: (value) {
                           if (value != null &&
                               value.isNotEmpty &&
@@ -536,44 +371,12 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                       ),
                     ),
                     const SizedBox(height: 24),
-                    Container(
+                    AppPrimaryButton(
+                      text: AppTranslations.getText(ref, 'save_changes'),
+                      onPressed: _isLoading ? null : _saveProfile,
+                      isLoading: _isLoading,
                       width: double.infinity,
                       height: 50,
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryColor,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppTheme.primaryColor.withValues(alpha: 0.3),
-                            spreadRadius: 1,
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: ElevatedButton(
-                        onPressed: _isLoading ? null : _saveProfile,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primaryColor,
-                          foregroundColor: AppTheme.backgroundColor,
-                          disabledBackgroundColor: AppTheme.primaryColor,
-                          disabledForegroundColor: AppTheme.backgroundColor,
-                          shadowColor: Colors.transparent,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: Text(
-                          AppTranslations.getText(ref, 'save_changes'),
-                          style: const TextStyle(
-                            color: AppTheme.lightAccentColor,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            fontFamily: AppTheme.secondaryFontFamily,
-                          ),
-                        ),
-                      ),
                     ),
                   ],
                 ),

@@ -110,7 +110,10 @@ class AppRouter {
       // Search screen
       GoRoute(
         path: '/search',
-        builder: (context, state) => const SearchScreen(),
+        builder: (context, state) {
+          final query = state.uri.queryParameters['q'];
+          return SearchScreen(initialQuery: query);
+        },
       ),
 
       // Category recipes screen

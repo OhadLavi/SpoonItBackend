@@ -3,13 +3,16 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:spoonit/services/recipe_extraction_service.dart';
+import 'package:spoonit/services/error_handler_service.dart';
 import 'package:spoonit/utils/translations.dart';
 import 'package:spoonit/widgets/recipe_form_base.dart';
 import 'package:spoonit/widgets/app_header.dart';
 import 'package:spoonit/widgets/app_bottom_nav.dart';
 import 'package:spoonit/models/recipe.dart';
 import 'package:spoonit/utils/app_theme.dart';
-import 'package:flutter_svg/flutter_svg.dart';
+import 'package:spoonit/widgets/forms/app_text_field.dart';
+import 'package:spoonit/widgets/forms/app_form_container.dart';
+import 'package:spoonit/widgets/feedback/app_loading_indicator.dart';
 
 class ImportRecipeScreen extends ConsumerStatefulWidget {
   const ImportRecipeScreen({super.key});
@@ -22,7 +25,7 @@ class _ImportRecipeScreenState extends ConsumerState<ImportRecipeScreen> {
   final _urlController = TextEditingController();
   final _recipeExtractionService = RecipeExtractionService();
   bool _isLoading = false;
-  String? _error;
+  AppError? _error;
 
   @override
   void dispose() {
@@ -34,7 +37,10 @@ class _ImportRecipeScreenState extends ConsumerState<ImportRecipeScreen> {
     final url = _urlController.text.trim();
     if (url.isEmpty) {
       setState(() {
-        _error = AppTranslations.getText(ref, 'url_required');
+        _error = AppError(
+          userMessage: AppTranslations.getText(ref, 'url_required'),
+          severity: ErrorSeverity.warning,
+        );
       });
       return;
     }
@@ -58,7 +64,7 @@ class _ImportRecipeScreenState extends ConsumerState<ImportRecipeScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = ErrorHandlerService.handleApiError(e, ref);
       });
     } finally {
       if (mounted) {
@@ -92,91 +98,51 @@ class _ImportRecipeScreenState extends ConsumerState<ImportRecipeScreen> {
                   child: Column(
                     children: [
                       // URL input field at the top
-                      Container(
-                        decoration: BoxDecoration(
-                          color: AppTheme.cardColor,
-                          borderRadius: BorderRadius.circular(12),
-                          boxShadow: [
-                            BoxShadow(
-                              color: AppTheme.dividerColor.withValues(alpha: 0.5),
-                              blurRadius: 10,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: TextField(
+                      AppFormContainer(
+                        child: AppTextField(
                           controller: _urlController,
-                          decoration: InputDecoration(
-                            hintText: AppTranslations.getText(
-                              ref,
-                              'paste_link',
-                            ),
-                            errorText: _error,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(
-                                color: AppTheme.dividerColor,
-                              ),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(
-                                color: AppTheme.dividerColor,
-                              ),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(
-                                color: AppTheme.primaryColor,
-                                width: 2,
-                              ),
-                            ),
-                            filled: true,
-                            fillColor: Colors.transparent,
-                            prefixIcon: GestureDetector(
-                              onTap: () async {
-                                // Get clipboard data
-                                final clipboardData = await Clipboard.getData(
-                                  'text/plain',
-                                );
-                                if (clipboardData?.text != null) {
-                                  _urlController.text = clipboardData!.text!;
-                                  _importRecipe();
-                                }
-                              },
-                              child: Padding(
-                                padding: const EdgeInsets.all(12.0),
-                                child: SvgPicture.asset(
-                                  'assets/images/paste.svg',
-                                  width: 24,
-                                  height: 24,
-                                  colorFilter: const ColorFilter.mode(
-                                    AppTheme.uiAccentColor,
-                                    BlendMode.srcIn,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            hintStyle: const TextStyle(
-                              color: AppTheme.textColor,
-                              fontFamily: AppTheme.primaryFontFamily,
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 16,
-                            ),
+                          hintText: AppTranslations.getText(ref, 'paste_link'),
+                          keyboardType: TextInputType.url,
+                          textInputAction: TextInputAction.go,
+                          prefixIcon: Icons.link,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
                           ),
-                          style: const TextStyle(
-                            color: AppTheme.textColor,
-                            fontSize: 16,
-                            fontFamily: AppTheme.primaryFontFamily,
+                          textAlignOverride: TextAlign.right,
+                          errorText: _error?.userMessage,
+                          onPrefixIconTap: () async {
+                            final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
+                            if (clipboardData?.text != null && clipboardData!.text!.isNotEmpty) {
+                              _urlController.text = clipboardData.text!;
+                              setState(() {
+                                _error = null;
+                              });
+                            }
+                          },
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              Icons.send,
+                              color: _isLoading
+                                  ? AppTheme.textColor.withValues(alpha: 0.5)
+                                  : AppTheme.primaryColor,
+                            ),
+                            onPressed: _isLoading ? null : _importRecipe,
+                            iconSize: 20,
                           ),
-                          onSubmitted: (_) => _importRecipe(),
+                          onChanged: (value) {
+                            // Clear error when user starts typing
+                            if (_error != null) {
+                              setState(() {
+                                _error = null;
+                              });
+                            }
+                          },
+                          onFieldSubmitted: (_) => _importRecipe(),
                         ),
                       ),
                       if (_isLoading) ...[
                         const SizedBox(height: 32),
-                        // Loading state with cooking pot icon
                         Text(
                           AppTranslations.getText(ref, 'loading_recipe'),
                           style: const TextStyle(
@@ -187,20 +153,7 @@ class _ImportRecipeScreenState extends ConsumerState<ImportRecipeScreen> {
                           ),
                         ),
                         const SizedBox(height: 16),
-                        // Waiting SVG icon
-                        SizedBox(
-                          width: 96,
-                          height: 96,
-                          child: SvgPicture.asset(
-                            'assets/images/waiting.svg',
-                            width: 96,
-                            height: 96,
-                            colorFilter: const ColorFilter.mode(
-                              AppTheme.primaryColor,
-                              BlendMode.srcIn,
-                            ),
-                          ),
-                        ),
+                        const AppLoadingIndicator(),
                       ],
                     ],
                   ),

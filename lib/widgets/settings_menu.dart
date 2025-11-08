@@ -61,7 +61,7 @@ class SettingsMenu extends ConsumerWidget {
     developer.log('SettingsMenu: Email: $email', name: 'SettingsMenu');
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 28, 28, 32),
+      padding: const EdgeInsets.fromLTRB(20, 20, 28, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -74,7 +74,7 @@ class SettingsMenu extends ConsumerWidget {
                     ? name!
                     : AppTranslations.getText(ref, 'user'),
                 style: const TextStyle(
-                  fontSize: 34.58,
+                  fontSize: 30,
                   fontWeight: FontWeight.w600,
                   fontFamily: AppTheme.primaryFontFamily,
                   color: AppTheme.lightAccentColor,
@@ -86,7 +86,7 @@ class SettingsMenu extends ConsumerWidget {
           DirectionalText(
             email ?? '',
             style: const TextStyle(
-              fontSize: 17.29,
+              fontSize: 15,
               fontFamily: AppTheme.primaryFontFamily,
               color: kAccent,
               fontWeight: FontWeight.w500,
@@ -99,7 +99,7 @@ class SettingsMenu extends ConsumerWidget {
 
   Widget _buildSettingsMenu(BuildContext context, WidgetRef ref) {
     return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.only(top: 0, bottom: 16),
       children: [
         _buildSettingsMenuItem(
           svgAsset: 'assets/images/profile.svg',
@@ -126,11 +126,11 @@ class SettingsMenu extends ConsumerWidget {
           ref: ref,
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 28, 12),
+          padding: const EdgeInsets.fromLTRB(20, 8, 28, 8),
           child: Divider(
             color: AppTheme.lightAccentColor.withValues(alpha: 0.24),
             thickness: 0.5,
-            height: 4,
+            height: 2,
           ),
         ),
         _buildSettingsMenuItem(
@@ -146,11 +146,11 @@ class SettingsMenu extends ConsumerWidget {
           ref: ref,
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 28, 12),
+          padding: const EdgeInsets.fromLTRB(20, 8, 28, 8),
           child: Divider(
             color: AppTheme.lightAccentColor.withValues(alpha: 0.24),
             thickness: 0.5,
-            height: 4,
+            height: 2,
           ),
         ),
         _buildSettingsMenuItem(
@@ -165,7 +165,6 @@ class SettingsMenu extends ConsumerWidget {
           },
           ref: ref,
         ),
-        const SizedBox(height: 10),
       ],
     );
   }
@@ -183,7 +182,7 @@ class SettingsMenu extends ConsumerWidget {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 32, 28, 32),
+        padding: const EdgeInsets.fromLTRB(20, 16, 28, 16),
         child: Row(
           children: [
             if (svgAsset != null)
@@ -208,7 +207,7 @@ class SettingsMenu extends ConsumerWidget {
               child: DirectionalText(
                 title,
                 style: const TextStyle(
-                  fontSize: 18,
+                  fontSize: 17,
                   color: AppTheme.lightAccentColor,
                   fontWeight: FontWeight.w400,
                   fontFamily: AppTheme.primaryFontFamily,

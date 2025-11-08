@@ -1,3 +1,6 @@
+import 'dart:developer' as developer;
+
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -12,6 +15,13 @@ import 'package:spoonit/utils/responsive_utils.dart';
 import 'package:spoonit/utils/language_utils.dart';
 import 'package:spoonit/services/rate_limit_service.dart';
 import 'package:spoonit/services/audit_logger_service.dart';
+import 'package:spoonit/widgets/forms/app_text_field.dart';
+import 'package:spoonit/widgets/forms/app_password_field.dart';
+import 'package:spoonit/widgets/forms/app_form_container.dart';
+import 'package:spoonit/widgets/buttons/app_primary_button.dart';
+import 'package:spoonit/widgets/buttons/app_text_button.dart';
+import 'package:spoonit/widgets/feedback/app_error_container.dart';
+import 'package:spoonit/services/error_handler_service.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -24,7 +34,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  bool _isPasswordVisible = false;
   bool _isLoading = false;
   String? _errorMessage;
 
@@ -61,16 +70,50 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           .read(authProvider.notifier)
           .signInWithEmailAndPassword(email, _passwordController.text);
 
-      // Clear rate limiting on successful login
-      await RateLimitService.clearAttemptsAsync(email);
+      // Only proceed if we successfully authenticated
+      final authState = ref.read(authProvider);
+      if (authState.status == AuthStatus.authenticated && authState.user != null) {
+        // Clear rate limiting on successful login
+        await RateLimitService.clearAttemptsAsync(email);
 
-      if (mounted) context.go('/home');
-    } catch (e) {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+          context.go('/home');
+        }
+      } else {
+        // Authentication failed but no exception was thrown
+        if (kDebugMode) {
+          developer.log(
+            'Login failed: status=${authState.status}, error=${authState.errorMessage}',
+            name: 'LoginScreen',
+          );
+        }
+        setState(() {
+          _errorMessage = authState.errorMessage ?? 
+              ErrorHandlerService.handleAuthError(
+                Exception('Authentication failed'),
+                ref,
+              ).userMessage;
+          _isLoading = false;
+        });
+      }
+    } catch (e, stackTrace) {
       // Record failed attempt
       await RateLimitService.recordFailedAttemptAsync(email);
 
+      if (kDebugMode) {
+        developer.log(
+          'Login exception: $e',
+          name: 'LoginScreen',
+          error: e,
+          stackTrace: stackTrace,
+        );
+      }
+
       setState(() {
-        _errorMessage = e.toString().replaceFirst('Exception: ', '');
+        _errorMessage = ErrorHandlerService.handleAuthError(e, ref).userMessage;
         _isLoading = false;
       });
     }
@@ -87,7 +130,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (mounted) context.go('/home');
     } catch (e) {
       setState(() {
-        _errorMessage = e.toString().replaceFirst('Exception: ', '');
+        _errorMessage = ErrorHandlerService.handleAuthError(e, ref).userMessage;
         _isLoading = false;
       });
     }
@@ -104,7 +147,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (mounted) context.go('/home');
     } catch (e) {
       setState(() {
-        _errorMessage = e.toString().replaceFirst('Exception: ', '');
+        _errorMessage = ErrorHandlerService.handleAuthError(e, ref).userMessage;
         _isLoading = false;
       });
     }
@@ -173,7 +216,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final isHebrew = LanguageUtils.isHebrew(ref);
 
     return Scaffold(
-      resizeToAvoidBottomInset: true,
+      resizeToAvoidBottomInset: false,
       body: Stack(
         children: [
           // Background header band
@@ -266,17 +309,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                     ),
                     child: Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: screenWidth < 500 ? 16 : 24,
-                        vertical: 32,
+                      padding: EdgeInsets.only(
+                        left: screenWidth < 500 ? 16 : 24,
+                        right: screenWidth < 500 ? 16 : 24,
+                        top: 32,
+                        bottom: 32,
                       ),
-                      // Scroll if content overflows on short screens
-                      child: SingleChildScrollView(
-                        child: Form(
-                          key: _formKey,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
+                        child: SingleChildScrollView(
+                          child: Form(
+                            key: _formKey,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
                               Align(
                                 alignment:
                                     isHebrew
@@ -299,101 +343,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               const SizedBox(height: 24),
 
                               // Email
-                              Container(
-                                margin: const EdgeInsets.only(bottom: 16),
-                                decoration: BoxDecoration(
-                                  color:
-                                      isDark
-                                          ? AppTheme.darkCardColor
-                                          : AppTheme.backgroundColor,
-                                  borderRadius: BorderRadius.circular(24),
-                                  border: Border.all(
-                                    color:
-                                        isDark
-                                            ? AppTheme.darkDividerColor
-                                            : AppTheme.dividerColor,
-                                    width: 1,
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: AppTheme.dividerColor.withValues(
-                                        alpha: 0.04,
-                                      ),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: TextFormField(
+                              AppFormContainer(
+                                child: AppTextField(
                                   controller: _emailController,
+                                  hintText: AppTranslations.getText(
+                                    ref,
+                                    'email_hint',
+                                  ),
+                                  prefixSvgAsset: 'assets/images/email.svg',
                                   keyboardType: TextInputType.emailAddress,
-                                  textAlign:
-                                      _emailController.text.isEmpty
-                                          ? (isHebrew
-                                              ? TextAlign.right
-                                              : TextAlign.left)
-                                          : TextAlign.left,
-                                  textDirection:
-                                      _emailController.text.isEmpty
-                                          ? (isHebrew
-                                              ? TextDirection.rtl
-                                              : TextDirection.ltr)
-                                          : TextDirection.ltr,
-                                  style: TextStyle(
-                                    color: mainTextColor,
-                                    fontWeight: FontWeight.w300,
-                                  ),
+                                  textAlignOverride: isHebrew ? null : TextAlign.left,
+                                  textDirectionOverride: TextDirection.ltr,
                                   onChanged: (value) => setState(() {}),
-                                  decoration: InputDecoration(
-                                    hintText: AppTranslations.getText(
-                                      ref,
-                                      'email_hint',
-                                    ),
-                                    hintStyle: TextStyle(
-                                      color: mainTextColor,
-                                      fontWeight: FontWeight.w300,
-                                    ),
-                                    prefixIcon: Padding(
-                                      padding: const EdgeInsets.all(12.0),
-                                      child: SvgPicture.asset(
-                                        'assets/images/email.svg',
-                                        width: 18,
-                                        height: 18,
-                                        colorFilter: const ColorFilter.mode(
-                                          AppTheme.textColor,
-                                          BlendMode.srcIn,
-                                        ),
-                                      ),
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    errorBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    focusedErrorBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    disabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 20,
-                                      vertical: 18,
-                                    ),
-                                  ),
                                   validator: (value) {
                                     if (value == null || value.isEmpty) {
                                       return AppTranslations.getText(
@@ -413,116 +374,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               ),
 
                               // Password
-                              Container(
+                              AppFormContainer(
                                 margin: const EdgeInsets.only(bottom: 8),
-                                decoration: BoxDecoration(
-                                  color:
-                                      isDark
-                                          ? AppTheme.darkCardColor
-                                          : AppTheme.backgroundColor,
-                                  borderRadius: BorderRadius.circular(24),
-                                  border: Border.all(
-                                    color:
-                                        isDark
-                                            ? AppTheme.darkDividerColor
-                                            : AppTheme.dividerColor,
-                                    width: 1,
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: AppTheme.dividerColor.withValues(
-                                        alpha: 0.04,
-                                      ),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: TextFormField(
+                                child: AppPasswordField(
                                   controller: _passwordController,
-                                  obscureText: !_isPasswordVisible,
-                                  textAlign:
-                                      _passwordController.text.isEmpty
-                                          ? (isHebrew
-                                              ? TextAlign.right
-                                              : TextAlign.left)
-                                          : TextAlign.left,
-                                  textDirection:
-                                      _passwordController.text.isEmpty
-                                          ? (isHebrew
-                                              ? TextDirection.rtl
-                                              : TextDirection.ltr)
-                                          : TextDirection.ltr,
-                                  style: TextStyle(
-                                    color: mainTextColor,
-                                    fontWeight: FontWeight.w300,
+                                  hintText: AppTranslations.getText(
+                                    ref,
+                                    'password_hint',
                                   ),
+                                  textAlignOverride: isHebrew ? null : TextAlign.left,
+                                  textDirectionOverride: TextDirection.ltr,
                                   onChanged: (value) => setState(() {}),
-                                  decoration: InputDecoration(
-                                    hintText: AppTranslations.getText(
-                                      ref,
-                                      'password_hint',
-                                    ),
-                                    hintStyle: TextStyle(
-                                      color: mainTextColor,
-                                      fontWeight: FontWeight.w300,
-                                    ),
-                                    prefixIcon: Padding(
-                                      padding: const EdgeInsets.all(12.0),
-                                      child: SvgPicture.asset(
-                                        'assets/images/password.svg',
-                                        width: 18,
-                                        height: 18,
-                                        colorFilter: const ColorFilter.mode(
-                                          AppTheme.textColor,
-                                          BlendMode.srcIn,
-                                        ),
-                                      ),
-                                    ),
-                                    suffixIcon: IconButton(
-                                      icon: Icon(
-                                        _isPasswordVisible
-                                            ? Icons.visibility_outlined
-                                            : Icons.visibility_off_outlined,
-                                        color: mainTextColor,
-                                        size: 18,
-                                      ),
-                                      onPressed: () {
-                                        setState(() {
-                                          _isPasswordVisible =
-                                              !_isPasswordVisible;
-                                        });
-                                      },
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    errorBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    focusedErrorBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    disabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 20,
-                                      vertical: 18,
-                                    ),
-                                  ),
                                   validator: (value) {
                                     if (value == null || value.isEmpty) {
                                       return AppTranslations.getText(
@@ -536,43 +398,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               ),
 
                               // Error
-                              if (_errorMessage != null) ...[
-                                const SizedBox(height: 8),
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.errorColor.withValues(
-                                      alpha: 0.1,
-                                    ),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: AppTheme.errorColor.withValues(
-                                        alpha: 0.3,
-                                      ),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      const Icon(
-                                        Icons.error_outline,
-                                        color: AppTheme.errorColor,
-                                        size: 20,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Text(
-                                          _errorMessage!,
-                                          style: const TextStyle(
-                                            color: AppTheme.errorColor,
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                              if (_errorMessage != null)
+                                AppErrorContainer(
+                                  message: _errorMessage!,
+                                  onDismiss:
+                                      () =>
+                                          setState(() => _errorMessage = null),
                                 ),
-                              ],
 
                               // Forgot
                               Align(
@@ -580,55 +412,28 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                     isHebrew
                                         ? Alignment.centerLeft
                                         : Alignment.centerRight,
-                                child: TextButton(
-                                  onPressed: _isLoading ? null : _resetPassword,
-                                  child: Text(
-                                    AppTranslations.getText(
-                                      ref,
-                                      'forgot_password_link',
-                                    ),
-                                    style: TextStyle(
-                                      color: mainTextColor,
-                                      fontSize: 14,
-                                    ),
+                                child: AppTextButton(
+                                  text: AppTranslations.getText(
+                                    ref,
+                                    'forgot_password_link',
                                   ),
+                                  onPressed: _isLoading ? null : _resetPassword,
                                 ),
                               ),
                               const SizedBox(height: 8),
 
                               // Login button
-                              SizedBox(
-                                height: 44,
-                                child: ElevatedButton(
-                                  onPressed:
-                                      _isLoading
-                                          ? null
-                                          : _signInWithEmailAndPassword,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: AppTheme.primaryColor,
-                                    foregroundColor: AppTheme.backgroundColor,
-                                    disabledBackgroundColor:
-                                        AppTheme.primaryColor,
-                                    disabledForegroundColor:
-                                        AppTheme.backgroundColor,
-                                    shadowColor: Colors.transparent,
-                                    elevation: 0,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                    ),
-                                    textStyle: const TextStyle(
-                                      fontFamily: AppTheme.primaryFontFamily,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                  child: Text(
-                                    AppTranslations.getText(
-                                      ref,
-                                      'login_button',
-                                    ),
-                                  ),
+                              AppPrimaryButton(
+                                text: AppTranslations.getText(
+                                  ref,
+                                  'login_button',
                                 ),
+                                onPressed:
+                                    _isLoading
+                                        ? null
+                                        : _signInWithEmailAndPassword,
+                                isLoading: _isLoading,
+                                height: 44,
                               ),
                               const SizedBox(height: 16),
 
@@ -726,36 +531,41 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               const SizedBox(height: 16),
 
                               // Register link
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    AppTranslations.getText(
-                                      ref,
-                                      'want_to_save_recipes',
-                                    ),
-                                    style: TextStyle(
-                                      color: mainTextColor,
-                                      fontFamily: AppTheme.primaryFontFamily,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                  GestureDetector(
-                                    onTap: () => context.go('/register'),
-                                    child: Text(
+                              Padding(
+                                padding: EdgeInsets.only(
+                                  bottom: 16 + MediaQuery.of(context).padding.bottom,
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
                                       AppTranslations.getText(
                                         ref,
-                                        'register_fun',
+                                        'want_to_save_recipes',
                                       ),
-                                      style: const TextStyle(
-                                        color: AppTheme.primaryColor,
-                                        fontWeight: FontWeight.bold,
+                                      style: TextStyle(
+                                        color: mainTextColor,
                                         fontFamily: AppTheme.primaryFontFamily,
                                         fontSize: 14,
                                       ),
                                     ),
-                                  ),
-                                ],
+                                    GestureDetector(
+                                      onTap: () => context.go('/register'),
+                                      child: Text(
+                                        AppTranslations.getText(
+                                          ref,
+                                          'register_fun',
+                                        ),
+                                        style: const TextStyle(
+                                          color: AppTheme.primaryColor,
+                                          fontWeight: FontWeight.bold,
+                                          fontFamily: AppTheme.primaryFontFamily,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ],
                           ),

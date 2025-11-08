@@ -7,6 +7,9 @@ import 'package:spoonit/widgets/app_bottom_nav.dart';
 import 'package:spoonit/utils/app_theme.dart';
 import 'package:spoonit/utils/language_utils.dart';
 import 'package:spoonit/widgets/common/directional_text.dart';
+import 'package:spoonit/widgets/forms/app_text_field.dart';
+import 'package:spoonit/widgets/buttons/app_primary_button.dart';
+import 'package:spoonit/widgets/feedback/app_loading_indicator.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({super.key});
@@ -104,9 +107,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const CircularProgressIndicator(
-                      color: AppTheme.primaryColor,
-                    ),
+                    const AppLoadingIndicator(),
                     const SizedBox(width: 8),
                     Text(AppTranslations.getText(ref, 'loading')),
                   ],
@@ -122,30 +123,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ),
               child: Row(
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.send),
+                  AppPrimaryButton(
                     onPressed: _sendMessage,
-                    tooltip: AppTranslations.getText(ref, 'send'),
+                    text: AppTranslations.getText(ref, 'send'),
+                    icon: const Icon(Icons.send),
+                    height: 40,
+                    width: 80,
                   ),
+                  const SizedBox(width: 8),
                   Expanded(
-                    child: TextField(
+                    child: AppTextField(
                       controller: _messageController,
                       focusNode: _focusNode,
                       autofocus: true,
-                      textDirection:
-                          isHebrew ? TextDirection.rtl : TextDirection.ltr,
-                      textAlign: isHebrew ? TextAlign.right : TextAlign.left,
-                      style: TextStyle(
-                        fontFamily: isHebrew ? 'Heebo' : null,
-                        fontSize: 16,
-                      ),
-                      decoration: InputDecoration(
-                        hintText: AppTranslations.getText(ref, 'type_message'),
-                        hintTextDirection:
-                            isHebrew ? TextDirection.rtl : TextDirection.ltr,
-                        border: InputBorder.none,
-                      ),
-                      onSubmitted: (_) => _sendMessage(),
+                      hintText: AppTranslations.getText(ref, 'type_message'),
+                      textInputAction: TextInputAction.send,
+                      onChanged: (value) {
+                        // Auto-send when user types and presses enter
+                        if (value.trim().isNotEmpty) {
+                          _sendMessage();
+                        }
+                      },
                     ),
                   ),
                 ],

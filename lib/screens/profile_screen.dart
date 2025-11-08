@@ -10,6 +10,9 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:spoonit/services/image_service.dart';
 import 'package:spoonit/widgets/app_header.dart';
 import 'package:spoonit/widgets/app_bottom_nav.dart';
+import 'package:spoonit/widgets/feedback/app_loading_indicator.dart';
+import 'package:spoonit/widgets/feedback/app_empty_state.dart';
+import 'package:spoonit/services/error_handler_service.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -27,33 +30,23 @@ class ProfileScreen extends ConsumerWidget {
           AppHeader(title: AppTranslations.getText(ref, 'profile')),
           Expanded(
             child: authState.when(
-              initial:
-                  () => const Center(
-                    child: CircularProgressIndicator(
-                      color: AppTheme.primaryColor,
-                    ),
-                  ),
-              loading:
-                  () => const Center(
-                    child: CircularProgressIndicator(
-                      color: AppTheme.primaryColor,
-                    ),
-                  ),
+              initial: () => const Center(child: AppLoadingIndicator()),
+              loading: () => const Center(child: AppLoadingIndicator()),
               authenticated: (user) {
                 return userDataAsync.when(
                   data: (userData) {
                     if (userData == null) {
-                      return const Center(child: Text('User data not found'));
+                      return const AppEmptyState(
+                        title: 'User data not found',
+                        subtitle: 'Please try logging in again',
+                        icon: Icons.person_off,
+                        padding: EdgeInsets.only(bottom: 100),
+                      );
                     }
 
                     return _buildProfileContent(context, ref, userData);
                   },
-                  loading:
-                      () => const Center(
-                        child: CircularProgressIndicator(
-                          color: AppTheme.primaryColor,
-                        ),
-                      ),
+                  loading: () => const Center(child: AppLoadingIndicator()),
                   error: (error, _) => Center(child: Text('Error: $error')),
                 );
               },
@@ -517,7 +510,8 @@ class ProfileScreen extends ConsumerWidget {
     } catch (e) {
       if (context.mounted) Navigator.pop(context);
       if (context.mounted) {
-        showSnackBar(context, '${AppTranslations.getText(ref, 'error')}: $e');
+        final appError = ErrorHandlerService.handleAuthError(e, ref);
+        showSnackBar(context, appError.userMessage);
       }
     }
   }
@@ -536,9 +530,10 @@ class ProfileScreen extends ConsumerWidget {
       }
     } catch (e) {
       if (context.mounted) {
+        final appError = ErrorHandlerService.handleAuthError(e, ref);
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Error signing out: $e')));
+        ).showSnackBar(SnackBar(content: Text(appError.userMessage)));
       }
     }
   }

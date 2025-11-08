@@ -11,9 +11,14 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:spoonit/services/image_service.dart';
 import 'package:spoonit/widgets/app_header.dart';
 import 'package:spoonit/widgets/app_bottom_nav.dart';
+import 'package:spoonit/widgets/forms/app_text_field.dart';
+import 'package:spoonit/widgets/forms/app_form_container.dart';
+import 'package:spoonit/widgets/feedback/app_empty_state.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
-  const SearchScreen({super.key});
+  final String? initialQuery;
+  
+  const SearchScreen({super.key, this.initialQuery});
 
   @override
   ConsumerState<SearchScreen> createState() => _SearchScreenState();
@@ -24,6 +29,19 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   bool _isSearching = false;
   String _searchQuery = '';
   List<Recipe> _searchResults = [];
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialQuery != null && widget.initialQuery!.isNotEmpty) {
+      _searchController.text = widget.initialQuery!;
+      _searchQuery = widget.initialQuery!;
+      // Perform search after build completes
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _performSearch();
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -208,19 +226,18 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           AppHeader(title: AppTranslations.getText(ref, 'search')),
           Padding(
             padding: const EdgeInsets.all(16.0),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
+            child: AppFormContainer(
+              child: AppTextField(
+                controller: _searchController,
                 hintText: AppTranslations.getText(ref, 'search_recipe'),
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                filled: true,
-                fillColor: AppTheme.backgroundColor,
+                prefixIcon: Icons.search,
+                textInputAction: TextInputAction.search,
+                onChanged: (value) {
+                  if (value.trim().isNotEmpty) {
+                    _performSearch();
+                  }
+                },
               ),
-              onSubmitted: (_) => _performSearch(),
-              textInputAction: TextInputAction.search,
             ),
           ),
           recipesState.when(
@@ -244,7 +261,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   ),
                 ),
             data: (recipes) {
-              if (_isSearching) {
+              if (_isSearching && _searchQuery.isNotEmpty) {
                 return const Expanded(
                   child: Center(
                     child: CircularProgressIndicator(
@@ -254,84 +271,50 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 );
               } else if (_searchQuery.isNotEmpty && _searchResults.isEmpty) {
                 return Expanded(
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.search_off,
-                          size: 80,
-                          color: AppTheme.secondaryTextColor.withValues(
-                            alpha: 0.5,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          AppTranslations.getText(
-                            ref,
-                            'no_results_found',
-                          ).replaceAll('{query}', _searchQuery),
-                          style: const TextStyle(
-                            fontFamily: AppTheme.secondaryFontFamily,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w500,
-                            color: AppTheme.textColor,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          AppTranslations.getText(ref, 'try_different_search'),
-                          style: const TextStyle(
-                            fontFamily: AppTheme.secondaryFontFamily,
-                            fontSize: 16,
-                            color: AppTheme.secondaryTextColor,
-                          ),
-                        ),
-                      ],
+                  child: AppNoSearchResultsState(
+                    searchQuery: _searchQuery,
+                    action: TextButton(
+                      onPressed: _clearSearch,
+                      child: Text(AppTranslations.getText(ref, 'clear_search')),
                     ),
                   ),
                 );
               } else if (_searchQuery.isEmpty) {
                 return Expanded(
                   child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.search,
-                          size: 80,
-                          color: AppTheme.primaryColor.withValues(alpha: 0.3),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          AppTranslations.getText(ref, 'search_for_recipes'),
-                          style: const TextStyle(
-                            fontFamily: AppTheme.secondaryFontFamily,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w500,
-                            color: AppTheme.textColor,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          AppTranslations.getText(ref, 'find_recipes_by'),
-                          style: const TextStyle(
-                            fontFamily: AppTheme.secondaryFontFamily,
-                            fontSize: 16,
-                            color: AppTheme.secondaryTextColor,
-                          ),
-                        ),
-                      ],
+                    child: AppEmptyState(
+                      title: AppTranslations.getText(ref, 'search_for_recipes'),
+                      subtitle: AppTranslations.getText(ref, 'find_recipes_by'),
+                      icon: Icons.search,
+                      padding: const EdgeInsets.only(bottom: 100),
                     ),
                   ),
                 );
               } else {
                 return Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-                    itemCount: _searchResults.length,
-                    itemBuilder: (context, index) {
-                      final recipe = _searchResults[index];
+                  child: Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            AppTranslations.getText(ref, 'search_results'),
+                            style: const TextStyle(
+                              fontFamily: AppTheme.primaryFontFamily,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.textColor,
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+                          itemCount: _searchResults.length,
+                          itemBuilder: (context, index) {
+                            final recipe = _searchResults[index];
                       return GestureDetector(
                         onTap: () {
                           context.push('/recipe/${recipe.id}');
@@ -483,6 +466,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                         ),
                       );
                     },
+                        ),
+                      ),
+                    ],
                   ),
                 );
               }

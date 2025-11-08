@@ -8,6 +8,8 @@ import 'package:spoonit/utils/app_theme.dart';
 import 'package:spoonit/utils/translations.dart';
 import 'package:spoonit/widgets/app_header.dart';
 import 'package:spoonit/widgets/app_bottom_nav.dart';
+import 'package:spoonit/widgets/buttons/app_primary_button.dart';
+import 'package:spoonit/widgets/feedback/app_empty_state.dart';
 
 class FavoritesScreen extends ConsumerWidget {
   const FavoritesScreen({super.key});
@@ -222,36 +224,15 @@ class FavoritesScreen extends ConsumerWidget {
   }
 
   Widget _buildEmptyState(BuildContext context, WidgetRef ref) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(
-            Icons.restaurant_menu,
-            size: 80,
-            color: AppTheme.secondaryTextColor,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            AppTranslations.getText(ref, 'no_recipes_yet'),
-            style: AppTheme.headingStyle,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            AppTranslations.getText(ref, 'create_first_recipe'),
-            style: AppTheme.captionStyle,
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: () => context.go('/add-recipe'),
-            icon: const Icon(Icons.add),
-            label: Text(AppTranslations.getText(ref, 'create_new_recipe')),
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            ),
-          ),
-        ],
+    return AppEmptyState(
+      title: AppTranslations.getText(ref, 'no_recipes_yet'),
+      subtitle: AppTranslations.getText(ref, 'create_first_recipe'),
+      icon: Icons.restaurant_menu,
+      padding: const EdgeInsets.only(bottom: 100),
+      action: AppPrimaryButton(
+        onPressed: () => context.go('/add-recipe'),
+        text: AppTranslations.getText(ref, 'create_new_recipe'),
+        icon: const Icon(Icons.add),
       ),
     );
   }

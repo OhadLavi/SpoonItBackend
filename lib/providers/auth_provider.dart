@@ -187,6 +187,8 @@ class AuthNotifier extends Notifier<AuthState> {
         status: AuthStatus.error,
         errorMessage: e.toString(),
       );
+      // Rethrow the exception so the UI can catch and handle it
+      rethrow;
     }
   }
 

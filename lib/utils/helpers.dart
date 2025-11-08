@@ -106,6 +106,16 @@ class Helpers {
   }
 
   // Validate email format with enhanced regex
+  /// Check if text contains primarily English characters
+  static bool isEnglishText(String text) {
+    if (text.isEmpty) return false;
+    // Check if text contains primarily ASCII/Latin characters
+    // Hebrew characters are in the range \u0590-\u05FF
+    final hebrewPattern = RegExp(r'[\u0590-\u05FF]');
+    final hasHebrew = hebrewPattern.hasMatch(text);
+    return !hasHebrew;
+  }
+
   static bool isValidEmail(String email) {
     if (email.isEmpty) return false;
 
