@@ -104,6 +104,7 @@ class RecipeExtractionService {
         servings: servings,
         imageUrl: '', // We'll need to handle image extraction separately
         sourceUrl: url,
+        source: url,
         userId: '', // This will be set when saving the recipe
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
