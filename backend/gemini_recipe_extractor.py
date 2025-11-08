@@ -5,6 +5,8 @@ Extracts recipe information from a URL using only the Gemini API.
 
 import os
 import json
+import re
+import httpx
 import google.generativeai as genai
 from typing import Dict, Any, Optional
 from dotenv import load_dotenv
@@ -12,6 +14,27 @@ from dotenv import load_dotenv
 # Load environment variables from .env file if it exists
 load_dotenv()
 
+
+def fetch_html_content(url: str) -> str:
+    """Fetch HTML content from URL and extract visible text (no HTML parsing)."""
+    with httpx.Client(timeout=30.0, headers={"User-Agent": "Mozilla/5.0"}) as client:
+        r = client.get(url, follow_redirects=True)
+        r.raise_for_status()
+        html = r.text
+        
+        # Simple text extraction: remove script and style tags using regex (no BeautifulSoup)
+        # Remove script tags and their content
+        html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        # Remove style tags and their content
+        html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        # Remove HTML tags but keep text content
+        text = re.sub(r'<[^>]+>', ' ', html)
+        # Normalize whitespace
+        text = re.sub(r'\s+', ' ', text)
+        # Limit size
+        if len(text.encode('utf-8')) > 50000:
+            text = text[:50000]
+        return text.strip()
 
 def extract_recipe_from_url(url: str, api_key: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -40,18 +63,31 @@ def extract_recipe_from_url(url: str, api_key: Optional[str] = None) -> Dict[str
     # Configure the Gemini API
     genai.configure(api_key=api_key)
     
-    # Initialize the model
-    model = genai.GenerativeModel('gemini-pro')
+    # Fetch HTML content and extract text
+    page_text = fetch_html_content(url)
+    print(f"Fetched page text, length={len(page_text)}")
     
-    # Create the prompt for recipe extraction
-    prompt = f"""Extract the recipe information from this URL: {url}
+    # Initialize the model
+    model = genai.GenerativeModel('gemini-2.5-flash')
+    
+    # Create the prompt for recipe extraction with improved guidelines
+    prompt = f"""Extract the recipe information from the following webpage content:
 
-Please analyze the webpage at this URL and extract the following recipe information in JSON format:
+URL: {url}
+
+Webpage content:
+{page_text}
+
+Extract the recipe information in JSON format:
 
 {{
     "title": "Recipe title",
     "description": "Recipe description or summary",
     "ingredients": ["ingredient 1", "ingredient 2", ...],
+    "ingredientsGroups": [
+        {{"category": "Category name as written on page", "ingredients": ["ingredient 1", "ingredient 2"]}},
+        {{"category": "Another category name", "ingredients": ["ingredient 3", "ingredient 4"]}}
+    ],
     "instructions": ["step 1", "step 2", ...],
     "prepTime": 0,
     "cookTime": 0,
@@ -62,13 +98,56 @@ Please analyze the webpage at this URL and extract the following recipe informat
     "imageUrl": "URL of recipe image if available"
 }}
 
-Important guidelines:
-- Return ONLY valid JSON, no additional text or markdown formatting
-- prepTime and cookTime should be in minutes (as integers)
-- ingredients should be a list of strings, each containing the full ingredient with quantities
-- instructions should be a list of strings, each representing a step
-- If any information is not available, use empty strings for text fields, empty arrays for lists, and 0 for numbers
-- Extract the actual recipe content from the webpage, not just metadata
+⚠️ CRITICAL - YOUR TASK IS TO COPY, NOT TO CREATE OR MODIFY ⚠️
+
+YOU ARE A COPY MACHINE, NOT A WRITER. DO NOT CHANGE ANYTHING.
+
+STEP 1: FIND INGREDIENTS SECTIONS
+Look in the content for headers like:
+- "מצרכים למתכון:" or "מצרכים:" or "חומרים:"
+- "למילוי:" or "מילוי:"
+- "לציפוי:" or "ציפוי:"
+- "לבצק:" or "בצק:"
+- Any other section headers before ingredient lists
+
+STEP 2: COPY INGREDIENTS EXACTLY AS WRITTEN
+- If you found section headers → use "ingredientsGroups"
+- COPY the section name EXACTLY (including colons if present)
+- COPY each ingredient line EXACTLY as written
+- Keep EXACT amounts: "1 קילו" stays "1 קילו" (NOT "1 קג", NOT "1000 גרם")
+- Keep EXACT units: "750 גר׳" stays "750 גר׳" (NOT "0.75 קילו")
+- Keep EXACT order as on page
+- Do NOT add words, remove words, or change words
+- If no section headers exist → use flat "ingredients" list
+
+STEP 3: COPY INSTRUCTIONS EXACTLY AS WRITTEN
+- COPY each instruction sentence EXACTLY
+- Do NOT paraphrase, summarize, or rewrite
+- Do NOT change any words
+- Just add numbers (1., 2., 3., ...) at the start of each step
+
+EXAMPLES OF WRONG (DO NOT DO THIS):
+❌ Original: "1 קילו קמח" → You write: "1 קג קמח" (WRONG - changed unit)
+❌ Original: "750 גר׳ בשר טחון" → You write: "400 גרם בשר בקר טחון" (WRONG - changed amount and added words)
+❌ Original: "בצל גדול" → You write: "1 בצל בינוני, קצוץ דק" (WRONG - changed everything)
+
+EXAMPLES OF CORRECT (DO THIS):
+✓ Original: "1 קילו קמח" → You write: "1 קילו קמח" (CORRECT - exact copy)
+✓ Original: "750 גר׳ בשר טחון" → You write: "750 גר׳ בשר טחון" (CORRECT - exact copy)
+✓ Original: "בצל גדול" → You write: "בצל גדול" (CORRECT - exact copy)
+
+FORMAT:
+{{
+  "ingredientsGroups": [
+    {{"category": "EXACT header from page", "ingredients": ["EXACT ingredient 1", "EXACT ingredient 2"]}},
+    {{"category": "EXACT header from page", "ingredients": ["EXACT ingredient 3"]}}
+  ],
+  "ingredients": [],
+  "instructions": ["1. EXACT instruction text", "2. EXACT instruction text"]
+}}
+
+IF YOU CHANGE ANY INGREDIENT AMOUNT, NAME, OR INSTRUCTION WORDING, YOU HAVE FAILED.
+YOUR JOB IS TO COPY, NOT TO WRITE.
 """
     
     try:
@@ -90,6 +169,17 @@ Important guidelines:
         
         # Parse JSON response
         recipe_data = json.loads(response_text)
+        
+        # Process instructions - ensure they are numbered
+        instructions = recipe_data.get("instructions", [])
+        numbered_instructions = []
+        for i, instruction in enumerate(instructions, 1):
+            instruction_str = str(instruction).strip()
+            # Remove existing numbering if present
+            instruction_str = re.sub(r'^\d+[\.\)]\s*', '', instruction_str)
+            # Add numbering
+            numbered_instructions.append(f"{i}. {instruction_str}")
+        recipe_data["instructions"] = numbered_instructions
         
         return recipe_data
         
