@@ -1,62 +1,20 @@
-# Use Python 3.11 slim image
 FROM python:3.11-slim
-
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies required for Playwright
-RUN apt-get update && apt-get install -y \
-    wget \
-    gnupg \
-    ca-certificates \
-    fonts-liberation \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libatspi2.0-0 \
-    libcups2 \
-    libdbus-1-3 \
-    libdrm2 \
-    libgbm1 \
-    libgtk-3-0 \
-    libnspr4 \
-    libnss3 \
-    libwayland-client0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxkbcommon0 \
-    libxrandr2 \
-    xdg-utils \
-    libu2f-udev \
-    libvulkan1 \
-    tesseract-ocr \
-    tesseract-ocr-heb \
-    tesseract-ocr-eng \
-    && rm -rf /var/lib/apt/lists/*
+# Tools and OCR languages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl gnupg ca-certificates tesseract-ocr tesseract-ocr-heb tesseract-ocr-eng \
+  && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements file
+# Python deps
 COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt \
+ && pip install --no-cache-dir playwright==1.47.1
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# ✅ Install Chromium AND all required system libraries via Playwright
+RUN playwright install --with-deps chromium
 
-# Install Playwright browsers
-RUN playwright install chromium
-RUN playwright install-deps chromium
-
-# Copy application code
 COPY . .
-
-# Set environment variables
-# Note: PORT is set automatically by Cloud Run, don't override it
 ENV PYTHONUNBUFFERED=1
-
-# Expose the port
 EXPOSE 8080
-
-# Run the application using uvicorn directly (ASGI server for FastAPI)
-# Use ENTRYPOINT to ensure this cannot be overridden
-# PORT is read from environment variable (set by Cloud Run)
-ENTRYPOINT ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]
-
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]
