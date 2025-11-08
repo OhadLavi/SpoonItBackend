@@ -1,5 +1,6 @@
 # ✅ Use Playwright's official Python base image (includes Chromium + deps)
-FROM mcr.microsoft.com/playwright/python:v1.47.1-jammy
+# Note: Playwright Docker images use 3-segment versions (v1.47.0), not 4-segment (v1.47.1)
+FROM mcr.microsoft.com/playwright/python:v1.47.0-jammy
 
 # Workdir
 WORKDIR /app
@@ -15,7 +16,8 @@ COPY requirements.txt ./
 # IMPORTANT:
 # - Do NOT list `playwright` in requirements.txt when using this base image.
 #   (The image already has a matching Playwright version + browsers.)
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # App code
 COPY . .

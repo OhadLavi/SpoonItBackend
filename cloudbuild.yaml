@@ -1,7 +1,13 @@
 steps:
   # Build the container image
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', '${_SERVICE_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_SERVICE_NAME}:${SHORT_SHA}', '.']
+    args: 
+      - 'build'
+      - '-f'
+      - 'Dockerfile'
+      - '-t'
+      - '${_SERVICE_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REGISTRY_REPO}/${_SERVICE_NAME}:${SHORT_SHA}'
+      - '.'
   
   # Push the container image
   - name: 'gcr.io/cloud-builders/docker'
