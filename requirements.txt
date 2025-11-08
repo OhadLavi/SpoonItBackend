@@ -5,7 +5,9 @@ beautifulsoup4==4.12.3
 python-dotenv==1.0.1
 pydantic>=2.9.0,<3.0.0
 pillow>=10.0.0,<12.0.0
-playwright>=1.40.0
+# Pin Playwright to the SAME version as your base image (example below).
+# If you use mcr.microsoft.com/playwright/python:v1.47.1-*, pin 1.47.1 here:
+playwright==1.47.1
 pytesseract==0.3.13
 python-multipart==0.0.20
-google-generativeai>=0.3.0 
+google-generativeai>=0.3.0
