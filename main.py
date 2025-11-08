@@ -74,10 +74,15 @@ class CustomRecipeRequest(BaseModel):
     groceries: str
     description: str
 
+class IngredientGroup(BaseModel):
+    category: str = ""  # e.g., "בצק", "למילוי", "ציפוי", or empty for default
+    ingredients: List[str] = Field(default_factory=list, min_length=0)
+
 class RecipeModel(BaseModel):
     title: str = ""
     description: str = ""
-    ingredients: List[str] = Field(default_factory=list, min_length=0)
+    ingredients: List[str] = Field(default_factory=list, min_length=0)  # For backward compatibility
+    ingredientsGroups: Optional[List[IngredientGroup]] = None  # Categorized ingredients
     instructions: List[str] = Field(default_factory=list, min_length=0)
     prepTime: int = 0
     cookTime: int = 0
@@ -334,6 +339,27 @@ async def chat(request: ChatRequest):
 # -----------------------------------------------------------------------------
 # Core extraction
 # -----------------------------------------------------------------------------
+async def fetch_html_content(url: str) -> str:
+    """Fetch HTML content from URL and extract visible text (no HTML parsing)."""
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, headers={"User-Agent": "Mozilla/5.0"}) as client:
+        r = await client.get(url, follow_redirects=True)
+        r.raise_for_status()
+        html = r.text
+        
+        # Simple text extraction: remove script and style tags using regex (no BeautifulSoup)
+        # Remove script tags and their content
+        html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        # Remove style tags and their content
+        html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        # Remove HTML tags but keep text content
+        text = re.sub(r'<[^>]+>', ' ', html)
+        # Normalize whitespace
+        text = re.sub(r'\s+', ' ', text)
+        # Limit size
+        if len(text.encode('utf-8')) > 50000:
+            text = text[:50000]
+        return text.strip()
+
 @app.post("/extract_recipe")
 async def extract_recipe(req: RecipeExtractionRequest):
     url = req.url.strip()
@@ -345,18 +371,31 @@ async def extract_recipe(req: RecipeExtractionRequest):
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
 
     try:
-        # Use Gemini API directly (same approach as gemini_recipe_extractor.py)
+        # Fetch HTML content and extract text
+        page_text = await fetch_html_content(url)
+        logger.info("[FLOW] fetched page text, length=%d", len(page_text))
+        
+        # Use Gemini API to extract recipe from the text content
         model = genai.GenerativeModel(GEMINI_MODEL)
         
-        # Create the prompt for recipe extraction (same as gemini_recipe_extractor.py)
-        prompt = f"""Extract the recipe information from this URL: {url}
+        # Create the prompt for recipe extraction with improved guidelines
+        prompt = f"""Extract the recipe information from the following webpage content:
 
-Please analyze the webpage at this URL and extract the following recipe information in JSON format:
+URL: {url}
+
+Webpage content:
+{page_text}
+
+Extract the recipe information in JSON format:
 
 {{
     "title": "Recipe title",
     "description": "Recipe description or summary",
     "ingredients": ["ingredient 1", "ingredient 2", ...],
+    "ingredientsGroups": [
+        {{"category": "Category name as written on page", "ingredients": ["ingredient 1", "ingredient 2"]}},
+        {{"category": "Another category name", "ingredients": ["ingredient 3", "ingredient 4"]}}
+    ],
     "instructions": ["step 1", "step 2", ...],
     "prepTime": 0,
     "cookTime": 0,
@@ -367,13 +406,56 @@ Please analyze the webpage at this URL and extract the following recipe informat
     "imageUrl": "URL of recipe image if available"
 }}
 
-Important guidelines:
-- Return ONLY valid JSON, no additional text or markdown formatting
-- prepTime and cookTime should be in minutes (as integers)
-- ingredients should be a list of strings, each containing the full ingredient with quantities
-- instructions should be a list of strings, each representing a step
-- If any information is not available, use empty strings for text fields, empty arrays for lists, and 0 for numbers
-- Extract the actual recipe content from the webpage, not just metadata
+⚠️ CRITICAL - YOUR TASK IS TO COPY, NOT TO CREATE OR MODIFY ⚠️
+
+YOU ARE A COPY MACHINE, NOT A WRITER. DO NOT CHANGE ANYTHING.
+
+STEP 1: FIND INGREDIENTS SECTIONS
+Look in the content for headers like:
+- "מצרכים למתכון:" or "מצרכים:" or "חומרים:"
+- "למילוי:" or "מילוי:"
+- "לציפוי:" or "ציפוי:"
+- "לבצק:" or "בצק:"
+- Any other section headers before ingredient lists
+
+STEP 2: COPY INGREDIENTS EXACTLY AS WRITTEN
+- If you found section headers → use "ingredientsGroups"
+- COPY the section name EXACTLY (including colons if present)
+- COPY each ingredient line EXACTLY as written
+- Keep EXACT amounts: "1 קילו" stays "1 קילו" (NOT "1 קג", NOT "1000 גרם")
+- Keep EXACT units: "750 גר׳" stays "750 גר׳" (NOT "0.75 קילו")
+- Keep EXACT order as on page
+- Do NOT add words, remove words, or change words
+- If no section headers exist → use flat "ingredients" list
+
+STEP 3: COPY INSTRUCTIONS EXACTLY AS WRITTEN
+- COPY each instruction sentence EXACTLY
+- Do NOT paraphrase, summarize, or rewrite
+- Do NOT change any words
+- Just add numbers (1., 2., 3., ...) at the start of each step
+
+EXAMPLES OF WRONG (DO NOT DO THIS):
+❌ Original: "1 קילו קמח" → You write: "1 קג קמח" (WRONG - changed unit)
+❌ Original: "750 גר׳ בשר טחון" → You write: "400 גרם בשר בקר טחון" (WRONG - changed amount and added words)
+❌ Original: "בצל גדול" → You write: "1 בצל בינוני, קצוץ דק" (WRONG - changed everything)
+
+EXAMPLES OF CORRECT (DO THIS):
+✓ Original: "1 קילו קמח" → You write: "1 קילו קמח" (CORRECT - exact copy)
+✓ Original: "750 גר׳ בשר טחון" → You write: "750 גר׳ בשר טחון" (CORRECT - exact copy)
+✓ Original: "בצל גדול" → You write: "בצל גדול" (CORRECT - exact copy)
+
+FORMAT:
+{{
+  "ingredientsGroups": [
+    {{"category": "EXACT header from page", "ingredients": ["EXACT ingredient 1", "EXACT ingredient 2"]}},
+    {{"category": "EXACT header from page", "ingredients": ["EXACT ingredient 3"]}}
+  ],
+  "ingredients": [],
+  "instructions": ["1. EXACT instruction text", "2. EXACT instruction text"]
+}}
+
+IF YOU CHANGE ANY INGREDIENT AMOUNT, NAME, OR INSTRUCTION WORDING, YOU HAVE FAILED.
+YOUR JOB IS TO COPY, NOT TO WRITE.
 """
         
         # Generate content using Gemini
@@ -399,12 +481,39 @@ Important guidelines:
         if not recipe_dict.get("source"):
             recipe_dict["source"] = url
         
+        # Process instructions - ensure they are numbered
+        instructions = recipe_dict.get("instructions", [])
+        numbered_instructions = []
+        for i, instruction in enumerate(instructions, 1):
+            instruction_str = str(instruction).strip()
+            # Remove existing numbering if present
+            instruction_str = re.sub(r'^\d+[\.\)]\s*', '', instruction_str)
+            # Add numbering
+            numbered_instructions.append(f"{i}. {instruction_str}")
+        recipe_dict["instructions"] = numbered_instructions
+        
+        # Process ingredientsGroups if present
+        ingredients_groups = None
+        if "ingredientsGroups" in recipe_dict and recipe_dict["ingredientsGroups"]:
+            try:
+                ingredients_groups = [
+                    IngredientGroup(
+                        category=group.get("category", ""),
+                        ingredients=group.get("ingredients", [])
+                    )
+                    for group in recipe_dict["ingredientsGroups"]
+                ]
+            except Exception as e:
+                logger.warning(f"Failed to parse ingredientsGroups: {e}")
+                ingredients_groups = None
+        
         # Convert to RecipeModel and return
         recipe_model = RecipeModel(
             title=recipe_dict.get("title", ""),
             description=recipe_dict.get("description", ""),
-            ingredients=recipe_dict.get("ingredients", []),
-            instructions=recipe_dict.get("instructions", []),
+            ingredients=recipe_dict.get("ingredients", []),  # Keep for backward compatibility
+            ingredientsGroups=ingredients_groups,
+            instructions=numbered_instructions,
             prepTime=int(recipe_dict.get("prepTime", 0) or 0),
             cookTime=int(recipe_dict.get("cookTime", 0) or 0),
             servings=int(recipe_dict.get("servings", 1) or 1),
@@ -593,4 +702,7 @@ async def proxy_image(url: str):
 # Entrypoint
 # =============================================================================
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+    # Use PORT environment variable for cloud deployments (Google Cloud Run, etc.)
+    # Falls back to 8001 for local development
+    port = int(os.getenv("PORT", 8001))
+    uvicorn.run(app, host="0.0.0.0", port=port)
