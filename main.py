@@ -1036,6 +1036,26 @@ def _extract_all_text_parts_from_candidate(candidate: dict) -> str:
     if not candidate:
         return content_text
     content_obj = candidate.get("content")
+    def collect(parts):
+        nonlocal content_text
+        if isinstance(parts, list):
+            for part in parts:
+                if isinstance(part, dict):
+                    if isinstance(part.get("text"), str):
+                        content_text += part["text"]
+                    elif isinstance(part.get("inline_data"), dict):
+                        try:
+                            content_text += json.dumps(part["inline_data"])  # last resort
+                        except Exception:
+                            pass
+    if isinstance(content_obj, dict):
+        collect(content_obj.get("parts"))
+    elif isinstance(content_obj, list):
+        for item in content_obj:
+            if isinstance(item, dict):
+                collect(item.get("parts"))
+    return content_text
+    content_obj = candidate.get("content")
     if isinstance(content_obj, dict):
         parts = content_obj.get("parts")
         if isinstance(parts, list):
@@ -1065,109 +1085,79 @@ async def call_gemini_llm(prompt: str, system_prompt: str = None) -> str:
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
 
-    user_prompt = prompt + "\n\nIMPORTANT: Return ONLY valid JSON, no markdown, no code blocks, just the raw JSON object."
-    if system_prompt:
-        combined_prompt = f"{system_prompt}\n\n{user_prompt}"
-    else:
-        combined_prompt = user_prompt
+    base_instruction = "IMPORTANT: Return ONLY valid JSON, no markdown, no code blocks, just the raw JSON object."
+    user_prompt = f"{prompt}
 
-    configs = [
-        {"version": "v1beta", "use_response_mime_type": True},
-        {"version": "v1beta", "use_response_mime_type": False},
-    ]
+{base_instruction}"
+    combined_prompt = f"{system_prompt}
 
-    last_error: Optional[Exception] = None
+{user_prompt}" if system_prompt else user_prompt
 
-    for config in configs:
-        api_version = config["version"]
-        try:
-            url = f"https://generativelanguage.googleapis.com/{api_version}/models/{GEMINI_MODEL}:generateContent"
-            generation_config: Dict[str, Any] = {
-                "temperature": 0,
-                "maxOutputTokens": 3000,  # allow longer JSON
+    def build_payload(text: str, json_schema: bool) -> dict:
+        generation_config: Dict[str, Any] = {"temperature": 0, "maxOutputTokens": 2000}
+        if json_schema:
+            generation_config["responseMimeType"] = "application/json"
+            generation_config["responseJsonSchema"] = {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "ingredients": {"type": "array", "items": {"type": "string"}},
+                    "instructions": {"type": "array", "items": {"type": "string"}},
+                    "description": {"type": "string"},
+                    "prepTime": {"type": "integer"},
+                    "cookTime": {"type": "integer"},
+                    "servings": {"type": "integer"},
+                    "tags": {"type": "array", "items": {"type": "string"}},
+                    "imageUrl": {"type": "string"},
+                    "source": {"type": "string"},
+                },
+                "required": ["title", "ingredients", "instructions"],
             }
-            if config["use_response_mime_type"] and api_version == "v1beta":
-                generation_config["responseMimeType"] = "application/json"
-                generation_config["responseJsonSchema"] = {
-                    "type": "object",
-                    "properties": {
-                        "title": {"type": "string"},
-                        "description": {"type": "string"},
-                        "ingredients": {"type": "array", "items": {"type": "string"}},
-                        "instructions": {"type": "array", "items": {"type": "string"}},
-                        "prepTime": {"type": "integer"},
-                        "cookTime": {"type": "integer"},
-                        "servings": {"type": "integer"},
-                        "tags": {"type": "array", "items": {"type": "string"}},
-                        "imageUrl": {"type": "string"},
-                        "source": {"type": "string"},
-                    },
-                    "required": ["title", "ingredients", "instructions"],
-                }
-            payload = {
-                "contents": [{"parts": [{"text": combined_prompt}]}],
-                "generationConfig": generation_config,
-            }
-            headers = {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
-            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-                r = await client.post(url, json=payload, headers=headers)
-                r.raise_for_status()
-                data = r.json()
-            if "candidates" in data and data["candidates"]:
-                candidate = data["candidates"][0]
-                finish_reason = candidate.get("finishReason")
-                content_text = _extract_all_text_parts_from_candidate(candidate)
-                if content_text:
-                    logger.info(f"[GEMINI] Success with {api_version} API (responseMimeType={config['use_response_mime_type']})")
-                    return content_text
-                # If MAX_TOKENS and no text captured, attempt to stringify candidate for partial JSON
-                if finish_reason == "MAX_TOKENS":
-                    logger.warning("[GEMINI] Output truncated at MAX_TOKENS; attempting to use partial candidate")
-                    try:
-                        return json.dumps(candidate)
-                    except Exception:
-                        pass
-                # Unexpected structure
-                logger.warning(f"[GEMINI] Unexpected response structure: {candidate}")
-                raise ValueError(f"Could not extract text from response structure: {candidate}")
-            else:
-                if "promptFeedback" in data and "blockReason" in data["promptFeedback"]:
-                    raise ValueError(f"Prompt blocked: {data['promptFeedback']['blockReason']}")
-                raise ValueError(f"No candidates in Gemini response: {data}")
-        except httpx.HTTPStatusError as e:
-            try:
-                error_data = e.response.json()
-                error_msg = error_data.get("error", {}).get("message", str(e))
-            except Exception:
-                error_msg = str(e)
-            if e.response.status_code == 400 and ("responseMimeType" in error_msg or "systemInstruction" in error_msg):
-                logger.warning(f"[GEMINI] Config issue with {api_version}: {error_msg}, trying next...")
-                last_error = e
-                continue
-            elif e.response.status_code == 404:
-                logger.warning(f"[GEMINI] Model not found in {api_version}, trying next config...")
-                last_error = e
-                continue
-            else:
-                logger.warning(f"[GEMINI] HTTP error with {api_version}: {error_msg}, trying next...")
-                last_error = e
-                continue
-        except Exception as e:
-            logger.warning(f"[GEMINI] Exception with {api_version}: {e}, trying next config...")
-            last_error = e
-            continue
+        return {
+            "contents": [{"parts": [{"text": text}]}],
+            "generationConfig": generation_config,
+        }
 
-    if last_error:
-        error_detail = str(last_error)
-        if hasattr(last_error, "response") and getattr(last_error, "response") is not None:
-            try:
-                error_data = last_error.response.json()
-                error_detail = error_data.get("error", {}).get("message", error_detail)
-            except Exception:
-                pass
-        raise HTTPException(status_code=500, detail=f"Gemini request failed after trying all configurations: {error_detail}")
-    else:
-        raise HTTPException(status_code=500, detail="Gemini request failed: Unknown error")
+    async def try_once(use_schema: bool, text: str) -> Optional[str]:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+        payload = build_payload(text, use_schema)
+        headers = {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            r = await client.post(url, json=payload, headers=headers)
+            r.raise_for_status()
+            data = r.json()
+        if "candidates" in data and data["candidates"]:
+            candidate = data["candidates"][0]
+            content_text = _extract_all_text_parts_from_candidate(candidate)
+            finish_reason = candidate.get("finishReason")
+            if content_text:
+                return content_text
+            if finish_reason == "MAX_TOKENS":
+                return None  # signal to retry with smaller prompt
+        return None
+
+    # First try: schema on, full combined prompt
+    out = await try_once(True, combined_prompt)
+    if out:
+        return out
+    # Second try: schema off (sometimes helps)
+    out = await try_once(False, combined_prompt)
+    if out:
+        return out
+    # Third try: shrink prompt to essential fields only (title/ings/steps)
+    minimal_user = re.sub(r"(?s)description.*?tags, imageUrl, source\.", "", prompt)
+    minimal_prompt = (
+        "Return ONLY JSON with keys: title, ingredients, instructions. "
+        "Do not include any other keys. Ingredients/instructions must be arrays. "
+        "No markdown/code fences.
+
+" + minimal_user
+    )
+    out = await try_once(True, minimal_prompt)
+    if out:
+        return out
+
+    raise HTTPException(status_code=500, detail="Gemini request failed after retries")
 
 
 async def call_ollama_llm(prompt: str) -> str:
@@ -1285,23 +1275,82 @@ def _build_filtered_section_for_llm(soup: BeautifulSoup) -> str:
 
 def _extract_generic_from_html(html: str) -> Optional[RecipeModel]:
     soup = BeautifulSoup(html, "html.parser")
-    title = ""
-    h1 = soup.find(["h1", "h2"])
-    if h1:
-        title = clean_html(h1.get_text())
+
+    def _clean_title(raw_title: str, url: str) -> str:
+        t = clean_html(raw_title)
+        if not t:
+            return ""
+        # Prefer left-most before separators
+        for sep in [" - ", " | ", " — ", " – "]:
+            if sep in t:
+                t = t.split(sep)[0].strip()
+                break
+        # Remove site/brand tokens
+        host = ""
+        try:
+            host = re.sub(r"^www\.", "", re.sub(r"https?://", "", url)).split("/")[0]
+        except Exception:
+            pass
+        site_name = ""
+        og_site = soup.find("meta", attrs={"property": "og:site_name"})
+        if og_site and og_site.get("content"):
+            site_name = clean_html(og_site["content"])
+        for token in filter(None, [host, site_name]):
+            token_plain = token.split(".")[0]
+            t = re.sub(rf"{re.escape(token_plain)}", "", t, flags=re.IGNORECASE).strip()
+        return t.strip(" -|—–\u00a0")
+
+    # title preference: og:title > h1/h2 > <title>
+    title_tag = soup.find("meta", attrs={"property": "og:title"})
+    title = clean_html(title_tag["content"]) if title_tag and title_tag.get("content") else ""
+    if not title:
+        h1 = soup.find(["h1", "h2"]) 
+        if h1:
+            title = clean_html(h1.get_text())
     if not title:
         t = soup.find("title")
         title = clean_html(t.get_text()) if t else ""
+    title = _clean_title(title, html)
+
     description = ""
     md = soup.find("meta", attrs={"property": "og:description"}) or soup.find("meta", attrs={"name": "description"})
     if md and md.get("content"):
         description = clean_html(md["content"]) 
+
     image_url = _extract_recipe_image_from_soup(soup)
+
+    def _extract_by_classes(root: BeautifulSoup, classes: List[str]) -> List[str]:
+        results: List[str] = []
+        for cls in classes:
+            for node in root.select(f".{cls} li, .{cls} p"):
+                txt = clean_html(node.get_text())
+                if txt:
+                    results.append(txt)
+        return results
+
     ing_candidates = _extract_ingredient_candidates(soup)
+    # Extend with common WP recipe plugins classes (he/en)
+    ing_candidates += _extract_by_classes(
+        soup,
+        [
+            "ingredients", "wprm-recipe-ingredients", "tasty-recipes-ingredients", "trx-ingredients",
+            "מצרכים", "מרכיבים",
+        ],
+    )
     ingredients = _filter_to_measured_ingredients(ing_candidates)
+
     step_candidates = _extract_instruction_candidates(soup)
+    step_candidates += _extract_by_classes(
+        soup,
+        [
+            "instructions", "wprm-recipe-instructions", "tasty-recipes-instructions", "trx-instructions",
+            "אופן-ההכנה", "אופן_ההכנה", "הוראות- הכנה", "הוראות-הכנה",
+        ],
+    )
     instructions = _normalize_instruction_lines(step_candidates)
+
     prep, cook = parse_times_from_soup(soup)
+
     if (title and (len(ingredients) >= 2 or len(instructions) >= 2)) or (len(ingredients) >= 3 and len(instructions) >= 2):
         logger.info("[GENERIC] success | ings=%d steps=%d", len(ingredients), len(instructions))
         return RecipeModel(
