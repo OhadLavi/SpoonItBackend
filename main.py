@@ -195,7 +195,7 @@ def _normalize_quotes(text: str) -> str:
     return (
         text.replace("\u201c", '"').replace("\u201d", '"')
         .replace("\u2018", "'").replace("\u2019", "'")
-        .replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
+        .replace(""", '"').replace(""", '"').replace("'", "'").replace("'", "'")
     )
 
 def _remove_trailing_commas(s: str) -> str:
@@ -371,6 +371,15 @@ async def _playwright_fetch(url: str) -> str:
 
             await page.goto(url, wait_until="domcontentloaded", timeout=PLAYWRIGHT_TIMEOUT_MS)
 
+            # Check if page shows 403 or error
+            page_url = page.url
+            if "403" in page_url or "forbidden" in page_url.lower():
+                raise APIError(
+                    "Remote site is blocking server fetch (403). Ask client to supply html_content.",
+                    status_code=403,
+                    details={"code": "FETCH_FORBIDDEN", "url": url},
+                )
+
             # Try to accept cookie banners if obvious
             try:
                 # common Hebrew cookie buttons text
@@ -450,6 +459,9 @@ async def fetch_html_content(url: str) -> str:
                         details={"code": "FETCH_FORBIDDEN", "url": url},
                     )
                 return text
+            except APIError:
+                # Re-raise APIError directly without wrapping
+                raise
             except Exception as e2:
                 logger.warning("[FETCH] playwright fallback failed: %s", e2, exc_info=True)
                 raise APIError(
@@ -463,6 +475,7 @@ async def fetch_html_content(url: str) -> str:
             details={"code": "FETCH_FAILED", "url": url},
         )
     except APIError:
+        # Re-raise APIError directly
         raise
     except Exception as e:
         logger.error("[FETCH] unexpected error: %s", e, exc_info=True)
@@ -884,3 +897,4 @@ async def proxy_image(url: str):
 # =============================================================================
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8002")))
+
