@@ -1,4 +1,14 @@
-# main.py
+# -*- coding: utf-8 -*-
+"""
+SpoonIt API — site-agnostic, LLM-first, Cloud Run friendly
+
+Key changes vs your last file:
+- /extract_recipe NEVER returns HTTP 403; returns 200 with a JSON error payload
+  so the app can client-fetch and resend html_content when sites block server IPs.
+- Playwright is lazy-imported; uses wait_until="networkidle" + scroll + main/article/body innerText.
+- Gemini uses Structured Outputs (JSON) with a response schema (Google GenAI SDK).
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -9,19 +19,17 @@ import logging
 import os
 import random
 import re
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 import httpx
 import uvicorn
 import google.generativeai as genai
-from bs4 import BeautifulSoup  # used only in /proxy_image fallback
+from bs4 import BeautifulSoup  # used in /proxy_image fallback
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from PIL import Image, ImageOps, ImageFilter
 from pydantic import BaseModel, Field
-from playwright.async_api import async_playwright
-import pytesseract
 
 # =============================================================================
 # Logging
@@ -38,11 +46,13 @@ logger = logging.getLogger("recipe-keeper")
 # =============================================================================
 OLLAMA_API_URL = "http://127.0.0.1:11434/api/generate"
 MODEL_NAME = "gemma3:4b"
+
 HTTP_TIMEOUT = 30.0
-PLAYWRIGHT_TIMEOUT_MS = 35000
+PLAYWRIGHT_TIMEOUT_MS = 45000
 FETCH_MAX_BYTES = 2_500_000
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")  # any Gemini model supporting structured outputs
 
 # Configure Gemini API
 if GEMINI_API_KEY:
@@ -106,7 +116,7 @@ class ChatRequest(BaseModel):
 
 class RecipeExtractionRequest(BaseModel):
     url: str
-    html_content: Optional[str] = None
+    html_content: Optional[str] = None  # when server is blocked, client sends page HTML here
 
 class ImageExtractionRequest(BaseModel):
     image_data: str  # base64 (with or without data URI prefix)
@@ -195,7 +205,6 @@ def _normalize_quotes(text: str) -> str:
     return (
         text.replace("\u201c", '"').replace("\u201d", '"')
         .replace("\u2018", "'").replace("\u2019", "'")
-        .replace(""", '"').replace(""", '"').replace("'", "'").replace("'", "'")
     )
 
 def _remove_trailing_commas(s: str) -> str:
@@ -294,28 +303,13 @@ def extract_text_from_image(image_bytes: bytes) -> str:
         img = img.filter(ImageFilter.SHARPEN)
         img = img.point(lambda x: 0 if x < 160 else 255, mode="1")
         config = "--psm 6"
+        import pytesseract  # lazy import is fine
         text = pytesseract.image_to_string(img, lang="eng+heb", config=config)
         logger.debug("[OCR] extracted %d chars", len(text))
         return text
     except Exception as e:
         logger.error("[OCR] failure: %s", e, exc_info=True)
         raise APIError(f"OCR processing failed: {str(e)}")
-
-# =============================================================================
-# Prompts
-# =============================================================================
-def create_recipe_extraction_prompt(section_text: str) -> str:
-    return (
-        "את/ה מומחה/ית לחילוץ מתכונים. החזר/י אך ורק אובייקט JSON תקין יחיד (ללא טקסט נוסף), "
-        "בדיוק עם המפתחות: title, description, ingredients, instructions, prepTime, cookTime, servings, tags, imageUrl, source.\n"
-        "כללים: 1) החזר JSON בלבד; 2) numbers כמספרים (לא מחרוזות); 3) ללא פסיקים מיותרים; 4) ללא המצאות;\n"
-        "- ingredients ו-instructions הן מערכים של מחרוזות נקיות (ללא מספור/תבליטים).\n"
-        "- prepTime/cookTime בדקות שלמות (int).\n"
-        "- servings מספר שלם.\n\n"
-        "טקסט המתכון (האזור הרלוונטי):\n"
-        f"{section_text}\n"
-        "סיום."
-    )
 
 # =============================================================================
 # HTTP Fetchers (orchestrated)
@@ -338,8 +332,11 @@ async def _httpx_fetch(url: str) -> str:
         return text.strip()
 
 async def _playwright_fetch(url: str) -> str:
-    if os.getenv("DISABLE_PLAYWRIGHT_FETCH", "").lower() in ("1", "true", "yes"):
-        raise RuntimeError("Playwright fetch disabled by env")
+    # Lazy import so container boots even if playwright is not installed.
+    try:
+        from playwright.async_api import async_playwright
+    except Exception as e:
+        raise RuntimeError(f"Playwright is not available: {e}")
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -361,7 +358,7 @@ async def _playwright_fetch(url: str) -> str:
             )
             page = await context.new_page()
 
-            # Light stealth: reduce obvious automation fingerprints
+            # small stealth
             await page.add_init_script("""
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
                 window.chrome = { runtime: {} };
@@ -369,20 +366,11 @@ async def _playwright_fetch(url: str) -> str:
                 Object.defineProperty(navigator, 'languages', { get: () => ['he-IL', 'he', 'en-US', 'en'] });
             """)
 
-            await page.goto(url, wait_until="domcontentloaded", timeout=PLAYWRIGHT_TIMEOUT_MS)
+            # IMPORTANT: wait_until="networkidle" to let lazy content settle
+            await page.goto(url, wait_until="networkidle", timeout=PLAYWRIGHT_TIMEOUT_MS)  # docs show valid values inc. 'networkidle' :contentReference[oaicite:3]{index=3}
 
-            # Check if page shows 403 or error
-            page_url = page.url
-            if "403" in page_url or "forbidden" in page_url.lower():
-                raise APIError(
-                    "Remote site is blocking server fetch (403). Ask client to supply html_content.",
-                    status_code=403,
-                    details={"code": "FETCH_FORBIDDEN", "url": url},
-                )
-
-            # Try to accept cookie banners if obvious
+            # Try to accept obvious cookie banners
             try:
-                # common Hebrew cookie buttons text
                 sel = "button:has-text('מסכים'), button:has-text('מאשר'), button:has-text('Accept'), button:has-text('I agree')"
                 btn = await page.query_selector(sel)
                 if btn:
@@ -396,7 +384,7 @@ async def _playwright_fetch(url: str) -> str:
                 await page.mouse.wheel(0, 1200)
                 await page.wait_for_timeout(400)
 
-            # Prefer main/article/recipe-region text
+            # Prefer visible, user-facing text for LLM
             content_text = ""
             for sel in ["main", "article", "[role='main']", ".entry-content", ".post-content", ".recipe", "body"]:
                 try:
@@ -432,7 +420,12 @@ async def _playwright_fetch(url: str) -> str:
         finally:
             await browser.close()
 
-async def fetch_html_content(url: str) -> str:
+async def fetch_html_content(url: str) -> Tuple[Optional[str], Optional[dict]]:
+    """
+    Returns (page_text, error_payload_if_blocked_or_failed)
+    - If blocked (403/anti-bot), we return (None, {...standard JSON error...})
+    - Caller then returns HTTP 200 with that JSON, so the app can fallback to client-side fetch.
+    """
     try:
         text = await _httpx_fetch(url)
         if _looks_blocked(text):
@@ -440,12 +433,13 @@ async def fetch_html_content(url: str) -> str:
             text = await _playwright_fetch(url)
         # Final check post-Playwright
         if _looks_blocked(text):
-            raise APIError(
-                "Remote site is blocking server fetch (403). Ask client to supply html_content.",
-                status_code=403,
-                details={"code": "FETCH_FORBIDDEN", "url": url},
-            )
-        return text
+            return None, {
+                "error": "FETCH_FORBIDDEN",
+                "html_required": True,
+                "message": "The website is blocking Cloud Run. Please fetch the page on the client and resend as html_content.",
+                "url": url,
+            }
+        return text, None
     except httpx.HTTPStatusError as e:
         status = e.response.status_code
         logger.warning("[FETCH] httpx status=%s for %s", status, url)
@@ -453,41 +447,34 @@ async def fetch_html_content(url: str) -> str:
             try:
                 text = await _playwright_fetch(url)
                 if _looks_blocked(text):
-                    raise APIError(
-                        "Remote site is blocking server fetch (403). Ask client to supply html_content.",
-                        status_code=403,
-                        details={"code": "FETCH_FORBIDDEN", "url": url},
-                    )
-                return text
-            except APIError:
-                # Re-raise APIError directly without wrapping
-                raise
+                    return None, {
+                        "error": "FETCH_FORBIDDEN",
+                        "html_required": True,
+                        "message": "The website is blocking Cloud Run. Please fetch the page on the client and resend as html_content.",
+                        "url": url,
+                    }
+                return text, None
             except Exception as e2:
                 logger.warning("[FETCH] playwright fallback failed: %s", e2, exc_info=True)
-                raise APIError(
-                    "Remote site is blocking server fetch (403). Ask client to supply html_content.",
-                    status_code=403,
-                    details={"code": "FETCH_FORBIDDEN", "url": url},
-                )
-        raise APIError(
-            f"Fetch failed with status {status}.",
-            status_code=status,
-            details={"code": "FETCH_FAILED", "url": url},
-        )
-    except APIError:
-        # Re-raise APIError directly
-        raise
+                return None, {
+                    "error": "FETCH_FORBIDDEN",
+                    "html_required": True,
+                    "message": "The website is blocking Cloud Run. Please fetch the page on the client and resend as html_content.",
+                    "url": url,
+                }
+        # Other HTTP errors: still return 200 with a JSON error body
+        return None, {"error": "FETCH_FAILED", "status": status, "url": url}
     except Exception as e:
         logger.error("[FETCH] unexpected error: %s", e, exc_info=True)
-        raise APIError("Unexpected fetch error", details={"url": url})
+        return None, {"error": "FETCH_UNEXPECTED", "message": str(e), "url": url}
 
 # =============================================================================
 # FastAPI app
 # =============================================================================
 app = FastAPI(
     title="SpoonIt API",
-    version="1.3.1",
-    description="Generic recipe extraction via schema.org, DOM heuristics (Hebrew/English), and LLM fallback.",
+    version="1.4.0",
+    description="Generic recipe extraction via LLM Structured Outputs + Playwright fallback (Heb/Eng).",
 )
 
 app.add_middleware(
@@ -512,9 +499,9 @@ async def root():
 async def health():
     return {"status": "ok"}
 
-# -----------------------------------------------------------------------------
-# Chat (Ollama)
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Chat (Ollama) — unchanged
+# ---------------------------------------------------------------------------
 @app.post("/chat")
 async def chat(request: ChatRequest):
     sys_prompt = (
@@ -534,163 +521,134 @@ async def chat(request: ChatRequest):
         logger.error("[CHAT] error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Ollama request failed")
 
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Gemini Structured Outputs — helpers
+# ---------------------------------------------------------------------------
+def _gemini_model():
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
+    # Use Structured Outputs (JSON) with schema
+    # Docs: set response_mime_type + response_json_schema/response_schema. :contentReference[oaicite:4]{index=4}
+    return genai.GenerativeModel(GEMINI_MODEL)
+
+def _gemini_generation_config():
+    # Google GenAI SDK supports response_mime_type/response_schema via GenerationConfig. :contentReference[oaicite:5]{index=5}
+    return genai.GenerationConfig(
+        response_mime_type="application/json",
+        response_schema={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "minLength": 3},
+                "description": {"type": "string"},
+                "ingredients": {"type": "array", "minItems": 4, "items": {"type": "string", "minLength": 2}},
+                "ingredientsGroups": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "category": {"type": "string"},
+                            "ingredients": {"type": "array", "items": {"type": "string"}}
+                        },
+                        "required": ["category", "ingredients"]
+                    }
+                },
+                "instructions": {"type": "array", "minItems": 4, "items": {"type": "string", "minLength": 4}},
+                "prepTime": {"type": "integer"},
+                "cookTime": {"type": "integer"},
+                "servings": {"type": "integer"},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "notes": {"type": "string"},
+                "source": {"type": "string"},
+                "imageUrl": {"type": "string"},
+            },
+            "required": ["title", "ingredients", "instructions"]
+        },
+        temperature=0,
+        max_output_tokens=1800,
+    )
+
+def _gemini_prompt(url: str, page_text: str) -> str:
+    return f"""
+Extract the recipe information from the following webpage content.
+
+URL: {url}
+
+Rules:
+- COPY facts from the page; do NOT invent or paraphrase.
+- Keep headers for ingredients groups EXACT as written (e.g., "למילוי:", "לבצק:", etc.).
+- Steps should be sequential and concise; preserve the page’s wording as much as possible.
+- If no recipe exists, return JSON with only: {{"title":"", "ingredients":[], "instructions":[]}}.
+
+PAGE TEXT:
+{page_text}
+"""
+
+# ---------------------------------------------------------------------------
 # Core extraction
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 @app.post("/extract_recipe")
 async def extract_recipe(req: RecipeExtractionRequest):
     url = req.url.strip()
     logger.info("[FLOW] extract_recipe START | url=%s", url)
     if not url.startswith("http"):
-        raise HTTPException(status_code=400, detail="Invalid URL")
+        # 200 with error payload (never 4xx) to avoid breaking mobile client flows
+        return {"error": "INVALID_URL", "message": "URL must start with http(s)://"}
 
-    if not GEMINI_API_KEY:
-        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
+    page_text: Optional[str] = None
+    if req.html_content:
+        logger.info("[FLOW] using HTML content provided by client, length=%d", len(req.html_content))
+        html = req.html_content
+        html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        page_text = re.sub(r'<[^>]+>', ' ', html)
+        page_text = re.sub(r'\s+', ' ', page_text).strip()
+        if len(page_text.encode('utf-8')) > 50_000:
+            page_text = page_text[:50_000]
+    else:
+        # Server-side fetch first; if blocked, return JSON error (HTTP 200) so the client
+        # can fetch the page and re-post html_content.
+        fetched, fetch_err = await fetch_html_content(url)
+        if fetch_err:
+            return fetch_err  # 200 with error JSON (html_required=true)
+        page_text = fetched or ""
 
+    if not page_text or len(page_text) < 80:
+        return {"error": "TOO_LITTLE_TEXT", "message": "Page has too little visible text to extract."}
+
+    # Gemini Structured Outputs
     try:
-        if req.html_content:
-            logger.info("[FLOW] using HTML content provided by client, length=%d", len(req.html_content))
-            html = req.html_content
-            html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
-            html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
-            page_text = re.sub(r'<[^>]+>', ' ', html)
-            page_text = re.sub(r'\s+', ' ', page_text).strip()
-            if len(page_text.encode('utf-8')) > 50_000:
-                page_text = page_text[:50_000]
-        else:
-            try:
-                page_text = await fetch_html_content(url)
-                logger.info("[FLOW] fetched page text, length=%d", len(page_text))
-            except APIError as e:
-                if e.status_code == 403 and e.details.get("code") == "FETCH_FORBIDDEN":
-                    raise HTTPException(
-                        status_code=403,
-                        detail={
-                            "code": "FETCH_FORBIDDEN",
-                            "message": (
-                                "The website is blocking Cloud Run. "
-                                "Please fetch the page on the client and resend as html_content."
-                            ),
-                            "url": url,
-                        },
-                    )
-                raise HTTPException(status_code=e.status_code, detail=e.message)
+        model = _gemini_model()
+        cfg = _gemini_generation_config()
+        prompt = _gemini_prompt(url, page_text)
 
-        # Use Gemini API
-        model = genai.GenerativeModel(GEMINI_MODEL)
+        # NOTE: With Structured Outputs, the model returns strictly JSON. :contentReference[oaicite:6]{index=6}
+        result = model.generate_content(prompt, generation_config=cfg)
+        text = (result.text or "").strip()
 
-        prompt = f"""Extract the recipe information from the following webpage content:
-
-URL: {url}
-
-Webpage content:
-{page_text}
-
-Extract the recipe information in JSON format:
-
-{{
-    "title": "Recipe title",
-    "description": "Recipe description or summary",
-    "ingredients": ["ingredient 1", "ingredient 2", ...],
-    "ingredientsGroups": [
-        {{"category": "Category name as written on page", "ingredients": ["ingredient 1", "ingredient 2"]}},
-        {{"category": "Another category name", "ingredients": ["ingredient 3", "ingredient 4"]}}
-    ],
-    "instructions": ["step 1", "step 2", ...],
-    "prepTime": 0,
-    "cookTime": 0,
-    "servings": 1,
-    "tags": ["tag1", "tag2", ...],
-    "notes": "Any additional notes",
-    "source": "{url}",
-    "imageUrl": "URL of recipe image if available"
-}}
-
-⚠️ CRITICAL - YOUR TASK IS TO COPY, NOT TO CREATE OR MODIFY ⚠️
-
-YOU ARE A COPY MACHINE, NOT A WRITER. DO NOT CHANGE ANYTHING.
-
-STEP 1: FIND INGREDIENTS SECTIONS
-Look in the content for headers like:
-- "מצרכים למתכון:" or "מצרכים:" or "חומרים:"
-- "למילוי:" or "מילוי:"
-- "לציפוי:" or "ציפוי:"
-- "לבצק:" or "בצק:"
-- Any other section headers before ingredient lists
-
-STEP 2: COPY INGREDIENTS EXACTLY AS WRITTEN
-- If you found section headers → use "ingredientsGroups"
-- COPY the section name EXACTLY (including colons if present)
-- COPY each ingredient line EXACTLY as written
-- Keep EXACT amounts and units
-- Keep EXACT order as on page
-- If no section headers exist → use flat "ingredients" list
-
-STEP 3: COPY INSTRUCTIONS EXACTLY AS WRITTEN
-- COPY each instruction sentence EXACTLY
-- Do NOT paraphrase, summarize, or rewrite
-- Just add numbers (1., 2., 3., ...) at the start of each step
-
-FORMAT:
-{{
-  "ingredientsGroups": [
-    {{"category": "EXACT header from page", "ingredients": ["EXACT ingredient 1", "EXACT ingredient 2"]}},
-    {{"category": "EXACT header from page", "ingredients": ["EXACT ingredient 3"]}}
-  ],
-  "ingredients": [],
-  "instructions": ["1. EXACT instruction text", "2. EXACT instruction text"]
-}}
-"""
-        response = model.generate_content(prompt)
-        response_text = (response.text or "").strip()
-
-        # If empty / suspicious, raise a clearer error with context
-        if not response_text:
+        if not text:
             logger.error("[LLM] empty response. First 160 page_text chars: %r", page_text[:160])
-            raise HTTPException(
-                status_code=502,
-                detail={"code": "LLM_EMPTY", "message": "Model returned empty response"}
-            )
+            return {"error": "LLM_EMPTY", "message": "Model returned empty response"}
 
-        # Strip code fences
-        if response_text.startswith("```"):
-            lines = response_text.split("\n")
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-            response_text = "\n".join(lines).strip()
-
-        # Parse JSON with repair fallback
+        # Parse JSON; repair if necessary (should be rare with structured outputs)
         try:
-            recipe_dict = json.loads(response_text)
+            recipe_dict = json.loads(text)
         except Exception:
-            try:
-                recipe_dict = await extract_and_parse_llm_json(response_text)
-            except Exception as e:
-                logger.error("[FLOW] JSON parse error (after repair). Raw head: %r", response_text[:220])
-                raise HTTPException(
-                    status_code=500,
-                    detail={
-                        "code": "LLM_JSON_PARSE",
-                        "message": f"Failed to parse JSON response from Gemini: {str(e)}",
-                        "raw_head": response_text[:500],
-                    },
-                )
+            recipe_dict = await extract_and_parse_llm_json(text)
 
+        # Force source
         if not recipe_dict.get("source"):
             recipe_dict["source"] = url
 
-        # Number instructions
+        # Number instructions (keep content, just add numbers if missing)
         instructions = recipe_dict.get("instructions", [])
-        numbered_instructions = []
+        numbered = []
         for i, instruction in enumerate(instructions, 1):
-            instruction_str = str(instruction).strip()
-            instruction_str = re.sub(r'^\d+[\.\)]\s*', '', instruction_str)
-            numbered_instructions.append(f"{i}. {instruction_str}")
-        recipe_dict["instructions"] = numbered_instructions
+            s = str(instruction).strip()
+            s = re.sub(r'^\d+[\.\)]\s*', '', s)
+            numbered.append(f"{i}. {s}")
+        recipe_dict["instructions"] = numbered
 
-        # ingredientsGroups (optional)
+        # Optional groups normalization
         ingredients_groups = None
         if "ingredientsGroups" in recipe_dict and recipe_dict["ingredientsGroups"]:
             try:
@@ -705,12 +663,13 @@ FORMAT:
                 logger.warning("Failed to parse ingredientsGroups: %s", e)
                 ingredients_groups = None
 
+        # Final model
         recipe_model = RecipeModel(
             title=recipe_dict.get("title", ""),
             description=recipe_dict.get("description", ""),
             ingredients=recipe_dict.get("ingredients", []),
             ingredientsGroups=ingredients_groups,
-            instructions=numbered_instructions,
+            instructions=recipe_dict["instructions"],
             prepTime=int(recipe_dict.get("prepTime", 0) or 0),
             cookTime=int(recipe_dict.get("cookTime", 0) or 0),
             servings=int(recipe_dict.get("servings", 1) or 1),
@@ -727,18 +686,13 @@ FORMAT:
         )
         return recipe_model.model_dump()
 
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error("[FLOW] unexpected error: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail={"code": "UNEXPECTED", "message": f"Error calling Gemini API: {str(e)}"},
-        )
+        logger.error("[FLOW] unexpected LLM error: %s", e, exc_info=True)
+        return {"error": "UNEXPECTED", "message": f"Error calling Gemini API: {str(e)}"}
 
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Extract recipe from Base64 image
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 @app.post("/extract_recipe_from_image")
 async def extract_recipe_from_image(req: ImageExtractionRequest):
     try:
@@ -748,9 +702,14 @@ async def extract_recipe_from_image(req: ImageExtractionRequest):
         image_bytes = base64.b64decode(data)
         text = extract_text_from_image(image_bytes)
         if not text or len(text) < 40:
-            raise HTTPException(status_code=400, detail="Not enough text extracted from image")
+            return {"error": "IMG_TEXT_TOO_SHORT", "message": "Not enough text extracted from image"}
 
-        prompt = create_recipe_extraction_prompt(text)
+        prompt = (
+            "את/ה מומחה/ית לחילוץ מתכונים. החזר/י אך ורק JSON תקין עם המפתחות: "
+            "title, description, ingredients, instructions, prepTime, cookTime, servings, tags, imageUrl, source.\n"
+            "מספרים כמספרים (int), ללא המצאות."
+            f"\n\nטקסט מהתמונה:\n{text}"
+        )
         payload = {
             "model": MODEL_NAME,
             "prompt": prompt,
@@ -771,24 +730,27 @@ async def extract_recipe_from_image(req: ImageExtractionRequest):
         recipe_model = normalize_recipe_fields(recipe_dict)
         return recipe_model.model_dump()
 
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error("[IMG] error: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
+        return {"error": "IMG_UNEXPECTED", "message": f"Error processing image: {str(e)}"}
 
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Upload recipe image (multipart)
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 @app.post("/upload_recipe_image")
 async def upload_recipe_image(file: UploadFile = File(...)):
     try:
         contents = await file.read()
         text = extract_text_from_image(contents)
         if not text or len(text) < 40:
-            raise HTTPException(status_code=400, detail="Not enough text extracted from image")
+            return {"error": "IMG_TEXT_TOO_SHORT", "message": "Not enough text extracted from image"}
 
-        prompt = create_recipe_extraction_prompt(text)
+        prompt = (
+            "את/ה מומחה/ית לחילוץ מתכונים. החזר/י אך ורק JSON תקין עם המפתחות: "
+            "title, description, ingredients, instructions, prepTime, cookTime, servings, tags, imageUrl, source.\n"
+            "מספרים כמספרים (int), ללא המצאות."
+            f"\n\nטקסט מהתמונה:\n{text}"
+        )
         payload = {
             "model": MODEL_NAME,
             "prompt": prompt,
@@ -809,15 +771,13 @@ async def upload_recipe_image(file: UploadFile = File(...)):
         recipe_model = normalize_recipe_fields(recipe_dict)
         return recipe_model.model_dump()
 
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error("[UPLOAD] error: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error processing uploaded image: {str(e)}")
+        return {"error": "UPLOAD_UNEXPECTED", "message": f"Error processing uploaded image: {str(e)}"}
 
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Custom recipe generation
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 @app.post("/custom_recipe")
 async def custom_recipe(req: CustomRecipeRequest):
     try:
@@ -849,15 +809,13 @@ async def custom_recipe(req: CustomRecipeRequest):
         recipe_model = normalize_recipe_fields(recipe_dict)
         return recipe_model.model_dump()
 
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error("[CUSTOM] error: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred during custom recipe generation")
+        return {"error": "CUSTOM_UNEXPECTED", "message": "An unexpected error occurred during custom recipe generation"}
 
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Simple image proxy (CORS bypass)
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 @app.get("/proxy_image")
 async def proxy_image(url: str):
     try:
@@ -890,11 +848,11 @@ async def proxy_image(url: str):
         )
     except Exception as e:
         logger.error("[PROXY] error: %s", e, exc_info=True)
-        raise APIError(f"Failed to proxy image: {str(e)}", status_code=500)
+        return {"error": "PROXY_UNEXPECTED", "message": f"Failed to proxy image: {str(e)}"}
 
 # =============================================================================
-# Entrypoint
+# Entrypoint (Cloud Run requires binding to 0.0.0.0:$PORT)
 # =============================================================================
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8002")))
-
+    # Cloud Run runtime contract: listen on $PORT (default 8080). :contentReference[oaicite:7]{index=7}
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
