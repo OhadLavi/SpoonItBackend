@@ -1,30 +1,29 @@
-# ✅ Use Playwright's official Python base image (includes Chromium + deps)
-# Note: Playwright Docker images use 3-segment versions (v1.47.0), not 4-segment (v1.47.1)
-FROM mcr.microsoft.com/playwright/python:v1.47.0-jammy
+# Use Python 3.11 slim
+FROM python:3.11-slim
 
-# Workdir
+# Faster, cleaner installs
+ENV PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
-# Install OCR languages (Hebrew + English)
+# System deps for Playwright (Chromium) + Tesseract (heb+eng)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl gnupg ca-certificates \
     tesseract-ocr tesseract-ocr-heb tesseract-ocr-eng \
- && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
-COPY requirements.txt ./
+# Python deps
+COPY requirements.txt .
+RUN pip install -r requirements.txt
 
-# IMPORTANT:
-# - Do NOT list `playwright` in requirements.txt when using this base image.
-#   (The image already has a matching Playwright version + browsers.)
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Install Chromium and all native libraries in one shot
+# (Playwright team’s recommended way for Docker)
+RUN playwright install --with-deps chromium
 
 # App code
 COPY . .
 
-# Cloud Run sets PORT; default to 8080 locally
-ENV PYTHONUNBUFFERED=1
+# Cloud Run: listen on 0.0.0.0:$PORT (PORT is injected)
 EXPOSE 8080
-
-# Run FastAPI with Uvicorn and bind to $PORT (Cloud Run requirement)
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]

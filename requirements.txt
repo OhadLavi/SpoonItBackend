@@ -5,9 +5,7 @@ beautifulsoup4==4.12.3
 python-dotenv==1.0.1
 pydantic>=2.9.0,<3.0.0
 pillow>=10.0.0,<12.0.0
-# NOTE: playwright is NOT listed here because the base image
-# (mcr.microsoft.com/playwright/python:v1.47.1-jammy) already includes
-# Playwright 1.47.1 with all browsers pre-installed.
+playwright==1.47.0
 pytesseract==0.3.13
 python-multipart==0.0.20
 google-generativeai>=0.3.0
