@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# Environment variables (will be set in Cloud Run)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+recipe_keeper.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Playwright cache (we'll install fresh in container)
+.playwright/
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
+
+# Documentation
+README.md
+
+# CI/CD
+.github/
+
+# Testing
+tests/
+*.test.py
+
+# Buildpack files that might interfere
+Procfile
+runtime.txt
+.python-version
