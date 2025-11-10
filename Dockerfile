@@ -31,8 +31,9 @@ RUN pip install -r requirements.txt
 # Install only the browser binaries (deps already provided above)
 RUN playwright install chromium
 
-# Copy the rest and set the default command as you had it
+# Copy the rest and set the default command
 COPY . .
 
-# Example:
-# CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Use PORT environment variable (Cloud Run provides this)
+# Use shell form to allow env var substitution
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]

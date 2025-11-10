@@ -538,26 +538,123 @@ async def health():
     return {"status": "ok"}
 
 # --------------------------------------------------------------------------
-# Chat (Ollama)
+# Chat (Gemini - Recipe-focused)
 # --------------------------------------------------------------------------
 @app.post("/chat")
 async def chat(request: ChatRequest):
-    sys_prompt = (
-        "You are a helpful assistant. Please respond in Hebrew, clearly and well-formatted."
-        if request.language.lower().startswith("he")
-        else "You are a helpful assistant. Please respond in English, clearly and well-formatted."
-    )
-    prompt = f"{sys_prompt}\n\nUser: {request.message}\nAssistant:"
-    payload = {"model": MODEL_NAME, "prompt": prompt, "stream": False}
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
+    
     try:
-        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-            r = await client.post(OLLAMA_API_URL, json=payload)
-            r.raise_for_status()
-            data = r.json()
-        return {"response": data.get("response", ""), "model": MODEL_NAME}
+        model = genai.GenerativeModel(GEMINI_MODEL)
+        
+        # Recipe-focused system prompt
+        sys_prompt = (
+            "אתה עוזר AI מומחה במתכונים. אתה יכול רק לעזור ביצירת מתכונים מבוססי מצרכים וסגנון בישול.\n"
+            "אם המשתמש שואל משהו שאינו קשור למתכונים, בקש ממנו בנימוס:\n"
+            "1. לספק רשימת מצרכים זמינים\n"
+            "2. לתאר איזה סוג מתכון הוא רוצה (איטלקי, אסייתי, טבעוני, מהיר, וכו')\n\n"
+            "כשהמשתמש מספק מצרכים וסגנון, צור JSON של מתכון בפורמט הבא:\n"
+            "{\n"
+            '  "title": "שם המתכון",\n'
+            '  "description": "תיאור קצר",\n'
+            '  "ingredients": ["מרכיב 1", "מרכיב 2", ...],\n'
+            '  "instructions": ["1. שלב 1", "2. שלב 2", ...],\n'
+            '  "prepTime": 15,\n'
+            '  "cookTime": 30,\n'
+            '  "servings": 4,\n'
+            '  "tags": ["תג1", "תג2"],\n'
+            '  "notes": "הערות נוספות",\n'
+            '  "imageUrl": "",\n'
+            '  "source": "SpoonIt AI"\n'
+            "}\n\n"
+            "הערות חשובות:\n"
+            "- השתמש רק במצרכים שהמשתמש מציין\n"
+            "- אם חסרים מצרכים חיוניים, הזכר זאת בהערות\n"
+            "- התאם את המתכון לסגנון המבוקש\n"
+            "- מספר את ההוראות בצורה ברורה"
+            if request.language.lower().startswith("he")
+            else
+            "You are an AI recipe assistant. You can ONLY help with creating recipes based on available ingredients and cooking style.\n"
+            "If the user asks anything not related to recipes, politely ask them to:\n"
+            "1. Provide a list of available ingredients\n"
+            "2. Describe what type of recipe they want (Italian, Asian, vegan, quick, etc.)\n\n"
+            "When the user provides ingredients and style, create a recipe JSON in this format:\n"
+            "{\n"
+            '  "title": "Recipe Name",\n'
+            '  "description": "Brief description",\n'
+            '  "ingredients": ["ingredient 1", "ingredient 2", ...],\n'
+            '  "instructions": ["1. Step 1", "2. Step 2", ...],\n'
+            '  "prepTime": 15,\n'
+            '  "cookTime": 30,\n'
+            '  "servings": 4,\n'
+            '  "tags": ["tag1", "tag2"],\n'
+            '  "notes": "Additional notes",\n'
+            '  "imageUrl": "",\n'
+            '  "source": "SpoonIt AI"\n'
+            "}\n\n"
+            "Important notes:\n"
+            "- Use only ingredients the user mentions\n"
+            "- If essential ingredients are missing, mention it in notes\n"
+            "- Adapt the recipe to the requested style\n"
+            "- Number the instructions clearly"
+        )
+        
+        prompt = f"{sys_prompt}\n\nUser: {request.message}\nAssistant:"
+        
+        try:
+            response = model.generate_content(prompt)
+            response_text = (response.text or "").strip()
+        except Exception as gen_error:
+            logger.error("[CHAT] Gemini API error: %s", gen_error, exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to generate response from Gemini: {str(gen_error)}"
+            )
+        
+        if not response_text:
+            logger.warning("[CHAT] Empty response from Gemini")
+            raise HTTPException(status_code=500, detail="Empty response from Gemini")
+        
+        # Try to parse as JSON recipe, if it starts with { or contains recipe structure
+        is_recipe = False
+        recipe_data = None
+        
+        if "{" in response_text:
+            try:
+                # Strip code fences if present
+                json_text = response_text
+                if "```" in json_text:
+                    lines = json_text.split("\n")
+                    if lines and lines[0].startswith("```"):
+                        lines = lines[1:]
+                    if lines and lines[-1].strip() == "```":
+                        lines = lines[:-1]
+                    json_text = "\n".join(lines).strip()
+                
+                # Try to extract JSON from text
+                start_idx = json_text.find("{")
+                end_idx = json_text.rfind("}") + 1
+                if start_idx != -1 and end_idx > start_idx:
+                    json_str = json_text[start_idx:end_idx]
+                    recipe_data = json.loads(json_str)
+                    is_recipe = True
+            except Exception:
+                # Not a valid recipe JSON, treat as normal text response
+                pass
+        
+        return {
+            "response": response_text,
+            "model": GEMINI_MODEL,
+            "is_recipe": is_recipe,
+            "recipe": recipe_data if is_recipe else None
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("[CHAT] error: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Ollama request failed")
+        raise HTTPException(status_code=500, detail=f"Chat request failed: {str(e)}")
 
 # --------------------------------------------------------------------------
 # Core extraction
