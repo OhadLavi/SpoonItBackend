@@ -73,8 +73,90 @@ def create_chat_system_prompt(language: str) -> str:
         )
 
 
+def create_extraction_prompt_from_url(url: str) -> str:
+    """Create a prompt for extracting recipe directly from a URL (Gemini will fetch the page)."""
+    return f"""Visit this URL and extract the recipe information from the webpage:
+
+URL: {url}
+
+Extract the recipe information in JSON format:
+
+{{
+    "title": "Recipe title",
+    "description": "Recipe description or summary",
+    "ingredients": ["ingredient 1", "ingredient 2", ...],
+    "ingredientsGroups": [
+        {{"category": "Category name as written on page", "ingredients": ["ingredient 1", "ingredient 2"]}},
+        {{"category": "Another category name", "ingredients": ["ingredient 3", "ingredient 4"]}}
+    ],
+    "instructions": ["step 1", "step 2", ...],
+    "prepTime": 0,
+    "cookTime": 0,
+    "servings": 1,
+    "tags": ["tag1", "tag2", ...],
+    "notes": "Any additional notes",
+    "source": "{url}",
+    "imageUrl": "URL of recipe image if available"
+}}
+
+⚠️ CRITICAL - YOUR TASK IS TO COPY, NOT TO CREATE OR MODIFY ⚠️
+
+YOU ARE A COPY MACHINE, NOT A WRITER. DO NOT CHANGE ANYTHING.
+
+STEP 1: FIND INGREDIENTS SECTIONS
+Look in the content for headers like:
+- "מצרכים למתכון:" or "מצרכים:" or "חומרים:"
+- "למילוי:" or "מילוי:"
+- "לציפוי:" or "ציפוי:"
+- "לבצק:" or "בצק:"
+- Any other section headers before ingredient lists
+
+STEP 2: COPY INGREDIENTS EXACTLY AS WRITTEN
+- If you found section headers → use "ingredientsGroups"
+- COPY the section name EXACTLY (including colons if present)
+- COPY each ingredient line EXACTLY as written
+- Keep EXACT amounts: "1 קילו" stays "1 קילו" (NOT "1 קג", NOT "1000 גרם")
+- Keep EXACT units: "750 גר׳" stays "750 גר׳" (NOT "0.75 קילו")
+- Keep EXACT order as on page
+- Do NOT add words, remove words, or change words
+- If no section headers exist → use flat "ingredients" list
+
+STEP 3: COPY INSTRUCTIONS EXACTLY AS WRITTEN
+- COPY each instruction sentence EXACTLY
+- Do NOT paraphrase, summarize, or rewrite
+- Do NOT change any words
+- Just add numbers (1., 2., 3., ...) at the start of each step
+
+EXAMPLES OF WRONG (DO NOT DO THIS):
+❌ Original: "1 קילו קמח" → You write: "1 קג קמח" (WRONG - changed unit)
+❌ Original: "750 גר׳ בשר טחון" → You write: "400 גרם בשר בקר טחון" (WRONG - changed amount and added words)
+❌ Original: "בצל גדול" → You write: "1 בצל בינוני, קצוץ דק" (WRONG - changed everything)
+
+EXAMPLES OF CORRECT (DO THIS):
+✓ Original: "1 קילו קמח" → You write: "1 קילו קמח" (CORRECT - exact copy)
+✓ Original: "750 גר׳ בשר טחון" → You write: "750 גר׳ בשר טחון" (CORRECT - exact copy)
+✓ Original: "בצל גדול" → You write: "בצל גדול" (CORRECT - exact copy)
+
+FORMAT:
+{{
+  "ingredientsGroups": [
+    {{"category": "EXACT header from page", "ingredients": ["EXACT ingredient 1", "EXACT ingredient 2"]}},
+    {{"category": "EXACT header from page", "ingredients": ["EXACT ingredient 3"]}}
+  ],
+  "ingredients": [],
+  "instructions": ["1. EXACT instruction text", "2. EXACT instruction text"]
+}}
+
+IF YOU CHANGE ANY INGREDIENT AMOUNT, NAME, OR INSTRUCTION WORDING, YOU HAVE FAILED.
+YOUR JOB IS TO COPY, NOT TO WRITE.
+"""
+
+
 def create_extraction_prompt(url: str, page_text: str) -> str:
-    """Create a comprehensive extraction prompt for recipe from webpage."""
+    """
+    Create extraction prompt with page text (for when HTML is already fetched).
+    DEPRECATED: Use create_extraction_prompt_from_url() instead to let Gemini fetch the page.
+    """
     return f"""Extract the recipe information from the following webpage content:
 
 URL: {url}
@@ -107,21 +189,51 @@ Extract the recipe information in JSON format:
 YOU ARE A COPY MACHINE, NOT A WRITER. DO NOT CHANGE ANYTHING.
 
 STEP 1: FIND INGREDIENTS SECTIONS
-- e.g. "מצרכים:", "חומרים:", "למילוי:", "לציפוי:", "לבצק:" etc.
+Look in the content for headers like:
+- "מצרכים למתכון:" or "מצרכים:" or "חומרים:"
+- "למילוי:" or "מילוי:"
+- "לציפוי:" or "ציפוי:"
+- "לבצק:" or "בצק:"
+- Any other section headers before ingredient lists
 
 STEP 2: COPY INGREDIENTS EXACTLY AS WRITTEN
 - If you found section headers → use "ingredientsGroups"
-- COPY the section name EXACTLY (including punctuation)
-- COPY each ingredient line EXACTLY
-- Keep EXACT order and units
-- If no section headers → use flat "ingredients" list
+- COPY the section name EXACTLY (including colons if present)
+- COPY each ingredient line EXACTLY as written
+- Keep EXACT amounts: "1 קילו" stays "1 קילו" (NOT "1 קג", NOT "1000 גרם")
+- Keep EXACT units: "750 גר׳" stays "750 גר׳" (NOT "0.75 קילו")
+- Keep EXACT order as on page
+- Do NOT add words, remove words, or change words
+- If no section headers exist → use flat "ingredients" list
 
 STEP 3: COPY INSTRUCTIONS EXACTLY AS WRITTEN
-- COPY each step EXACTLY
+- COPY each instruction sentence EXACTLY
 - Do NOT paraphrase, summarize, or rewrite
-- Number the steps "1.", "2.", "3.", ...
+- Do NOT change any words
+- Just add numbers (1., 2., 3., ...) at the start of each step
 
-Return JSON only. No extra text.
+EXAMPLES OF WRONG (DO NOT DO THIS):
+❌ Original: "1 קילו קמח" → You write: "1 קג קמח" (WRONG - changed unit)
+❌ Original: "750 גר׳ בשר טחון" → You write: "400 גרם בשר בקר טחון" (WRONG - changed amount and added words)
+❌ Original: "בצל גדול" → You write: "1 בצל בינוני, קצוץ דק" (WRONG - changed everything)
+
+EXAMPLES OF CORRECT (DO THIS):
+✓ Original: "1 קילו קמח" → You write: "1 קילו קמח" (CORRECT - exact copy)
+✓ Original: "750 גר׳ בשר טחון" → You write: "750 גר׳ בשר טחון" (CORRECT - exact copy)
+✓ Original: "בצל גדול" → You write: "בצל גדול" (CORRECT - exact copy)
+
+FORMAT:
+{{
+  "ingredientsGroups": [
+    {{"category": "EXACT header from page", "ingredients": ["EXACT ingredient 1", "EXACT ingredient 2"]}},
+    {{"category": "EXACT header from page", "ingredients": ["EXACT ingredient 3"]}}
+  ],
+  "ingredients": [],
+  "instructions": ["1. EXACT instruction text", "2. EXACT instruction text"]
+}}
+
+IF YOU CHANGE ANY INGREDIENT AMOUNT, NAME, OR INSTRUCTION WORDING, YOU HAVE FAILED.
+YOUR JOB IS TO COPY, NOT TO WRITE.
 """
 
 
