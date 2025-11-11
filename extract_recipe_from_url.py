@@ -11,15 +11,13 @@ import os
 import json
 import re
 import sys
-import asyncio
 from typing import Dict, Any
 
-from services.prompt_service import create_extraction_prompt
+from services.prompt_service import create_extraction_prompt_from_url
 from services.gemini_service import get_gemini_model
-from services.fetcher_service import fetch_html_content
 
 
-async def extract_recipe_async(url: str) -> Dict[str, Any]:
+def extract_recipe(url: str) -> Dict[str, Any]:
     """
     Extract recipe from URL using Gemini API.
     
@@ -44,19 +42,15 @@ async def extract_recipe_async(url: str) -> Dict[str, Any]:
             "GEMINI_API_KEY=your_api_key_here"
         )
     
-    # Fetch HTML content from URL
-    print(f"Fetching content from: {url}")
-    page_text = await fetch_html_content(url)
-    print(f"Fetched {len(page_text)} characters")
-    
     # Get Gemini model
+    print(f"Extracting recipe from: {url}")
+    print("Gemini will fetch and analyze the webpage...")
     model = get_gemini_model()
     
-    # Create extraction prompt
-    prompt = create_extraction_prompt(url, page_text)
+    # Create extraction prompt with URL only (Gemini will fetch the page)
+    prompt = create_extraction_prompt_from_url(url)
     
-    # Generate recipe using Gemini
-    print("Extracting recipe with Gemini...")
+    # Generate recipe using Gemini (it will fetch the URL)
     response = model.generate_content(prompt)
     response_text = (response.text or "").strip()
     
@@ -95,19 +89,6 @@ async def extract_recipe_async(url: str) -> Dict[str, Any]:
     
     print("Recipe extracted successfully!")
     return recipe_data
-
-
-def extract_recipe(url: str) -> Dict[str, Any]:
-    """
-    Synchronous wrapper for extract_recipe_async.
-    
-    Args:
-        url: The URL of the recipe page
-        
-    Returns:
-        Dictionary containing extracted recipe information
-    """
-    return asyncio.run(extract_recipe_async(url))
 
 
 def main():

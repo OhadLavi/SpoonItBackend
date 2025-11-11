@@ -15,17 +15,15 @@ from models import (
     IngredientGroup,
     RecipeModel,
 )
-from services.fetcher_service import fetch_html_content
 from services.gemini_service import get_gemini_model
 from services.ocr_service import extract_text_from_image
 from services.prompt_service import (
     create_recipe_extraction_prompt,
-    create_extraction_prompt,
+    create_extraction_prompt_from_url,
     create_custom_recipe_prompt,
 )
 from utils.json_repair import extract_and_parse_llm_json
 from utils.normalization import normalize_recipe_fields
-from errors import APIError
 
 router = APIRouter()
 
@@ -42,43 +40,15 @@ async def extract_recipe(req: RecipeExtractionRequest):
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
 
     try:
-        if req.html_content:
-            logger.info("[FLOW] using HTML content provided by client, length=%d", len(req.html_content))
-            html = req.html_content
-            html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
-            html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
-            page_text = re.sub(r'<[^>]+>', ' ', html)
-            page_text = re.sub(r'\s+', ' ', page_text).strip()
-            if len(page_text.encode('utf-8')) > 50_000:
-                page_text = page_text[:50_000]
-        else:
-            try:
-                page_text = await fetch_html_content(url)
-                logger.info("[FLOW] fetched page text, length=%d", len(page_text))
-            except APIError as e:
-                if e.status_code == 403 and e.details.get("code") in ("FETCH_FORBIDDEN", "PLAYWRIGHT_UNAVAILABLE"):
-                    # Return a clear 403 with instructions for client-side fetch fallback
-                    raise HTTPException(
-                        status_code=403,
-                        detail={
-                            "code": e.details.get("code"),
-                            "message": (
-                                "The website is blocking Cloud Run or Playwright is unavailable. "
-                                "Please fetch the page on the client and resend as html_content."
-                            ),
-                            "url": url,
-                        },
-                    )
-                raise HTTPException(status_code=e.status_code, detail=e.message)
-
-        # Use Gemini API
+        # Use Gemini API with URL only (Gemini will fetch the page)
+        logger.info("[FLOW] Sending URL to Gemini (it will fetch the page)")
         model = get_gemini_model()
-        prompt = create_extraction_prompt(url, page_text)
+        prompt = create_extraction_prompt_from_url(url)
         response = model.generate_content(prompt)
         response_text = (response.text or "").strip()
 
         if not response_text:
-            logger.error("[LLM] empty response. First 160 page_text chars: %r", page_text[:160])
+            logger.error("[LLM] empty response from Gemini for url=%s", url)
             raise HTTPException(
                 status_code=502,
                 detail={"code": "LLM_EMPTY", "message": "Model returned empty response"}
