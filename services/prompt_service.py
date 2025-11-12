@@ -75,7 +75,12 @@ def create_chat_system_prompt(language: str) -> str:
 
 def create_extraction_prompt_from_url(url: str) -> str:
     """Create a prompt for extracting recipe directly from a URL (Gemini will fetch the page)."""
-    return f"""Visit this URL and extract the recipe information from the webpage:
+    return f"""🚨 CRITICAL SYSTEM INSTRUCTION 🚨
+YOU ARE A DATA EXTRACTION ROBOT. YOUR ONLY JOB IS TO COPY TEXT EXACTLY AS WRITTEN.
+DO NOT PARAPHRASE. DO NOT TRANSLATE. DO NOT CHANGE ANYTHING.
+IF YOU CHANGE EVEN ONE WORD OR NUMBER, THE EXTRACTION HAS FAILED.
+
+Visit this URL and extract the recipe information from the webpage:
 
 URL: {url}
 
@@ -326,7 +331,12 @@ def create_extraction_prompt(url: str, page_text: str) -> str:
     DEPRECATED: Use create_extraction_prompt_from_url() instead to let Gemini fetch the page.
     This function uses the same enhanced instructions as create_extraction_prompt_from_url().
     """
-    return f"""Extract the recipe information from the following webpage content:
+    return f"""🚨 CRITICAL SYSTEM INSTRUCTION 🚨
+YOU ARE A DATA EXTRACTION ROBOT. YOUR ONLY JOB IS TO COPY TEXT EXACTLY AS WRITTEN.
+DO NOT PARAPHRASE. DO NOT TRANSLATE. DO NOT CHANGE ANYTHING.
+IF YOU CHANGE EVEN ONE WORD OR NUMBER, THE EXTRACTION HAS FAILED.
+
+Extract the recipe information from the following webpage content:
 
 URL: {url}
 

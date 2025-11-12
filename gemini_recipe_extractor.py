@@ -58,8 +58,16 @@ def extract_recipe_from_url(url: str, api_key: Optional[str] = None) -> Dict[str
     prompt = create_extraction_prompt_from_url(url)
     
     try:
-        # Generate content using Gemini (it will fetch the URL)
-        response = model.generate_content(prompt)
+        # Generate content using Gemini with strict config for exact copying
+        generation_config = {
+            "temperature": 0.0,  # No randomness - deterministic output
+            "top_p": 0.1,  # Very low sampling diversity
+            "top_k": 1,  # Only consider the most likely token
+            "max_output_tokens": 8192,
+            "response_mime_type": "application/json",  # Force JSON output
+        }
+        
+        response = model.generate_content(prompt, generation_config=generation_config)
         
         # Get the text response
         response_text = (response.text or "").strip()

@@ -44,7 +44,17 @@ async def extract_recipe(req: RecipeExtractionRequest):
         logger.info("[FLOW] Sending URL to Gemini (it will fetch the page)")
         model = get_gemini_model()
         prompt = create_extraction_prompt_from_url(url)
-        response = model.generate_content(prompt)
+        
+        # Use strict generation config for exact copying
+        generation_config = {
+            "temperature": 0.0,  # No randomness - deterministic output
+            "top_p": 0.1,  # Very low sampling diversity
+            "top_k": 1,  # Only consider the most likely token
+            "max_output_tokens": 8192,
+            "response_mime_type": "application/json",  # Force JSON output
+        }
+        
+        response = model.generate_content(prompt, generation_config=generation_config)
         response_text = (response.text or "").strip()
 
         if not response_text:
