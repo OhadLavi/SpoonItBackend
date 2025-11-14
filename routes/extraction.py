@@ -5,10 +5,9 @@ import base64
 import json
 import re
 from fastapi import APIRouter, HTTPException, UploadFile, File
-import httpx
-from bs4 import BeautifulSoup
 
 from config import logger, GEMINI_API_KEY, OLLAMA_API_URL, MODEL_NAME, HTTP_TIMEOUT
+from errors import APIError
 from models import (
     RecipeExtractionRequest,
     ImageExtractionRequest,
@@ -23,94 +22,46 @@ from services.prompt_service import (
     create_extraction_prompt_from_url,
     create_custom_recipe_prompt,
 )
+from services.fetcher_service import fetch_html_content
 from utils.json_repair import extract_and_parse_llm_json
 from utils.normalization import normalize_recipe_fields
 
 router = APIRouter()
 
 
-async def get_page_content(url: str, timeout: int = HTTP_TIMEOUT) -> str:
+async def get_page_content(url: str) -> str:
     """
-    Fetches the URL content asynchronously, handles 403 errors by using a 
-    standard browser User-Agent, and returns clean, readable text.
+    Fetches the page content using httpx with automatic Playwright fallback.
 
-    Args:
-        url (str): The URL of the page to fetch.
-        timeout (int): The request timeout in seconds.
+    This delegates to services.fetcher_service.fetch_html_content, which:
+      - Uses rotating browser-like headers with httpx
+      - Detects bot-block pages / too-short content
+      - Falls back to Playwright (Chromium headless) for JS-heavy / blocked sites
+      - Truncates to ~50KB of cleaned text
 
-    Returns:
-        str: The clean text content of the page.
+    Any APIError raised here is handled by the global APIError handler in main.py.
     """
-    # 🌟 Refactoring 1: Use a robust User-Agent to mimic a real browser (fixes 403 errors)
-    browser_headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Accept": (
-            "text/html,application/xhtml+xml,application/xml;"
-            "q=0.9,image/avif,image/webp,*/*;q=0.8"
-        ),
-        "Accept-Language": "he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Connection": "keep-alive",
-        "Cache-Control": "no-cache",
-    }
-
-    
     try:
-        async with httpx.AsyncClient(timeout=timeout, headers=browser_headers) as client:
-            response = await client.get(url)
-            
-            # This handles 4xx and 5xx errors, including the 403 Forbidden
-            response.raise_for_status() 
-
-            # Use BeautifulSoup to parse the HTML
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # 🌟 Refactoring 2: Use CSS selectors for extraction (more standard)
-            # Find the main recipe article block or common article tags
-            recipe_body = soup.find('div', class_='recipie-content')
-
-            if recipe_body:
-                # Prioritize content within the specific recipe block
-                return recipe_body.get_text(separator=' ', strip=True)
-            else:
-                # 🌟 Refactoring 3: Use a more resilient fallback for general page content
-                # Search for common article or body tags to exclude things like headers/footers if possible
-                main_content = soup.find(['article', 'main'])
-                if main_content:
-                    return main_content.get_text(separator=' ', strip=True)
-                
-                # Final fallback: return all body text
-                body = soup.find('body')
-                if body:
-                    return body.get_text(separator=' ', strip=True)
-                    
-                return soup.get_text(separator=' ', strip=True)
-                
-    except httpx.HTTPStatusError as e:
-        # Catch specific HTTP status errors (like 403)
-        error_detail = f"HTTP Error fetching URL: {e.response.status_code} {e.response.reason_phrase}"
-        logger.error("%s from %s: %s", error_detail, url, e)
-        raise HTTPException(status_code=500, detail=error_detail)
-        
-    except httpx.RequestError as e:
-        # Catch connection and timeout errors
-        logger.error("Network error fetching URL %s: %s", url, e)
-        raise HTTPException(status_code=500, detail=f"Network Error fetching URL: {str(e)}")
-        
+        text = await fetch_html_content(url)
+        return text
+    except APIError:
+        # Let the global APIError handler deal with it (status + details)
+        raise
     except Exception as e:
-        # Catch parsing errors or other unexpected exceptions
-        logger.error("Unexpected error processing content from %s: %s", url, e)
-        raise HTTPException(status_code=500, detail=f"Unexpected Error processing page: {str(e)}")
+        logger.error("Unexpected error fetching page content from %s: %s", url, e, exc_info=True)
+        # Wrap in APIError so it goes through the same handler
+        raise APIError(
+            "Unexpected error fetching page content.",
+            status_code=500,
+            details={"code": "FETCH_UNEXPECTED", "url": url, "error": str(e)},
+        )
 
 
 def create_extraction_prompt_from_content(page_content: str, url: str) -> str:
     """Create a prompt for extracting recipe from page content (similar to standalone version)."""
     # Limit content to first 10000 chars to be safe
     content_preview = page_content[:10000]
-    
+
     json_format_template = """{
   "title": "Recipe Title",
   "description": "Recipe description or summary",
@@ -130,7 +81,7 @@ def create_extraction_prompt_from_content(page_content: str, url: str) -> str:
   "source": "%s",
   "imageUrl": "URL of recipe image if available"
 }""" % url
-    
+
     return f"""🚨 CRITICAL SYSTEM INSTRUCTION 🚨
 YOU ARE A DATA EXTRACTION ROBOT. YOUR ONLY JOB IS TO COPY TEXT EXACTLY AS WRITTEN.
 DO NOT PARAPHRASE. DO NOT TRANSLATE. DO NOT CHANGE ANYTHING.
@@ -289,39 +240,44 @@ async def extract_recipe(req: RecipeExtractionRequest):
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
 
     try:
-        # Fetch page content first (like standalone version)
+        # Fetch page content first (via httpx + Playwright fallback)
         logger.info("[FLOW] Fetching page content from URL: %s", url)
         page_content = await get_page_content(url)
-        
+
         if not page_content or len(page_content.strip()) < 100:
             logger.error("[FLOW] Failed to fetch meaningful content from url=%s", url)
-            raise HTTPException(
+            raise APIError(
+                "Could not fetch or parse page content",
                 status_code=502,
-                detail={"code": "FETCH_FAILED", "message": "Could not fetch or parse page content"}
+                details={"code": "FETCH_FAILED", "url": url},
             )
-        
-        logger.info("[FLOW] Page content fetched (%d chars), sending to Gemini", len(page_content))
+
+        logger.info(
+            "[FLOW] Page content fetched (%d chars), sending to Gemini",
+            len(page_content),
+        )
         model = get_gemini_model()
         prompt = create_extraction_prompt_from_content(page_content, url)
-        
+
         # Use strict generation config for exact copying
         generation_config = {
             "temperature": 0.0,  # No randomness - deterministic output
-            "top_p": 0.1,  # Very low sampling diversity
-            "top_k": 1,  # Only consider the most likely token
+            "top_p": 0.1,        # Very low sampling diversity
+            "top_k": 1,          # Only consider the most likely token
             "max_output_tokens": 8192,
             "response_mime_type": "application/json",  # Force JSON output
         }
-        
+
         response = model.generate_content(prompt, generation_config=generation_config)
 
         response_text = (response.text or "").strip()
 
         if not response_text:
             logger.error("[LLM] empty response from Gemini for url=%s", url)
-            raise HTTPException(
+            raise APIError(
+                "Model returned empty response",
                 status_code=502,
-                detail={"code": "LLM_EMPTY", "message": "Model returned empty response"}
+                details={"code": "LLM_EMPTY", "url": url},
             )
 
         # Strip code fences (if any)
@@ -341,12 +297,13 @@ async def extract_recipe(req: RecipeExtractionRequest):
                 recipe_dict = await extract_and_parse_llm_json(response_text)
             except Exception as e:
                 logger.error("[FLOW] JSON parse error (after repair). Raw head: %r", response_text[:220])
-                raise HTTPException(
+                raise APIError(
+                    f"Failed to parse JSON response from Gemini: {str(e)}",
                     status_code=500,
-                    detail={
+                    details={
                         "code": "LLM_JSON_PARSE",
-                        "message": f"Failed to parse JSON response from Gemini: {str(e)}",
                         "raw_head": response_text[:500],
+                        "url": url,
                     },
                 )
 
@@ -358,7 +315,7 @@ async def extract_recipe(req: RecipeExtractionRequest):
         numbered_instructions = []
         for i, instruction in enumerate(instructions, 1):
             instruction_str = str(instruction).strip()
-            instruction_str = re.sub(r'^\d+[\.\)]\s*', '', instruction_str)
+            instruction_str = re.sub(r"^\d+[\.\)]\s*", "", instruction_str)
             numbered_instructions.append(f"{i}. {instruction_str}")
         recipe_dict["instructions"] = numbered_instructions
 
@@ -394,18 +351,23 @@ async def extract_recipe(req: RecipeExtractionRequest):
 
         logger.info(
             "[FLOW] done via Gemini | title='%s' ings=%d steps=%d prep=%d cook=%d",
-            recipe_model.title, len(recipe_model.ingredients), len(recipe_model.instructions),
-            recipe_model.prepTime, recipe_model.cookTime
+            recipe_model.title,
+            len(recipe_model.ingredients),
+            len(recipe_model.instructions),
+            recipe_model.prepTime,
+            recipe_model.cookTime,
         )
         return recipe_model.model_dump()
 
-    except HTTPException:
+    except (HTTPException, APIError):
+        # Let FastAPI's default HTTPException handler or our APIError handler deal with it
         raise
     except Exception as e:
         logger.error("[FLOW] unexpected error: %s", e, exc_info=True)
-        raise HTTPException(
+        raise APIError(
+            f"Error calling Gemini API: {str(e)}",
             status_code=500,
-            detail={"code": "UNEXPECTED", "message": f"Error calling Gemini API: {str(e)}"},
+            details={"code": "UNEXPECTED", "url": url},
         )
 
 
@@ -515,5 +477,7 @@ async def custom_recipe(req: CustomRecipeRequest):
         raise
     except Exception as e:
         logger.error("[CUSTOM] error: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred during custom recipe generation")
-
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred during custom recipe generation",
+        )
