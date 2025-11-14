@@ -7,7 +7,8 @@ import re
 from fastapi import APIRouter, HTTPException, UploadFile, File
 import httpx
 from bs4 import BeautifulSoup
-
+from google import genai
+from google.genai.types import Tool, GenerateContentConfig
 from config import logger, GEMINI_API_KEY, OLLAMA_API_URL, MODEL_NAME, HTTP_TIMEOUT
 from models import (
     RecipeExtractionRequest,
@@ -311,7 +312,41 @@ async def extract_recipe(req: RecipeExtractionRequest):
             "response_mime_type": "application/json",  # Force JSON output
         }
         
-        response = model.generate_content(prompt, generation_config=generation_config)
+        #response = model.generate_content(prompt, generation_config=generation_config)
+        client = genai.Client()
+        model_id = "gemini-2.5-flash"
+
+        tools = [
+        {"url_context": {}},
+        ]
+
+        url1 = "https://kerenagam.co.il/%d7%a8%d7%95%d7%9c%d7%93%d7%aa-%d7%98%d7%99%d7%a8%d7%9e%d7%99%d7%a1%d7%95-%d7%99%d7%a4%d7%99%d7%a4%d7%99%d7%99%d7%94/"
+        json_format_template = """{
+        "title": "Recipe Title",
+        "description": "Recipe description or summary",
+        "ingredients": ["ingredient 1", "ingredient 2", ...],
+        "ingredientsGroups": [
+            {
+            "category": "Category name as written on page",
+            "ingredients": ["ingredient 1", "ingredient 2"]
+            }
+        ],
+        "instructions": ["step 1", "step 2", ...],
+        "prepTime": 0,
+        "cookTime": 0,
+        "servings": 1,
+        "tags": ["tag1", "tag2", ...],
+        "notes": "Any additional notes",
+        "source": "%s",
+        "imageUrl": "URL of recipe image if available"
+        }"""
+        response = client.models.generate_content(
+            model=model_id,
+            contents=f"Extract Recipe from the following URL: {url1} using this json format: {json_format_template}",
+            config=GenerateContentConfig(
+                tools=tools,
+            )
+        )
         response_text = (response.text or "").strip()
 
         if not response_text:
