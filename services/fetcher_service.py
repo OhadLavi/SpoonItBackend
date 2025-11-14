@@ -127,6 +127,30 @@ async def _httpx_fetch(url: str) -> str:
         return text.strip()
 
 
+def _jina_proxy_url(url: str) -> str:
+    """Return the URL wrapped in the r.jina.ai readability proxy."""
+
+    normalized = url.strip()
+    if not normalized.startswith(("http://", "https://")):
+        normalized = f"https://{normalized.lstrip('/')}"
+    return f"https://r.jina.ai/{normalized}"
+
+
+async def _jina_ai_fetch(url: str) -> str:
+    """Fetch page content through the jina.ai readability proxy service."""
+
+    proxy_url = _jina_proxy_url(url)
+    headers = _default_headers()
+    headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7"
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, headers=headers, follow_redirects=True) as client:
+        r = await client.get(proxy_url)
+        r.raise_for_status()
+        text = re.sub(r"\s+", " ", r.text)
+        if len(text.encode("utf-8")) > 50_000:
+            text = text[:50_000]
+        return text.strip()
+
+
 async def _playwright_fetch(url: str) -> str:
     """Fetch HTML content using Playwright for JavaScript-heavy sites."""
     # If Playwright is not installed or import failed, report a structured 403
@@ -253,12 +277,34 @@ async def _playwright_fetch(url: str) -> str:
 
 async def fetch_html_content(url: str) -> str:
     """Fetch HTML content from URL with automatic fallback to Playwright if blocked."""
+
+    async def _try_jina_proxy(reason: str) -> Optional[str]:
+        try:
+            logger.info("[FETCH] Trying jina.ai proxy fallback (%s) for %s", reason, url)
+            proxy_text = await _jina_ai_fetch(url)
+            if _looks_blocked(proxy_text):
+                logger.warning("[FETCH] jina.ai proxy result still looks blocked/empty (%d chars)", len(proxy_text))
+                return None
+            return proxy_text
+        except Exception as proxy_error:
+            logger.warning("[FETCH] jina.ai proxy fetch failed: %s", proxy_error, exc_info=True)
+            return None
+
     try:
         text = await _httpx_fetch(url)
         if _looks_blocked(text):
             logger.warning("[FETCH] httpx content looks blocked/short (%d chars). Trying Playwright.", len(text))
-            text = await _playwright_fetch(url)
+            try:
+                text = await _playwright_fetch(url)
+            except APIError:
+                proxy = await _try_jina_proxy("playwright_unavailable")
+                if proxy:
+                    return proxy
+                raise
         if _looks_blocked(text):
+            proxy = await _try_jina_proxy("blocked_after_playwright")
+            if proxy:
+                return proxy
             raise APIError(
                 "Remote site is blocking server fetch (403). Ask client to supply html_content.",
                 status_code=403,
@@ -272,6 +318,9 @@ async def fetch_html_content(url: str) -> str:
             try:
                 text = await _playwright_fetch(url)
                 if _looks_blocked(text):
+                    proxy = await _try_jina_proxy("blocked_after_status_playwright")
+                    if proxy:
+                        return proxy
                     raise APIError(
                         "Remote site is blocking server fetch (403). Ask client to supply html_content.",
                         status_code=403,
@@ -279,9 +328,15 @@ async def fetch_html_content(url: str) -> str:
                     )
                 return text
             except APIError:
+                proxy = await _try_jina_proxy("playwright_apierror")
+                if proxy:
+                    return proxy
                 raise
             except Exception as e2:
                 logger.warning("[FETCH] Playwright fallback failed: %s", e2, exc_info=True)
+                proxy = await _try_jina_proxy("playwright_exception")
+                if proxy:
+                    return proxy
                 raise APIError(
                     "Remote site is blocking server fetch (403). Ask client to supply html_content.",
                     status_code=403,
