@@ -43,9 +43,20 @@ async def get_page_content(url: str, timeout: int = HTTP_TIMEOUT) -> str:
     """
     # 🌟 Refactoring 1: Use a robust User-Agent to mimic a real browser (fixes 403 errors)
     browser_headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": (
+            "text/html,application/xhtml+xml,application/xml;"
+            "q=0.9,image/avif,image/webp,*/*;q=0.8"
+        ),
+        "Accept-Language": "he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Connection": "keep-alive",
+        "Cache-Control": "no-cache",
     }
+
     
     try:
         async with httpx.AsyncClient(timeout=timeout, headers=browser_headers) as client:
