@@ -38,7 +38,7 @@ import logging # You'll need to define your logger object somewhere
 # HTTP_TIMEOUT = 15 
 # logger = logging.getLogger(__name__)
 
-async def get_page_content(url: str, timeout: int) -> str:
+async def get_page_content(url: str, timeout: int = HTTP_TIMEOUT) -> str:
     """
     Fetches the URL content asynchronously, handles 403 errors by using a 
     standard browser User-Agent, and returns clean, readable text.
@@ -90,19 +90,19 @@ async def get_page_content(url: str, timeout: int) -> str:
     except httpx.HTTPStatusError as e:
         # Catch specific HTTP status errors (like 403)
         error_detail = f"HTTP Error fetching URL: {e.response.status_code} {e.response.reason_phrase}"
-        logging.error(f"{error_detail} from {url}: {e}")
+        logger.error(f"{error_detail} from {url}: {e}")
         raise HTTPException(status_code=500, detail=error_detail)
         
     except httpx.RequestError as e:
         # Catch connection and timeout errors
-        logging.error(f"Network error fetching URL {url}: {e}")
+        logger.error(f"Network error fetching URL {url}: {e}")
         raise HTTPException(status_code=500, detail=f"Network Error fetching URL: {str(e)}")
         
     except Exception as e:
         # Catch parsing errors or other unexpected exceptions
-        logging.error(f"Unexpected error processing content from {url}: {e}")
+        logger.error(f"Unexpected error processing content from {url}: {e}")
         raise HTTPException(status_code=500, detail=f"Unexpected Error processing page: {str(e)}")
-        
+
 
 def create_extraction_prompt_from_content(page_content: str, url: str) -> str:
     """Create a prompt for extracting recipe from page content (similar to standalone version)."""
