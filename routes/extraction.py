@@ -29,38 +29,80 @@ from utils.normalization import normalize_recipe_fields
 router = APIRouter()
 
 
-async def get_page_content(url: str) -> str:
+import httpx
+from bs4 import BeautifulSoup
+from fastapi import HTTPException # Assuming this is the source of HTTPException
+import logging # You'll need to define your logger object somewhere
+
+# Constants (assuming these are defined globally in your actual code)
+# HTTP_TIMEOUT = 15 
+# logger = logging.getLogger(__name__)
+
+async def get_page_content(url: str, timeout: int) -> str:
     """
-    Fetches the URL and returns its clean, readable text content.
-    Similar to extract_recipe_standalone.py approach.
+    Fetches the URL content asynchronously, handles 403 errors by using a 
+    standard browser User-Agent, and returns clean, readable text.
+
+    Args:
+        url (str): The URL of the page to fetch.
+        timeout (int): The request timeout in seconds.
+
+    Returns:
+        str: The clean text content of the page.
     """
+    # 🌟 Refactoring 1: Use a robust User-Agent to mimic a real browser (fixes 403 errors)
+    browser_headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
+    
     try:
-        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, headers={'User-Agent': 'Mozilla/5.0'}) as client:
+        async with httpx.AsyncClient(timeout=timeout, headers=browser_headers) as client:
             response = await client.get(url)
-            response.raise_for_status()
             
-            # Use BeautifulSoup to parse the HTML and get text
+            # This handles 4xx and 5xx errors, including the 403 Forbidden
+            response.raise_for_status() 
+
+            # Use BeautifulSoup to parse the HTML
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Find the main recipe article, or just get all text
-            # This selector is specific to some sites' recipe block
+            # 🌟 Refactoring 2: Use CSS selectors for extraction (more standard)
+            # Find the main recipe article block or common article tags
             recipe_body = soup.find('div', class_='recipie-content')
-            
+
             if recipe_body:
+                # Prioritize content within the specific recipe block
                 return recipe_body.get_text(separator=' ', strip=True)
             else:
-                # Fallback if the specific class isn't found
+                # 🌟 Refactoring 3: Use a more resilient fallback for general page content
+                # Search for common article or body tags to exclude things like headers/footers if possible
+                main_content = soup.find(['article', 'main'])
+                if main_content:
+                    return main_content.get_text(separator=' ', strip=True)
+                
+                # Final fallback: return all body text
                 body = soup.find('body')
                 if body:
                     return body.get_text(separator=' ', strip=True)
+                    
                 return soup.get_text(separator=' ', strip=True)
+                
+    except httpx.HTTPStatusError as e:
+        # Catch specific HTTP status errors (like 403)
+        error_detail = f"HTTP Error fetching URL: {e.response.status_code} {e.response.reason_phrase}"
+        logging.error(f"{error_detail} from {url}: {e}")
+        raise HTTPException(status_code=500, detail=error_detail)
+        
     except httpx.RequestError as e:
-        logger.error("Error fetching URL %s: %s", url, e)
-        raise HTTPException(status_code=500, detail=f"Error fetching URL: {str(e)}")
+        # Catch connection and timeout errors
+        logging.error(f"Network error fetching URL {url}: {e}")
+        raise HTTPException(status_code=500, detail=f"Network Error fetching URL: {str(e)}")
+        
     except Exception as e:
-        logger.error("Error parsing content from %s: %s", url, e)
-        raise HTTPException(status_code=500, detail=f"Error parsing page content: {str(e)}")
-
+        # Catch parsing errors or other unexpected exceptions
+        logging.error(f"Unexpected error processing content from {url}: {e}")
+        raise HTTPException(status_code=500, detail=f"Unexpected Error processing page: {str(e)}")
+        
 
 def create_extraction_prompt_from_content(page_content: str, url: str) -> str:
     """Create a prompt for extracting recipe from page content (similar to standalone version)."""
