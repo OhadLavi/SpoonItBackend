@@ -30,6 +30,7 @@ PLAYWRIGHT_TIMEOUT_MS = int(os.getenv("PLAYWRIGHT_TIMEOUT_MS", "45000"))
 FETCH_MAX_BYTES = 2_500_000
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+ZYTE_API_KEY = os.getenv("ZYTE_API_KEY", "")
 
 # =============================================================================
 # Headers / UA rotation
