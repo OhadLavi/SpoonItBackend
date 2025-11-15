@@ -33,13 +33,16 @@ def _normalize_quotes(text: str) -> str:
     return (
         text
         # Curly double quotes
-        .replace("\u201c", '"').replace("\u201d", '"')
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
         # Low double quote
         .replace("\u201e", '"')
         # Angle quotes
-        .replace("\u00ab", '"').replace("\u00bb", '"')
+        .replace("\u00ab", '"')
+        .replace("\u00bb", '"')
         # Curly single quotes
-        .replace("\u2018", "'").replace("\u2019", "'")
+        .replace("\u2018", "'")
+        .replace("\u2019", "'")
         # Low single quote
         .replace("\u201a", "'")
     )
@@ -133,6 +136,64 @@ def _fix_newlines_inside_strings(s: str) -> str:
     return "".join(out)
 
 
+def _escape_unescaped_inner_quotes(s: str) -> str:
+    """
+    Inside JSON strings, escape inner quotes that are very likely to be part
+    of the value (e.g. ק"ג) rather than the end of the string.
+
+    Heuristic:
+      - While inside a string:
+        - If we see a quote (") that is NOT escaped:
+          - Look ahead to the next non-space character.
+          - If it's one of , } ] : or end-of-text -> treat as closing quote.
+          - Otherwise -> treat as inner quote and convert to \".
+    """
+    out: list[str] = []
+    in_string = False
+    escape = False
+    n = len(s)
+
+    i = 0
+    while i < n:
+        ch = s[i]
+
+        if in_string:
+            if escape:
+                # Previous char was a backslash, so this char is escaped.
+                out.append(ch)
+                escape = False
+            elif ch == "\\":
+                out.append(ch)
+                escape = True
+            elif ch == '"':
+                # Candidate closing or inner quote
+                j = i + 1
+                while j < n and s[j].isspace():
+                    j += 1
+
+                if j >= n or s[j] in ",}]:":
+                    # Looks like a real closing quote
+                    out.append(ch)
+                    in_string = False
+                else:
+                    # Looks like an inner quote (e.g. ק"ג) – escape it
+                    out.append("\\")
+                    out.append('"')
+                # Note: don't change `escape` here
+            else:
+                out.append(ch)
+        else:
+            if ch == '"':
+                out.append(ch)
+                in_string = True
+            else:
+                out.append(ch)
+
+        i += 1
+
+    return "".join(out)
+
+
 def _remove_trailing_commas(s: str) -> str:
     """Remove trailing commas before closing } or ]."""
     return re.sub(r",(\s*[}\]])", r"\1", s)
@@ -166,8 +227,9 @@ def _repair_and_load(output: str) -> Dict[str, Any]:
     s = _normalize_quotes(s)
     s = _extract_json_block(s)
 
-    # Fix common structural issues
+    # Fix newlines inside strings and inner quotes
     s = _fix_newlines_inside_strings(s)
+    s = _escape_unescaped_inner_quotes(s)
     s = _remove_trailing_commas(s)
 
     # First, try straight JSON
@@ -178,6 +240,7 @@ def _repair_and_load(output: str) -> Dict[str, Any]:
 
     # Second attempt: quote unquoted keys + collapse whitespace
     s2 = _quote_unquoted_keys(s)
+    s2 = _escape_unescaped_inner_quotes(s2)
     s2 = _remove_trailing_commas(s2)
     s2 = _collapse_whitespace(s2)
 
