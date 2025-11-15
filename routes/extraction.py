@@ -64,13 +64,17 @@ async def fetch_zyte_content(url: str) -> Dict[str, Any]:
         )
         response.raise_for_status()
         data = response.json()
-        
+
+        # Debug log so we can see what Zyte actually returned when it fails
+        logger.debug("[ZYTE] Raw response for %s: %s", url, repr(data))
+
         article_list = data.get("articleList", [])
         if not article_list:
+            logger.error("[ZYTE] No articleList in response for %s: %s", url, data)
             raise APIError(
                 "No article content found in Zyte response",
                 status_code=502,
-                details={"code": "ZYTE_NO_ARTICLE", "url": url},
+                details={"code": "ZYTE_NO_ARTICLE", "url": url, "raw": data},
             )
         
         # Get the first article (main recipe)
@@ -82,19 +86,39 @@ async def fetch_zyte_content(url: str) -> Dict[str, Any]:
             "headline": article.get("headline", ""),
             "url": article.get("url", url),
         }
+
+    # 1) network / HTTP / timeout errors from requests
     except requests.exceptions.RequestException as e:
-        logger.error("[ZYTE] Request error: %s", e, exc_info=True)
+        logger.error("[ZYTE] Request error for %s: %s", url, e, exc_info=True)
         raise APIError(
             f"Zyte API request failed: {str(e)}",
             status_code=502,
             details={"code": "ZYTE_REQUEST_FAILED", "url": url},
         )
+
+    # 2) preserve any APIError we ourselves raised above
+    except APIError:
+        # don't wrap again, just bubble up so the message/status_code stay intact
+        raise
+
+    # 3) truly unexpected stuff
     except Exception as e:
-        logger.error("[ZYTE] Unexpected error: %s", e, exc_info=True)
+        logger.error(
+            "[ZYTE] Unexpected error type=%s for %s: %r",
+            type(e).__name__,
+            url,
+            e,
+            exc_info=True,
+        )
         raise APIError(
-            f"Unexpected error fetching from Zyte: {str(e)}",
+            "Unexpected error fetching from Zyte",
             status_code=500,
-            details={"code": "ZYTE_UNEXPECTED", "url": url},
+            details={
+                "code": "ZYTE_UNEXPECTED",
+                "url": url,
+                "inner_type": type(e).__name__,
+                "inner": str(e),
+            },
         )
 
 
