@@ -65,20 +65,71 @@ async def fetch_zyte_content(url: str) -> Dict[str, Any]:
         response.raise_for_status()
         data = response.json()
 
-        # Debug log so we can see what Zyte actually returned when it fails
-        logger.debug("[ZYTE] Raw response for %s: %s", url, repr(data))
-
-        article_list = data.get("articleList", [])
-        if not article_list:
-            logger.error("[ZYTE] No articleList in response for %s: %s", url, data)
+        # Log the response structure for debugging
+        logger.info("[ZYTE] Response keys: %s", list(data.keys()) if isinstance(data, dict) else "not a dict")
+        
+        # Check if articleList exists and what type it is
+        article_list = data.get("articleList")
+        if article_list is None:
+            logger.error("[ZYTE] No articleList in response for %s. Response keys: %s", url, list(data.keys()) if isinstance(data, dict) else "not a dict")
+            # Try pageContent as fallback (as shown in scrape.py)
+            page_content = data.get("pageContent")
+            if page_content:
+                logger.info("[ZYTE] Using pageContent instead of articleList")
+                return {
+                    "itemMain": page_content,
+                    "images": data.get("images", []),
+                    "headline": data.get("headline", ""),
+                    "url": data.get("url", url),
+                }
             raise APIError(
                 "No article content found in Zyte response",
                 status_code=502,
-                details={"code": "ZYTE_NO_ARTICLE", "url": url, "raw": data},
+                details={"code": "ZYTE_NO_ARTICLE", "url": url, "response_keys": list(data.keys()) if isinstance(data, dict) else None},
             )
         
-        # Get the first article (main recipe)
-        article = article_list[0]
+        # Handle different response structures
+        if isinstance(article_list, dict):
+            # If articleList is a dict, try to get the first value or a specific key
+            logger.warning("[ZYTE] articleList is a dict, not a list. Keys: %s", list(article_list.keys()))
+            # Try to get the first item if it's a dict with numeric string keys
+            if "0" in article_list:
+                article = article_list["0"]
+            elif len(article_list) > 0:
+                # Get the first value from the dict
+                article = list(article_list.values())[0]
+            else:
+                raise APIError(
+                    "articleList dict is empty",
+                    status_code=502,
+                    details={"code": "ZYTE_NO_ARTICLE", "url": url},
+                )
+        elif isinstance(article_list, list):
+            if len(article_list) == 0:
+                logger.error("[ZYTE] articleList is empty for %s", url)
+                raise APIError(
+                    "No article content found in Zyte response (empty articleList)",
+                    status_code=502,
+                    details={"code": "ZYTE_NO_ARTICLE", "url": url},
+                )
+            # Get the first article (main recipe)
+            article = article_list[0]
+        else:
+            logger.error("[ZYTE] articleList is unexpected type: %s for %s", type(article_list), url)
+            raise APIError(
+                f"Unexpected articleList type: {type(article_list)}",
+                status_code=502,
+                details={"code": "ZYTE_UNEXPECTED_TYPE", "url": url, "type": str(type(article_list))},
+            )
+        
+        # Ensure article is a dict before accessing its keys
+        if not isinstance(article, dict):
+            logger.error("[ZYTE] Article is not a dict: %s (type: %s) for %s", article, type(article), url)
+            raise APIError(
+                f"Article data is not a dictionary: {type(article)}",
+                status_code=502,
+                details={"code": "ZYTE_INVALID_ARTICLE", "url": url, "article_type": str(type(article))},
+            )
         
         return {
             "itemMain": article.get("itemMain", ""),
