@@ -61,6 +61,7 @@ async def fetch_zyte_content(url: str) -> Dict[str, Any]:
                 "followRedirect": True,
             },
             timeout=HTTP_TIMEOUT,
+            verify=False,
         )
         response.raise_for_status()
         data = response.json()

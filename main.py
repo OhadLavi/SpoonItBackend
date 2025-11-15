@@ -356,7 +356,11 @@ async def test_zyte_page():
 app.include_router(chat.router, tags=["Chat"])
 app.include_router(extraction.router, tags=["Extraction"])
 app.include_router(proxy.router, tags=["Proxy"])
-
+@app.get("/ip")
+async def ip_check():
+    """Return the public IP of outbound Cloud Run traffic"""
+    r = requests.get("https://api64.ipify.org?format=json", timeout=5)
+    return {"ip": r.json().get("ip")}
 # =============================================================================
 # Entrypoint
 # =============================================================================
