@@ -139,12 +139,52 @@ async def fetch_zyte_content(url: str) -> Dict[str, Any]:
         }
 
     # 1) network / HTTP / timeout errors from requests
+    except requests.exceptions.HTTPError as e:
+        # HTTP errors (4xx, 5xx)
+        status_code = e.response.status_code if e.response else None
+        response_text = ""
+        try:
+            if e.response:
+                response_text = e.response.text[:500]  # First 500 chars
+        except Exception:
+            pass
+        
+        logger.error(
+            "[ZYTE] HTTP error for %s: status=%s, response=%s",
+            url,
+            status_code,
+            response_text[:200] if response_text else "no response body",
+            exc_info=True,
+        )
+        
+        # 520 is Cloudflare error - origin server issue
+        if status_code == 520:
+            raise APIError(
+                "Zyte API received 520 error from origin server (site may be blocking Zyte). Try again later.",
+                status_code=502,
+                details={
+                    "code": "ZYTE_520_ERROR",
+                    "url": url,
+                    "message": "Origin server returned invalid response to Zyte",
+                },
+            )
+        
+        raise APIError(
+            f"Zyte API request failed with status {status_code}: {str(e)}",
+            status_code=502,
+            details={
+                "code": "ZYTE_REQUEST_FAILED",
+                "url": url,
+                "http_status": status_code,
+                "response_preview": response_text[:200] if response_text else None,
+            },
+        )
     except requests.exceptions.RequestException as e:
         logger.error("[ZYTE] Request error for %s: %s", url, e, exc_info=True)
         raise APIError(
             f"Zyte API request failed: {str(e)}",
             status_code=502,
-            details={"code": "ZYTE_REQUEST_FAILED", "url": url},
+            details={"code": "ZYTE_REQUEST_FAILED", "url": url, "error_type": type(e).__name__},
         )
 
     # 2) preserve any APIError we ourselves raised above
@@ -763,6 +803,50 @@ async def upload_recipe_image(file: UploadFile = File(...)):
     except Exception as e:
         logger.error("[UPLOAD] error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error processing uploaded image: {str(e)}")
+
+
+@router.get("/test_zyte")
+async def test_zyte(url: str = "https://kerenagam.co.il/%d7%a8%d7%95%d7%9c%d7%93%d7%aa-%d7%98%d7%99%d7%a8%d7%9e%d7%99%d7%a1%d7%95-%d7%99%d7%a4%d7%99%d7%a4%d7%99%d7%99%d7%94/"):
+    """Test endpoint to fetch raw JSON from Zyte API using httpResponseBody."""
+    if not ZYTE_API_KEY:
+        raise HTTPException(status_code=500, detail="ZYTE_API_KEY not configured")
+    
+    try:
+        api_response = requests.post(
+            "https://api.zyte.com/v1/extract",
+            auth=(ZYTE_API_KEY, ""),
+            json={
+                "url": url,
+                "httpResponseBody": True,
+                "followRedirect": True,
+            },
+            timeout=HTTP_TIMEOUT,
+        )
+        api_response.raise_for_status()
+        data = api_response.json()
+        
+        logger.info("[TEST_ZYTE] Successfully fetched from Zyte for url=%s", url)
+        return data
+    except requests.exceptions.HTTPError as e:
+        status_code = e.response.status_code if e.response else None
+        response_text = ""
+        try:
+            if e.response:
+                response_text = e.response.text[:1000]
+        except Exception:
+            pass
+        
+        logger.error("[TEST_ZYTE] HTTP error: status=%s, url=%s", status_code, url)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Zyte API error: HTTP {status_code}: {str(e)}",
+        )
+    except Exception as e:
+        logger.error("[TEST_ZYTE] Error: %s, url=%s", e, url, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error calling Zyte API: {str(e)}",
+        )
 
 
 @router.post("/custom_recipe")
