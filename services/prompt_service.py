@@ -179,14 +179,20 @@ Look for these patterns:
   - If you see "15 דקות" or "15 minutes" → prepTime: 15
   - If you see "30 דקות הכנה" → prepTime: 30
   - If you see "1 שעה" or "1 hour" → prepTime: 60
-  - If no prep time is mentioned → prepTime: 0
+  - If no prep time is mentioned in the content, ESTIMATE it from the instructions:
+    * Count preparation steps (chopping, mixing, marinating, etc.)
+    * Estimate 2-5 minutes per prep step
+    * Typical prep time: 10-30 minutes for most recipes
   - DO NOT confuse prep time with cook time or total time
 
 - cookTime: Extract ONLY cooking/baking time in MINUTES as integer
   - If you see "45 דקות" or "45 minutes" → cookTime: 45
   - If you see "1.5 שעות" or "1.5 hours" → cookTime: 90
   - If you see "בישול: 30 דקות" → cookTime: 30
-  - If no cook time is mentioned → cookTime: 0
+  - If no cook time is mentioned in the content, ESTIMATE it from the instructions:
+    * Look for cooking/baking steps with time mentions (e.g., "אופים 20 דקות", "מבשלים 15 דקות")
+    * If instructions mention "אופים" (bake) or "מבשלים" (cook) with time → use that time
+    * Typical cook time: 15-60 minutes for most recipes, 60-120+ for baking
   - DO NOT confuse cook time with prep time or total time
 
 - servings: Extract the number of servings as integer
@@ -438,14 +444,20 @@ Look for these patterns:
   - If you see "15 דקות" or "15 minutes" → prepTime: 15
   - If you see "30 דקות הכנה" → prepTime: 30
   - If you see "1 שעה" or "1 hour" → prepTime: 60
-  - If no prep time is mentioned → prepTime: 0
+  - If no prep time is mentioned in the content, ESTIMATE it from the instructions:
+    * Count preparation steps (chopping, mixing, marinating, etc.)
+    * Estimate 2-5 minutes per prep step
+    * Typical prep time: 10-30 minutes for most recipes
   - DO NOT confuse prep time with cook time or total time
 
 - cookTime: Extract ONLY cooking/baking time in MINUTES as integer
   - If you see "45 דקות" or "45 minutes" → cookTime: 45
   - If you see "1.5 שעות" or "1.5 hours" → cookTime: 90
   - If you see "בישול: 30 דקות" → cookTime: 30
-  - If no cook time is mentioned → cookTime: 0
+  - If no cook time is mentioned in the content, ESTIMATE it from the instructions:
+    * Look for cooking/baking steps with time mentions (e.g., "אופים 20 דקות", "מבשלים 15 דקות")
+    * If instructions mention "אופים" (bake) or "מבשלים" (cook) with time → use that time
+    * Typical cook time: 15-60 minutes for most recipes, 60-120+ for baking
   - DO NOT confuse cook time with prep time or total time
 
 - servings: Extract the number of servings as integer
@@ -694,14 +706,20 @@ Look for these patterns:
   - If you see "15 דקות" or "15 minutes" → prepTime: 15
   - If you see "30 דקות הכנה" → prepTime: 30
   - If you see "1 שעה" or "1 hour" → prepTime: 60
-  - If no prep time is mentioned → prepTime: 0
+  - If no prep time is mentioned in the content, ESTIMATE it from the instructions:
+    * Count preparation steps (chopping, mixing, marinating, etc.)
+    * Estimate 2-5 minutes per prep step
+    * Typical prep time: 10-30 minutes for most recipes
   - DO NOT confuse prep time with cook time or total time
 
 - cookTime: Extract ONLY cooking/baking time in MINUTES as integer
   - If you see "45 דקות" or "45 minutes" → cookTime: 45
   - If you see "1.5 שעות" or "1.5 hours" → cookTime: 90
   - If you see "בישול: 30 דקות" → cookTime: 30
-  - If no cook time is mentioned → cookTime: 0
+  - If no cook time is mentioned in the content, ESTIMATE it from the instructions:
+    * Look for cooking/baking steps with time mentions (e.g., "אופים 20 דקות", "מבשלים 15 דקות")
+    * If instructions mention "אופים" (bake) or "מבשלים" (cook) with time → use that time
+    * Typical cook time: 15-60 minutes for most recipes, 60-120+ for baking
   - DO NOT confuse cook time with prep time or total time
 
 - servings: Extract the number of servings as integer

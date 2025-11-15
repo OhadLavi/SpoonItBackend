@@ -319,13 +319,18 @@ async def extract_recipe_from_zyte(url: str) -> Dict[str, Any]:
                 },
             )
 
-    # Images
+    # Images - normalize to list of strings
     image_url = ""
     all_images: list[str] = []
     images = zyte_data.get("images", [])
     if isinstance(images, list) and images:
-        all_images = images
-        image_url = images[0]
+        for img in images:
+            if isinstance(img, str) and img:
+                all_images.append(img)
+            elif isinstance(img, dict) and img.get("url"):
+                all_images.append(str(img["url"]))
+        if all_images:
+            image_url = all_images[0]
 
     # Build final recipe dict from Zyte + Gemini
     recipe_dict: Dict[str, Any] = {
@@ -344,14 +349,15 @@ async def extract_recipe_from_zyte(url: str) -> Dict[str, Any]:
         "images": all_images,
     }
 
-    # Number instructions
+    # Remove numbering from instructions (strip existing numbers, don't add new ones)
     instructions = recipe_dict.get("instructions", [])
-    numbered_instructions: list[str] = []
-    for i, instruction in enumerate(instructions, 1):
+    cleaned_instructions: list[str] = []
+    for instruction in instructions:
         instruction_str = str(instruction).strip()
+        # Remove leading numbers (e.g., "1. ", "2) ", "3. ", etc.)
         instruction_str = re.sub(r"^\d+[\.\)]\s*", "", instruction_str)
-        numbered_instructions.append(f"{i}. {instruction_str}")
-    recipe_dict["instructions"] = numbered_instructions
+        cleaned_instructions.append(instruction_str)
+    recipe_dict["instructions"] = cleaned_instructions
 
     # ingredientsGroups → Pydantic objects
     ingredients_groups = None
@@ -368,21 +374,21 @@ async def extract_recipe_from_zyte(url: str) -> Dict[str, Any]:
             logger.warning("Failed to parse ingredientsGroups: %s", e)
             ingredients_groups = None
 
-    recipe_model = RecipeModel(
-        title=recipe_dict.get("title", ""),
-        description=recipe_dict.get("description", ""),
-        ingredients=recipe_dict.get("ingredients", []),
-        ingredientsGroups=ingredients_groups,
-        instructions=numbered_instructions,
-        prepTime=recipe_dict.get("prepTime", 0),
-        cookTime=recipe_dict.get("cookTime", 0),
-        servings=recipe_dict.get("servings", 1),
-        tags=recipe_dict.get("tags", []),
-        notes=recipe_dict.get("notes", ""),
-        source=recipe_dict.get("source", url),
-        imageUrl=recipe_dict.get("imageUrl", ""),
-        images=recipe_dict.get("images", []),
-    )
+        recipe_model = RecipeModel(
+            title=recipe_dict.get("title", ""),
+            description=recipe_dict.get("description", ""),
+            ingredients=recipe_dict.get("ingredients", []),
+            ingredientsGroups=ingredients_groups,
+            instructions=cleaned_instructions,
+            prepTime=recipe_dict.get("prepTime", 0),
+            cookTime=recipe_dict.get("cookTime", 0),
+            servings=recipe_dict.get("servings", 1),
+            tags=recipe_dict.get("tags", []),
+            notes=recipe_dict.get("notes", ""),
+            source=recipe_dict.get("source", url),
+            imageUrl=recipe_dict.get("imageUrl", ""),
+            images=recipe_dict.get("images", []),
+        )
 
     logger.info(
         "[ZYTE] done | title='%s' ings=%d steps=%d prep=%d cook=%d",
@@ -692,14 +698,15 @@ async def extract_recipe(req: RecipeExtractionRequest):
         if not recipe_dict.get("source"):
             recipe_dict["source"] = url
 
-        # Number instructions
+        # Remove numbering from instructions (strip existing numbers, don't add new ones)
         instructions = recipe_dict.get("instructions", [])
-        numbered_instructions: list[str] = []
-        for i, instruction in enumerate(instructions, 1):
+        cleaned_instructions: list[str] = []
+        for instruction in instructions:
             instruction_str = str(instruction).strip()
+            # Remove leading numbers (e.g., "1. ", "2) ", "3. ", etc.)
             instruction_str = re.sub(r"^\d+[\.\)]\s*", "", instruction_str)
-            numbered_instructions.append(f"{i}. {instruction_str}")
-        recipe_dict["instructions"] = numbered_instructions
+            cleaned_instructions.append(instruction_str)
+        recipe_dict["instructions"] = cleaned_instructions
 
         # ingredientsGroups → Pydantic objects
         ingredients_groups = None
@@ -727,7 +734,7 @@ async def extract_recipe(req: RecipeExtractionRequest):
             description=recipe_dict.get("description", ""),
             ingredients=recipe_dict.get("ingredients", []),
             ingredientsGroups=ingredients_groups,
-            instructions=numbered_instructions,
+            instructions=cleaned_instructions,
             prepTime=int(recipe_dict.get("prepTime", 0) or 0),
             cookTime=int(recipe_dict.get("cookTime", 0) or 0),
             servings=int(recipe_dict.get("servings", 1) or 1),
