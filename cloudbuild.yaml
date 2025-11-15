@@ -9,3 +9,11 @@ steps:
 
 images:
   - 'gcr.io/$PROJECT_ID/spoonit-backend:$COMMIT_SHA'
+
+options:
+  # This satisfies the new requirement when using a custom build.service_account
+  logging: CLOUD_LOGGING_ONLY
+  # (optional) you could also use:
+  # logging: NONE
+  # or instead:
+  # defaultLogsBucketBehavior: REGIONAL_USER_OWNED_BUCKET
