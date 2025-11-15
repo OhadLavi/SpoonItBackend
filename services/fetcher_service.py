@@ -5,7 +5,7 @@ import asyncio
 import os
 import random
 import re
-from typing import Optional
+from typing import Optional, Tuple
 
 import httpx
 
@@ -25,31 +25,86 @@ except Exception:
     async_playwright = None  # will be checked at runtime
 
 
+_ACCEPT_LANGS = [
+    "he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7",
+    "en-US,en;q=0.9,he;q=0.8",
+    "en-GB,en;q=0.9",
+]
+
+_REFERERS = [
+    "https://www.google.com/",
+    "https://www.bing.com/",
+    "https://duckduckgo.com/",
+]
+
+
+def _sec_ch_for_ua(ua: str) -> Tuple[str, str, str]:
+    """Return sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform headers."""
+
+    is_mobile = "mobile" in ua.lower()
+    if "safari" in ua.lower() and "chrome" not in ua.lower():
+        sec_ch = '"Not/A)Brand";v="8", "Safari";v="17"'
+        platform = '"macOS"'
+    elif "android" in ua.lower():
+        sec_ch = '"Not/A)Brand";v="8", "Chromium";v="127", "Google Chrome";v="127"'
+        platform = '"Android"'
+    elif "mac os" in ua.lower():
+        sec_ch = '"Not/A)Brand";v="8", "Chromium";v="127", "Google Chrome";v="127"'
+        platform = '"macOS"'
+    else:
+        sec_ch = '"Not/A)Brand";v="8", "Chromium";v="127", "Google Chrome";v="127"'
+        platform = '"Windows"'
+
+    return sec_ch, "?1" if is_mobile else "?0", platform
+
+
 def _default_headers() -> dict:
     """Generate default HTTP headers with random user agent."""
+
     ua = random.choice(BROWSER_UAS)
+    sec_ch, sec_mobile, sec_platform = _sec_ch_for_ua(ua)
     return {
         "User-Agent": ua,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept-Language": random.choice(_ACCEPT_LANGS),
+        "Accept-Encoding": "gzip, deflate, br",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
-        "Referer": "https://www.google.com/",
+        "Connection": "keep-alive",
+        "Referer": random.choice(_REFERERS),
         "DNT": "1",
         "Sec-Fetch-Dest": "document",
         "Sec-Fetch-Mode": "navigate",
         "Sec-Fetch-Site": "cross-site",
+        "Sec-Fetch-User": "?1",
+        "sec-ch-ua": sec_ch,
+        "sec-ch-ua-mobile": sec_mobile,
+        "sec-ch-ua-platform": sec_platform,
         "Upgrade-Insecure-Requests": "1",
     }
 
 
 def _looks_blocked(text: str) -> bool:
-    """Check if response looks like a bot blocker page."""
+    """Check if response looks like a bot blocker page with looser heuristics."""
+
     if not text:
         return True
-    if len(text) < 500:  # tiny pages are often interstitials / blocks
+
+    normalized = text.strip()
+    if not normalized:
         return True
-    return bool(BLOCK_PATTERNS.search(text))
+
+    if BLOCK_PATTERNS.search(normalized):
+        return True
+
+    # Previously we flagged every short response as blocked which produced
+    # false positives for minimalist recipe pages. Only treat extremely short
+    # snippets as blocked when there is no meaningful content at all.
+    if len(normalized) < 160:
+        alnum_ratio = sum(ch.isalnum() for ch in normalized) / max(len(normalized), 1)
+        return alnum_ratio < 0.25
+
+    return False
 
 
 async def _httpx_fetch(url: str) -> str:
@@ -58,6 +113,7 @@ async def _httpx_fetch(url: str) -> str:
         timeout=HTTP_TIMEOUT,
         headers=_default_headers(),
         follow_redirects=True,
+        http2=True,
     ) as client:
         r = await client.get(url)
         r.raise_for_status()
@@ -67,6 +123,30 @@ async def _httpx_fetch(url: str) -> str:
         text = re.sub(r'<[^>]+>', ' ', html)
         text = re.sub(r'\s+', ' ', text)
         if len(text.encode('utf-8')) > 50_000:
+            text = text[:50_000]
+        return text.strip()
+
+
+def _jina_proxy_url(url: str) -> str:
+    """Return the URL wrapped in the r.jina.ai readability proxy."""
+
+    normalized = url.strip()
+    if not normalized.startswith(("http://", "https://")):
+        normalized = f"https://{normalized.lstrip('/')}"
+    return f"https://r.jina.ai/{normalized}"
+
+
+async def _jina_ai_fetch(url: str) -> str:
+    """Fetch page content through the jina.ai readability proxy service."""
+
+    proxy_url = _jina_proxy_url(url)
+    headers = _default_headers()
+    headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7"
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, headers=headers, follow_redirects=True) as client:
+        r = await client.get(proxy_url)
+        r.raise_for_status()
+        text = re.sub(r"\s+", " ", r.text)
+        if len(text.encode("utf-8")) > 50_000:
             text = text[:50_000]
         return text.strip()
 
@@ -197,12 +277,34 @@ async def _playwright_fetch(url: str) -> str:
 
 async def fetch_html_content(url: str) -> str:
     """Fetch HTML content from URL with automatic fallback to Playwright if blocked."""
+
+    async def _try_jina_proxy(reason: str) -> Optional[str]:
+        try:
+            logger.info("[FETCH] Trying jina.ai proxy fallback (%s) for %s", reason, url)
+            proxy_text = await _jina_ai_fetch(url)
+            if _looks_blocked(proxy_text):
+                logger.warning("[FETCH] jina.ai proxy result still looks blocked/empty (%d chars)", len(proxy_text))
+                return None
+            return proxy_text
+        except Exception as proxy_error:
+            logger.warning("[FETCH] jina.ai proxy fetch failed: %s", proxy_error, exc_info=True)
+            return None
+
     try:
         text = await _httpx_fetch(url)
         if _looks_blocked(text):
             logger.warning("[FETCH] httpx content looks blocked/short (%d chars). Trying Playwright.", len(text))
-            text = await _playwright_fetch(url)
+            try:
+                text = await _playwright_fetch(url)
+            except APIError:
+                proxy = await _try_jina_proxy("playwright_unavailable")
+                if proxy:
+                    return proxy
+                raise
         if _looks_blocked(text):
+            proxy = await _try_jina_proxy("blocked_after_playwright")
+            if proxy:
+                return proxy
             raise APIError(
                 "Remote site is blocking server fetch (403). Ask client to supply html_content.",
                 status_code=403,
@@ -216,6 +318,9 @@ async def fetch_html_content(url: str) -> str:
             try:
                 text = await _playwright_fetch(url)
                 if _looks_blocked(text):
+                    proxy = await _try_jina_proxy("blocked_after_status_playwright")
+                    if proxy:
+                        return proxy
                     raise APIError(
                         "Remote site is blocking server fetch (403). Ask client to supply html_content.",
                         status_code=403,
@@ -223,9 +328,15 @@ async def fetch_html_content(url: str) -> str:
                     )
                 return text
             except APIError:
+                proxy = await _try_jina_proxy("playwright_apierror")
+                if proxy:
+                    return proxy
                 raise
             except Exception as e2:
                 logger.warning("[FETCH] Playwright fallback failed: %s", e2, exc_info=True)
+                proxy = await _try_jina_proxy("playwright_exception")
+                if proxy:
+                    return proxy
                 raise APIError(
                     "Remote site is blocking server fetch (403). Ask client to supply html_content.",
                     status_code=403,
