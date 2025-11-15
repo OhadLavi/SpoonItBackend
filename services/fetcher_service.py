@@ -15,6 +15,7 @@ from config import (
     PLAYWRIGHT_TIMEOUT_MS,
     BROWSER_UAS,
     BLOCK_PATTERNS,
+    ZYTE_API_KEY,
 )
 from errors import APIError
 
@@ -314,7 +315,16 @@ async def fetch_html_content(url: str) -> str:
     except httpx.HTTPStatusError as e:
         status = e.response.status_code
         logger.warning("[FETCH] httpx status=%s for %s", status, url)
-        if status in (401, 403, 406, 429, 451, 503):
+        # If 403 error, immediately use Zyte (skip Playwright and Jina)
+        if status == 403:
+            logger.info("[FETCH] 403 error detected, using Zyte fallback (skipping Playwright/Jina)")
+            raise APIError(
+                "Remote site is blocking server fetch (403). Using Zyte fallback.",
+                status_code=403,
+                details={"code": "FETCH_FORBIDDEN", "url": url},
+            )
+        # For other status codes, try Playwright/Jina as before
+        if status in (401, 406, 429, 451, 503):
             try:
                 text = await _playwright_fetch(url)
                 if _looks_blocked(text):
@@ -322,8 +332,8 @@ async def fetch_html_content(url: str) -> str:
                     if proxy:
                         return proxy
                     raise APIError(
-                        "Remote site is blocking server fetch (403). Ask client to supply html_content.",
-                        status_code=403,
+                        "Remote site is blocking server fetch.",
+                        status_code=status,
                         details={"code": "FETCH_FORBIDDEN", "url": url},
                     )
                 return text
@@ -338,8 +348,8 @@ async def fetch_html_content(url: str) -> str:
                 if proxy:
                     return proxy
                 raise APIError(
-                    "Remote site is blocking server fetch (403). Ask client to supply html_content.",
-                    status_code=403,
+                    "Remote site is blocking server fetch.",
+                    status_code=status,
                     details={"code": "FETCH_FORBIDDEN", "url": url},
                 )
         raise APIError(
