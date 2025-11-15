@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, HTMLResponse
 from config import logger
 from errors import APIError
 from routes import chat, extraction, proxy
-
+import requests
 # =============================================================================
 # FastAPI app
 # =============================================================================
@@ -356,11 +356,17 @@ async def test_zyte_page():
 app.include_router(chat.router, tags=["Chat"])
 app.include_router(extraction.router, tags=["Extraction"])
 app.include_router(proxy.router, tags=["Proxy"])
+
 @app.get("/ip")
 async def ip_check():
-    """Return the public IP of outbound Cloud Run traffic"""
-    r = requests.get("https://api64.ipify.org?format=json", timeout=5)
-    return {"ip": r.json().get("ip")}
+    """Return the public IP of outbound Cloud Run traffic."""
+    try:
+        r = requests.get("https://api64.ipify.org?format=json", timeout=10)
+        return {"ip": r.json().get("ip")}
+    except Exception as e:
+        logger.error("IP check failed: %s", e, exc_info=True)
+        return {"error": str(e)}
+
 # =============================================================================
 # Entrypoint
 # =============================================================================
