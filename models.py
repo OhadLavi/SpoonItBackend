@@ -49,4 +49,5 @@ class RecipeModel(BaseModel):
     notes: str = ""
     source: str = ""
     imageUrl: str = ""
+    images: Optional[List[str]] = None  # Multiple images support
 
