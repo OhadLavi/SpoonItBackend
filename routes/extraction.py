@@ -4,7 +4,7 @@
 import base64
 import json
 import re
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -39,942 +39,591 @@ from utils.normalization import normalize_recipe_fields
 router = APIRouter()
 
 
-# =====================================================================
+# =============================================================================
 # ZYTE INTEGRATION
-# =====================================================================
+# =============================================================================
 
 
 async def fetch_zyte_content(url: str) -> Dict[str, Any]:
     """
-    Fetch article content from Zyte API.
+    Fetch page content via Zyte API.
 
-    Returns a dictionary with:
-    - itemMain: main article content (string)
-    - images: list of image URLs (list[str])
-    - headline: article title
-    - title: page title
-    - url: article URL (canonical if available)
+    Returns the Zyte JSON payload. Raises APIError on 4xx/5xx or network issues.
     """
     if not ZYTE_API_KEY:
         raise APIError(
-            "ZYTE_API_KEY not configured",
-            status_code=500,
-            details={"code": "ZYTE_NOT_CONFIGURED"},
+            code="ZYTE_DISABLED",
+            message="Zyte API key is not configured on the server.",
+            details={"url": url},
         )
 
-    payload: Dict[str, Any] = {
+    zyte_url = "https://api.zyte.com/v1/extract"
+    payload = {
         "url": url,
-        "pageContent": True,
-        "pageContentOptions": {"extractFrom": "httpResponseBody"},
-        "followRedirect": True,
+        "browserHtml": True,
+        "httpResponseBody": True,
+        "screenshot": False,
     }
 
+    logger.info("[ZYTE] Requesting Zyte extraction | url=%s", url)
+
     try:
-        async with httpx.AsyncClient(
-            timeout=HTTP_TIMEOUT,
-            auth=(ZYTE_API_KEY, ""),
-        ) as client:
-            resp = await client.post("https://api.zyte.com/v1/extract", json=payload)
-            resp.raise_for_status()
-
-        # Explicit JSON decode handling so we don't hide it as ZYTE_UNEXPECTED
-        try:
-            data = resp.json()
-        except json.JSONDecodeError as e:
-            body_preview = ""
-            try:
-                body_preview = resp.text[:500]
-            except Exception:
-                pass
-
-            logger.error(
-                "[ZYTE] JSON decode error for %s: %s | body=%s",
-                url,
-                e,
-                body_preview or "no body",
-                exc_info=True,
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            resp = await client.post(
+                zyte_url,
+                json=payload,
+                auth=(ZYTE_API_KEY, ""),
             )
-            raise APIError(
-                "Zyte returned non-JSON response",
-                status_code=502,
-                details={
-                    "code": "ZYTE_BAD_JSON",
-                    "url": url,
-                    "body_preview": body_preview or None,
-                },
-            )
-
-        logger.info(
-            "[ZYTE] Response keys: %s",
-            list(data.keys()) if isinstance(data, dict) else "not a dict",
-        )
-
-        if not isinstance(data, dict):
-            raise APIError(
-                "Zyte returned unexpected response format",
-                status_code=502,
-                details={"code": "ZYTE_BAD_FORMAT", "url": url},
-            )
-
-        # 1) Prefer top-level fields
-        item_main = data.get("itemMain")
-        headline = data.get("headline")
-        title = data.get("title")
-        images = data.get("images")
-
-        # 2) If pageContent exists, it can override / augment these
-        page_content_raw = data.get("pageContent")
-        page_content_dict: Dict[str, Any] | None = None
-
-        if page_content_raw:
-            if isinstance(page_content_raw, str):
-                try:
-                    page_content_dict = json.loads(page_content_raw)
-                except json.JSONDecodeError:
-                    logger.warning(
-                        "[ZYTE] pageContent is not valid JSON, treating as plain text"
-                    )
-                    page_content_dict = {"itemMain": page_content_raw}
-            elif isinstance(page_content_raw, dict):
-                page_content_dict = page_content_raw
-            else:
-                logger.warning(
-                    "[ZYTE] pageContent is unexpected type: %s, converting to string",
-                    type(page_content_raw),
-                )
-                page_content_dict = {"itemMain": str(page_content_raw)}
-
-            # Override with values from pageContent if present
-            item_main = page_content_dict.get("itemMain", item_main)
-            headline = page_content_dict.get("headline", headline)
-            title = page_content_dict.get("title", title)
-            images = page_content_dict.get("images", images)
-
-        # Fallbacks back to top-level if still missing
-        if not item_main:
-            item_main = data.get("itemMain", "")
-
-        if not headline:
-            headline = data.get("headline", "")
-
-        if not title:
-            title = data.get("title", "")
-
-        if not images:
-            images = data.get("images", [])
-
-        if not item_main or len(str(item_main).strip()) < 20:
-            logger.error(
-                "[ZYTE] No usable itemMain in response for %s. Response keys: %s",
-                url,
-                list(data.keys()),
-            )
-            raise APIError(
-                "No page content found in Zyte response",
-                status_code=502,
-                details={
-                    "code": "ZYTE_NO_PAGE_CONTENT",
-                    "url": url,
-                    "response_keys": list(data.keys()),
-                },
-            )
-
-        # Normalize images into list[str]
-        all_images: list[str] = []
-        if isinstance(images, list):
-            for img in images:
-                if isinstance(img, dict):
-                    img_url = img.get("url")
-                    if img_url:
-                        all_images.append(str(img_url))
-                elif isinstance(img, str) and img:
-                    all_images.append(img)
-
-        logger.info(
-            "[ZYTE] Extracted itemMain=%d chars, headline=%r, title=%r, images=%d",
-            len(str(item_main)) if item_main else 0,
-            (headline[:50] if isinstance(headline, str) and headline else "none"),
-            (title[:50] if isinstance(title, str) and title else "none"),
-            len(all_images),
-        )
-
-        return {
-            "itemMain": str(item_main),
-            "images": all_images,
-            "headline": headline or "",
-            "title": title or "",
-            "url": data.get("canonicalUrl") or data.get("url") or url,
-        }
-
-    except httpx.HTTPStatusError as e:
-        status_code = e.response.status_code if e.response is not None else None
-        text_preview = ""
-        try:
-            text_preview = e.response.text[:500] if e.response is not None else ""
-        except Exception:
-            pass
-
-        logger.error(
-            "[ZYTE] HTTP error for %s: status=%s body=%s",
-            url,
-            status_code,
-            text_preview or "no body",
-            exc_info=True,
-        )
-
-        # Special handling for 520 from origin via Zyte
-        if status_code == 520:
-            raise APIError(
-                "Zyte API received 520 error from origin server (site may be blocking Zyte). Try again later.",
-                status_code=502,
-                details={
-                    "code": "ZYTE_520_ERROR",
-                    "url": url,
-                    "message": "Origin server returned invalid response to Zyte",
-                    "response_preview": text_preview or None,
-                },
-            )
-
+    except Exception as exc:
+        logger.error("[ZYTE] Network error: %s", exc, exc_info=True)
         raise APIError(
-            f"Zyte API request failed with status {status_code}: {str(e)}",
-            status_code=502,
-            details={
-                "code": "ZYTE_REQUEST_FAILED",
-                "url": url,
-                "http_status": status_code,
-                "response_preview": text_preview or None,
-            },
+            code="ZYTE_NETWORK_ERROR",
+            message="Unexpected error while calling Zyte.",
+            details={"url": url, "error": str(exc)},
         )
 
-    except httpx.RequestError as e:
-        logger.error("[ZYTE] Request error for %s: %s", url, e, exc_info=True)
+    if resp.status_code == 403:
+        logger.warning("[ZYTE] 403 Forbidden from Zyte for url=%s", url)
         raise APIError(
-            f"Zyte API request failed: {str(e)}",
-            status_code=502,
-            details={
-                "code": "ZYTE_REQUEST_FAILED",
-                "url": url,
-                "error_type": type(e).__name__,
-            },
+            code="ZYTE_FORBIDDEN",
+            message="Access denied by Zyte for this URL.",
+            details={"url": url, "status_code": resp.status_code},
         )
 
-    except APIError:
-        # Preserve earlier APIError details
-        raise
-
-    except Exception as e:
+    if resp.status_code >= 500:
         logger.error(
-            "[ZYTE] Unexpected error type=%s for %s: %r",
-            type(e).__name__,
-            url,
-            e,
+            "[ZYTE] Server error from Zyte | status=%s body=%s",
+            resp.status_code,
+            resp.text[:500],
+        )
+        raise APIError(
+            code="ZYTE_SERVER_ERROR",
+            message="Zyte is temporarily unavailable.",
+            details={"url": url, "status_code": resp.status_code},
+        )
+
+    if resp.status_code >= 400:
+        logger.error(
+            "[ZYTE] Client error from Zyte | status=%s body=%s",
+            resp.status_code,
+            resp.text[:500],
+        )
+        raise APIError(
+            code="ZYTE_CLIENT_ERROR",
+            message="Zyte could not fetch the page.",
+            details={"url": url, "status_code": resp.status_code},
+        )
+
+    try:
+        data = resp.json()
+    except json.JSONDecodeError as exc:
+        logger.error(
+            "[ZYTE] Failed to parse Zyte JSON | body_head=%r error=%s",
+            resp.text[:200],
+            exc,
             exc_info=True,
         )
         raise APIError(
-            "Unexpected error fetching from Zyte",
-            status_code=500,
-            details={
-                "code": "ZYTE_UNEXPECTED",
-                "url": url,
-                "inner_type": type(e).__name__,
-                "inner": str(e),
-            },
+            code="ZYTE_JSON_ERROR",
+            message="Failed to parse Zyte response.",
+            details={"url": url},
         )
 
+    logger.info("[ZYTE] Success | url=%s", url)
+    return data
 
-async def extract_recipe_from_zyte(url: str) -> Dict[str, Any]:
-    """
-    Extract recipe using Zyte API and Gemini for ingredients/instructions.
 
-    Returns a complete RecipeModel dictionary.
+async def extract_recipe_from_zyte(request: RecipeExtractionRequest) -> RecipeModel:
     """
-    logger.info("[ZYTE] Fetching content from Zyte API for url=%s", url)
+    Fetch HTML via Zyte, then ask Gemini to extract a recipe JSON from it.
+    """
+    url = request.url
+    logger.info("[FLOW] extract_recipe (ZYTE) START | url=%s", url)
 
     zyte_data = await fetch_zyte_content(url)
-    item_main = zyte_data.get("itemMain", "")
 
-    if not item_main or len(item_main.strip()) < 100:
+    # Prefer browserHtml, fall back to httpResponseBody if needed.
+    page_html: Optional[str] = None
+    if isinstance(zyte_data, dict):
+        # Zyte often nests under "browserHtml" -> "html" or "httpResponseBody"
+        page_html = zyte_data.get("browserHtml") or zyte_data.get("httpResponseBody")
+
+    if not page_html:
+        logger.error("[ZYTE] No HTML content in Zyte response for url=%s", url)
         raise APIError(
-            "Zyte returned insufficient article content",
-            status_code=502,
-            details={"code": "ZYTE_INSUFFICIENT_CONTENT", "url": url},
+            code="ZYTE_NO_HTML",
+            message="Zyte did not return HTML content.",
+            details={"url": url},
         )
 
-    logger.info("[ZYTE] Extracting ingredients/instructions from Zyte content using Gemini")
+    # Build Gemini prompt specialized for Zyte HTML
+    prompt = create_zyte_extraction_prompt(page_html, url)
+
     model = get_gemini_model()
-    prompt = create_zyte_extraction_prompt(item_main)
-
-    generation_config = {
-        "temperature": 0.0,
-        "top_p": 0.1,
-        "top_k": 1,
-        "max_output_tokens": 8192,
-        "response_mime_type": "application/json",
-    }
-
-    response = model.generate_content(prompt, generation_config=generation_config)
-    response_text = (response.text or "").strip()
-
-    if not response_text:
-        logger.error("[ZYTE] Empty response from Gemini")
+    try:
+        response = model.generate_content(
+            prompt,
+            generation_config={
+                "temperature": 0.2,
+                "max_output_tokens": 2048,
+                "response_mime_type": "application/json",
+            },
+        )
+    except Exception as exc:
+        logger.error("[ZYTE] Gemini error during extraction: %s", exc, exc_info=True)
         raise APIError(
-            "Model returned empty response",
-            status_code=502,
-            details={"code": "LLM_EMPTY", "url": url},
+            code="LLM_ERROR",
+            message="Unexpected error while extracting recipe with Gemini (Zyte).",
+            details={"url": url, "error": str(exc)},
         )
 
-    # Strip code fences if any
-    if response_text.startswith("```"):
-        lines = response_text.split("\n")
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        response_text = "\n".join(lines).strip()
+    response_text = getattr(response, "text", None) or str(response)
 
-    # Parse JSON with repair fallback
+    # ---- Robust JSON parsing (direct + repair) ----
     try:
-        gemini_dict = json.loads(response_text)
+        gemini_dict: Dict[str, Any] = json.loads(response_text)
     except Exception:
         try:
             gemini_dict = await extract_and_parse_llm_json(response_text)
-        except Exception as e:
-            logger.error("[ZYTE] JSON parse error. Raw head: %r", response_text[:220])
+        except Exception as exc:
+            logger.error(
+                "[ZYTE] Failed to parse JSON response from Gemini: %s | head=%r",
+                exc,
+                response_text[:200],
+                exc_info=True,
+            )
             raise APIError(
-                f"Failed to parse JSON response from Gemini: {str(e)}",
-                status_code=500,
+                code="LLM_JSON_PARSE",
+                message="Failed to parse JSON response from Gemini (Zyte).",
                 details={
-                    "code": "LLM_JSON_PARSE",
-                    "raw_head": response_text[:500],
                     "url": url,
+                    "raw_head": response_text[:200],
                 },
             )
 
-    # Images - normalize to list of strings
-    image_url = ""
-    all_images: list[str] = []
-    images = zyte_data.get("images", [])
-    if isinstance(images, list) and images:
-        for img in images:
-            if isinstance(img, str) and img:
-                all_images.append(img)
-            elif isinstance(img, dict) and img.get("url"):
-                all_images.append(str(img["url"]))
-        if all_images:
-            image_url = all_images[0]
-
-    # Build final recipe dict from Zyte + Gemini
+    # Map from Gemini output to our RecipeModel fields (best-effort)
     recipe_dict: Dict[str, Any] = {
-        "title": zyte_data.get("headline", "") or zyte_data.get("title", ""),
-        "description": zyte_data.get("title", ""),
-        "ingredients": gemini_dict.get("ingredients", []),
-        "ingredientsGroups": gemini_dict.get("ingredientsGroups", []),
-        "instructions": gemini_dict.get("instructions", []),
-        "prepTime": int(gemini_dict.get("prepTime", 0) or 0),
-        "cookTime": int(gemini_dict.get("cookTime", 0) or 0),
-        "servings": int(gemini_dict.get("servings", 1) or 1),
-        "tags": gemini_dict.get("tags", []),
-        "notes": gemini_dict.get("notes", ""),
-        "source": zyte_data.get("url", url),
-        "imageUrl": image_url,
-        "images": all_images,
+        "title": gemini_dict.get("title", ""),
+        "description": gemini_dict.get("description", ""),
+        "url": url,
+        "servings": gemini_dict.get("servings"),
+        "prepTimeMinutes": gemini_dict.get("prepTimeMinutes"),
+        "cookTimeMinutes": gemini_dict.get("cookTimeMinutes"),
+        "totalTimeMinutes": gemini_dict.get("totalTimeMinutes"),
+        "ingredientsText": gemini_dict.get("ingredientsText") or "",
+        "steps": gemini_dict.get("steps") or [],
+        "cuisine": gemini_dict.get("cuisine"),
+        "course": gemini_dict.get("course"),
+        "diet": gemini_dict.get("diet"),
+        "imageUrl": gemini_dict.get("imageUrl"),
     }
 
-    # Remove numbering from instructions (strip existing numbers, don't add new ones)
-    instructions = recipe_dict.get("instructions", [])
-    cleaned_instructions: list[str] = []
-    for instruction in instructions:
-        instruction_str = str(instruction).strip()
-        # Remove leading numbers (e.g., "1. ", "2) ", "3. ", etc.)
-        instruction_str = re.sub(r"^\d+[\.\)]\s*", "", instruction_str)
-        cleaned_instructions.append(instruction_str)
-    recipe_dict["instructions"] = cleaned_instructions
-
-    # ingredientsGroups → Pydantic objects
-    ingredients_groups = None
-    raw_groups = recipe_dict.get("ingredientsGroups")
-    if isinstance(raw_groups, list):
+    # IngredientsGroups (optional)
+    ingredients_groups: Optional[List[IngredientGroup]] = None
+    if gemini_dict.get("ingredientsGroups"):
         try:
             ingredients_groups = [
                 IngredientGroup(
-                    category=(group.get("category", "") if isinstance(group, dict) else ""),
-                    ingredients=(group.get("ingredients", []) if isinstance(group, dict) else []),
+                    category=(
+                        group.get("category", "")
+                        if isinstance(group, dict)
+                        else ""
+                    ),
+                    ingredients=(
+                        group.get("ingredients", [])
+                        if isinstance(group, dict)
+                        else []
+                    ),
                 )
-                for group in raw_groups
+                for group in gemini_dict["ingredientsGroups"]
             ]
-        except Exception as e:
-            logger.warning("[ZYTE] Failed to parse ingredientsGroups: %s", e)
+        except Exception as exc:
+            logger.warning(
+                "[ZYTE] Failed to parse ingredientsGroups: %s", exc, exc_info=True
+            )
             ingredients_groups = None
 
-    recipe_model = RecipeModel(
-        title=recipe_dict.get("title", ""),
-        description=recipe_dict.get("description", ""),
-        ingredients=recipe_dict.get("ingredients", []),
-        ingredientsGroups=ingredients_groups,
-        instructions=cleaned_instructions,
-        prepTime=recipe_dict.get("prepTime", 0),
-        cookTime=recipe_dict.get("cookTime", 0),
-        servings=recipe_dict.get("servings", 1),
-        tags=recipe_dict.get("tags", []),
-        notes=recipe_dict.get("notes", ""),
-        source=recipe_dict.get("source", url),
-        imageUrl=recipe_dict.get("imageUrl", ""),
-        images=recipe_dict.get("images", []),
-    )
+    recipe_dict["ingredientsGroups"] = ingredients_groups
+
+    # Normalize and build RecipeModel
+    recipe_dict = normalize_recipe_fields(recipe_dict)
+    recipe_model = RecipeModel(**recipe_dict)
 
     logger.info(
-        "[ZYTE] done | title='%s' ings=%d steps=%d prep=%d cook=%d",
+        "[ZYTE] DONE | title=%r ings=%d steps=%d",
         recipe_model.title,
-        len(recipe_model.ingredients),
-        len(recipe_model.instructions),
-        recipe_model.prepTime,
-        recipe_model.cookTime,
+        len(recipe_model.ingredientsGroups or []),
+        len(recipe_model.steps or []),
     )
+
+    return recipe_model
+
+
+# =============================================================================
+# CORE EXTRACTION FROM URL (non-Zyte)
+# =============================================================================
+
+
+async def extract_recipe_from_url(request: RecipeExtractionRequest) -> RecipeModel:
+    """
+    Fetch HTML (Playwright / httpx) and have Gemini extract a structured recipe.
+    """
+    url = request.url
+    logger.info("[FLOW] extract_recipe START | url=%s use_zyte=%s", url, request.use_zyte)
+
+    # fetch_html_content returns (html, final_url)
+    html_content, final_url = await fetch_html_content(url)
+
+    prompt = create_recipe_extraction_prompt(html_content, final_url)
+
+    model = get_gemini_model()
+    try:
+        response = model.generate_content(
+            prompt,
+            generation_config={
+                "temperature": 0.2,
+                "max_output_tokens": 2048,
+                "response_mime_type": "application/json",
+            },
+        )
+    except Exception as exc:
+        logger.error("[FLOW] Gemini error during extraction: %s", exc, exc_info=True)
+        raise APIError(
+            code="LLM_ERROR",
+            message="Unexpected error while extracting recipe with Gemini.",
+            details={"url": final_url, "error": str(exc)},
+        )
+
+    response_text = getattr(response, "text", None) or str(response)
+
+    # ---- Robust JSON parsing (direct + repair) ----
+    try:
+        recipe_dict: Dict[str, Any] = json.loads(response_text)
+    except Exception:
+        try:
+            recipe_dict = await extract_and_parse_llm_json(response_text)
+        except Exception as exc:
+            logger.error(
+                "[FLOW] Failed to parse JSON response from Gemini: %s | head=%r",
+                exc,
+                response_text[:200],
+                exc_info=True,
+            )
+            raise APIError(
+                code="LLM_JSON_PARSE",
+                message="Failed to parse JSON response from Gemini.",
+                details={
+                    "url": final_url,
+                    "raw_head": response_text[:200],
+                },
+            )
+
+    # Ensure URL field is set
+    recipe_dict.setdefault("url", final_url)
+
+    # Normalize fields according to our internal model
+    recipe_dict = normalize_recipe_fields(recipe_dict)
+    recipe_model = RecipeModel(**recipe_dict)
+
+    logger.info(
+        "[FLOW] extract_recipe DONE | title=%r ings=%d steps=%d",
+        recipe_model.title,
+        len(recipe_model.ingredientsGroups or []),
+        len(recipe_model.steps or []),
+    )
+
+    return recipe_model
+
+
+# =============================================================================
+# ROUTE: /extract_recipe
+# =============================================================================
+
+
+@router.post("/extract_recipe")
+async def extract_recipe_endpoint(request: RecipeExtractionRequest) -> Dict[str, Any]:
+    """
+    Main endpoint: extract a recipe from a URL.
+
+    If request.use_zyte is True, we go through Zyte; otherwise we fetch HTML
+    directly (Playwright / httpx).
+    """
+    try:
+        if getattr(request, "use_zyte", False):
+            recipe_model = await extract_recipe_from_zyte(request)
+        else:
+            recipe_model = await extract_recipe_from_url(request)
+    except APIError as api_err:
+        # Let APIError bubble up as HTTP 500 with structured JSON
+        logger.error(
+            "[FLOW] APIError in /extract_recipe: %s | code=%s",
+            api_err.message,
+            api_err.code,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": api_err.code,
+                "message": api_err.message,
+                "details": api_err.details,
+            },
+        )
 
     return recipe_model.model_dump()
 
 
-# =====================================================================
-# STANDARD URL → GEMINI PATH (WITH ZYTE FALLBACK ON 403)
-# =====================================================================
-
-
-async def get_page_content(url: str) -> str:
-    """
-    Fetches the page content using httpx/Playwright (via fetch_html_content).
-    If a 403 error occurs, we signal the caller to use Zyte fallback.
-    """
-    try:
-        text = await fetch_html_content(url)
-        return text
-    except APIError as api_err:
-        if api_err.status_code == 403:
-            logger.info(
-                "[FLOW] 403 error detected in fetch_html_content, signalling Zyte fallback | url=%s",
-                url,
-            )
-            raise APIError(
-                "Page is inaccessible (403), using Zyte fallback",
-                status_code=403,
-                details={"code": "FETCH_FORBIDDEN_ZYTE_FALLBACK", "url": url},
-            )
-        raise
-    except Exception as e:
-        logger.error(
-            "Unexpected error fetching page content from %s: %s", url, e, exc_info=True
-        )
-        raise APIError(
-            "Unexpected error fetching page content.",
-            status_code=500,
-            details={"code": "FETCH_UNEXPECTED", "url": url, "error": str(e)},
-        )
-
-
-def create_extraction_prompt_from_content(page_content: str, url: str) -> str:
-    """Create a prompt for extracting recipe from page content."""
-    content_preview = page_content[:10000]
-
-    json_format_template = """{
-  "title": "Recipe Title",
-  "description": "Recipe description or summary",
-  "ingredients": ["ingredient 1", "ingredient 2", ...],
-  "ingredientsGroups": [
-    {
-      "category": "Category name as written on page",
-      "ingredients": ["ingredient 1", "ingredient 2"]
-    }
-  ],
-  "instructions": ["step 1", "step 2", ...],
-  "prepTime": 0,
-  "cookTime": 0,
-  "servings": 1,
-  "tags": ["tag1", "tag2", ...],
-  "notes": "Any additional notes",
-  "source": "%s",
-  "imageUrl": "URL of recipe image if available"
-}""" % url
-
-    return f"""🚨 CRITICAL SYSTEM INSTRUCTION 🚨
-YOU ARE A DATA EXTRACTION ROBOT. YOUR ONLY JOB IS TO COPY TEXT EXACTLY AS WRITTEN.
-DO NOT PARAPHRASE. DO NOT TRANSLATE. DO NOT CHANGE ANYTHING.
-IF YOU CHANGE EVEN ONE WORD OR NUMBER, THE EXTRACTION HAS FAILED.
-
-Given the following webpage text, extract the recipe information into the specified JSON format.
-
-JSON FORMAT TO USE:
-{json_format_template}
-
-WEBPAGE TEXT:
-{content_preview}
-
-⚠️ CRITICAL - YOUR TASK IS TO COPY, NOT TO CREATE OR MODIFY ⚠️
-
-YOU ARE A COPY MACHINE, NOT A WRITER. DO NOT CHANGE ANYTHING.
-
-═══════════════════════════════════════════════════════════════
-STEP 1: EXTRACT ALL INGREDIENTS (MANDATORY - DO NOT MISS ANY)
-═══════════════════════════════════════════════════════════════
-
-🔍 MANDATORY: SEARCH FOR INGREDIENT SECTIONS (Hebrew & English):
-
-Hebrew patterns (MOST COMMON):
-- "מצרכים למתכון:" or "מצרכים:" or "חומרים:" → Main ingredients
-- "למילוי:" → Filling ingredients
-- "לציפוי:" → Topping/coating ingredients
-- "לבצק:" → Dough ingredients
-- "לרוטב:" → Sauce ingredients
-
-English patterns:
-- "Ingredients:", "For the filling:", "For the dough:", "For topping:"
-
-🚨 EXTRACTION RULES (MANDATORY - NO EXCEPTIONS):
-
-1. EXTRACT EVERY LINE UNDER INGREDIENT SECTIONS:
-   - See "מצרכים למתכון:" → Extract ALL lines until next section (למילוי/לציפוי/אופן ההכנה)
-   - See "למילוי:" → Extract ALL those lines too
-   - See "לציפוי:" → Extract ALL those lines too
-   - Keep extracting until you reach instructions section ("אופן ההכנה:" or "הוראות הכנה:")
-
-2. USE "ingredientsGroups" STRUCTURE:
-   {{
-     "ingredientsGroups": [
-       {{"category": "מצרכים למתכון:", "ingredients": ["ingredient 1", "ingredient 2", ...]}},
-       {{"category": "למילוי:", "ingredients": ["ingredient 3", "ingredient 4", ...]}},
-       {{"category": "לציפוי:", "ingredients": ["ingredient 5", "ingredient 6"]}}
-     ],
-     "ingredients": []
-   }}
-
-3. COPY EXACTLY - ZERO TOLERANCE FOR CHANGES:
-   - "1 קילו קמח לחם/חלה/פיצה או קמח לבן רגיל" → EXACT COPY
-   - "750 גר׳ בשר טחון" → EXACT COPY (NOT "750 גרם", NOT "0.75 קילו")
-   - "בצל גדול חתוך לקוביות קטנות" → EXACT COPY (NOT "1 בצל", NOT "בצל")
-   - "2 כפות שמרים יבשים" → EXACT COPY (NOT "2 כפות שמרים")
-
-4. IF NO INGREDIENTS EXTRACTED = COMPLETE FAILURE:
-   - Recipes ALWAYS have ingredients
-   - Empty "ingredientsGroups" and "ingredients" = YOU FAILED
-
-═══════════════════════════════════════════════════════════════
-STEP 2: EXTRACT TIME AND SERVINGS (MANDATORY - BE ACCURATE)
-═══════════════════════════════════════════════════════════════
-
-🔍 SEARCH FOR TIME INFORMATION:
-Look for these patterns (in Hebrew and English):
-- Prep time: "זמן הכנה:", "זמן הכנה", "Prep time:", "Preparation:", "Prep:", "הכנה:", etc.
-- Cook time: "זמן בישול:", "זמן בישול", "Cook time:", "Cooking time:", "בישול:", etc.
-- Total time: "זמן כולל:", "Total time:", "סה\"כ:", etc.
-- Look for numbers followed by: "דקות", "דק'", "minutes", "min", "שעות", "hours", "hrs", etc.
-
-🔍 SEARCH FOR SERVINGS INFORMATION:
-Look for these patterns:
-- "מנות:", "מנות", "Servings:", "Serves:", "מס' מנות:", "מספר מנות:", etc.
-- Look for numbers like: "4 מנות", "4 servings", "לכ-4", "לכ- 4", etc.
-
-✅ EXTRACTION RULES:
-- prepTime: Extract ONLY preparation time (chopping, mixing, etc.) in MINUTES as integer
-  - If you see "15 דקות" or "15 minutes" → prepTime: 15
-  - If you see "30 דקות הכנה" → prepTime: 30
-  - If you see "1 שעה" or "1 hour" → prepTime: 60
-  - If no prep time is mentioned → prepTime: 0
-  - DO NOT confuse prep time with cook time or total time
-
-- cookTime: Extract ONLY cooking/baking time in MINUTES as integer
-  - If you see "45 דקות" or "45 minutes" → cookTime: 45
-  - If you see "1.5 שעות" or "1.5 hours" → cookTime: 90
-  - If you see "בישול: 30 דקות" → cookTime: 30
-  - If no cook time is mentioned → cookTime: 0
-  - DO NOT confuse cook time with prep time or total time
-
-- servings: Extract the number of servings as integer
-  - If you see "4 מנות" or "4 servings" → servings: 4
-  - If you see "לכ-6" → servings: 6
-  - If you see "מס' מנות: 8" → servings: 8
-  - If no servings mentioned → servings: 1 (default)
-  - Extract the ACTUAL number, not a range (if you see "4-6", use 4 or the first number)
-
-═══════════════════════════════════════════════════════════════
-STEP 3: COPY INSTRUCTIONS EXACTLY AS WRITTEN (ZERO TOLERANCE)
-═══════════════════════════════════════════════════════════════
-
-🚨 MANDATORY RULES:
-- Find the instructions section: "אופן ההכנה:" or "הוראות הכנה:" or "Instructions:"
-- COPY each instruction sentence EXACTLY AS WRITTEN - word for word
-- Do NOT paraphrase, summarize, rewrite, or simplify
-- Do NOT change ANY words, numbers, or descriptions
-- Do NOT correct spelling or grammar
-- Only add step numbers (1., 2., 3., ...) at the start if not already present
-- Extract ALL steps - do not skip any
-- If recipe says "מחממים תנור ל 180 מעלות" → Write: "1. מחממים תנור ל 180 מעלות"
-
-⚠️ FINAL CHECKLIST BEFORE RESPONDING:
-1. ✅ Did I extract ALL ingredients from ALL sections? (Check the entire content)
-2. ✅ Did I extract prepTime correctly? (Only preparation, in minutes)
-3. ✅ Did I extract cookTime correctly? (Only cooking/baking, in minutes)
-4. ✅ Did I extract servings correctly? (Actual number, not range)
-5. ✅ Are all ingredients copied EXACTLY as written?
-6. ✅ Are all instructions copied EXACTLY as written?
-
-IF YOU MISS ANY INGREDIENTS OR EXTRACT TIMES/SERVINGS INCORRECTLY, YOU HAVE FAILED.
-YOUR JOB IS TO COPY ACCURATELY, NOT TO GUESS OR SKIP INFORMATION.
-"""
-
-
-@router.post("/extract_recipe")
-async def extract_recipe(req: RecipeExtractionRequest):
-    """Extract recipe from URL using Gemini API, with Zyte fallback on 403."""
-    url = req.url.strip()
-    logger.info("[FLOW] extract_recipe START | url=%s", url)
-
-    if not url.startswith("http"):
-        raise HTTPException(status_code=400, detail="Invalid URL")
-
-    if not GEMINI_API_KEY:
-        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
-
-    try:
-        logger.info("[FLOW] Fetching page content from URL: %s", url)
-        try:
-            page_content = await get_page_content(url)
-        except APIError as api_err:
-            if api_err.status_code == 403:
-                error_code = api_err.details.get("code", "")
-                if error_code in ("FETCH_FORBIDDEN_ZYTE_FALLBACK", "FETCH_FORBIDDEN"):
-                    logger.info("[FLOW] Using Zyte API fallback for url=%s", url)
-                    return await extract_recipe_from_zyte(url)
-            raise
-
-        if not page_content or len(page_content.strip()) < 100:
-            logger.error(
-                "[FLOW] Failed to fetch meaningful content from url=%s", url
-            )
-            raise APIError(
-                "Could not fetch or parse page content",
-                status_code=502,
-                details={"code": "FETCH_FAILED", "url": url},
-            )
-
-        logger.info(
-            "[FLOW] Page content fetched (%d chars), sending to Gemini",
-            len(page_content),
-        )
-        model = get_gemini_model()
-        prompt = create_extraction_prompt_from_content(page_content, url)
-
-        generation_config = {
-            "temperature": 0.0,
-            "top_p": 0.1,
-            "top_k": 1,
-            "max_output_tokens": 8192,
-            "response_mime_type": "application/json",
-        }
-
-        response = model.generate_content(prompt, generation_config=generation_config)
-        response_text = (response.text or "").strip()
-
-        if not response_text:
-            logger.error("[LLM] empty response from Gemini for url=%s", url)
-            raise APIError(
-                "Model returned empty response",
-                status_code=502,
-                details={"code": "LLM_EMPTY", "url": url},
-            )
-
-        if response_text.startswith("```"):
-            lines = response_text.split("\n")
-            if lines and lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-            response_text = "\n".join(lines).strip()
-
-        try:
-            recipe_dict: Dict[str, Any] = json.loads(response_text)
-        except Exception:
-            try:
-                recipe_dict = await extract_and_parse_llm_json(response_text)
-            except Exception as e:
-                logger.error(
-                    "[FLOW] JSON parse error (after repair). Raw head: %r",
-                    response_text[:220],
-                )
-                raise APIError(
-                    f"Failed to parse JSON response from Gemini: {str(e)}",
-                    status_code=500,
-                    details={
-                        "code": "LLM_JSON_PARSE",
-                        "raw_head": response_text[:500],
-                        "url": url,
-                    },
-                )
-
-        if not recipe_dict.get("source"):
-            recipe_dict["source"] = url
-
-        # Remove numbering from instructions (strip existing numbers, don't add new ones)
-        instructions = recipe_dict.get("instructions", [])
-        cleaned_instructions: list[str] = []
-        for instruction in instructions:
-            instruction_str = str(instruction).strip()
-            instruction_str = re.sub(r"^\d+[\.\)]\s*", "", instruction_str)
-            cleaned_instructions.append(instruction_str)
-        recipe_dict["instructions"] = cleaned_instructions
-
-        # ingredientsGroups → Pydantic objects
-        ingredients_groups = None
-        raw_groups = recipe_dict.get("ingredientsGroups")
-        if isinstance(raw_groups, list):
-            try:
-                ingredients_groups = [
-                    IngredientGroup(
-                        category=(
-                            group.get("category", "") if isinstance(group, dict) else ""
-                        ),
-                        ingredients=(
-                            group.get("ingredients", [])
-                            if isinstance(group, dict)
-                            else []
-                        ),
-                    )
-                    for group in raw_groups
-                ]
-            except Exception as e:
-                logger.warning("Failed to parse ingredientsGroups: %s", e)
-                ingredients_groups = None
-
-        recipe_model = RecipeModel(
-            title=recipe_dict.get("title", ""),
-            description=recipe_dict.get("description", ""),
-            ingredients=recipe_dict.get("ingredients", []),
-            ingredientsGroups=ingredients_groups,
-            instructions=cleaned_instructions,
-            prepTime=int(recipe_dict.get("prepTime", 0) or 0),
-            cookTime=int(recipe_dict.get("cookTime", 0) or 0),
-            servings=int(recipe_dict.get("servings", 1) or 1),
-            tags=recipe_dict.get("tags", []),
-            notes=recipe_dict.get("notes", ""),
-            source=recipe_dict.get("source", url),
-            imageUrl=recipe_dict.get("imageUrl", ""),
-        )
-
-        logger.info(
-            "[FLOW] done via Gemini | title='%s' ings=%d steps=%d prep=%d cook=%d",
-            recipe_model.title,
-            len(recipe_model.ingredients),
-            len(recipe_model.instructions),
-            recipe_model.prepTime,
-            recipe_model.cookTime,
-        )
-        return recipe_model.model_dump()
-
-    except (HTTPException, APIError):
-        raise
-    except Exception as e:
-        logger.error("[FLOW] unexpected error: %s", e, exc_info=True)
-        raise APIError(
-            f"Error calling Gemini API: {str(e)}",
-            status_code=500,
-            details={"code": "UNEXPECTED", "url": url},
-        )
-
-
-# =====================================================================
-# IMAGE → OCR → OLLAMA
-# =====================================================================
+# =============================================================================
+# ROUTE: /extract_recipe_from_image
+# =============================================================================
 
 
 @router.post("/extract_recipe_from_image")
-async def extract_recipe_from_image(req: ImageExtractionRequest):
-    """Extract recipe from base64 encoded image using OCR and Ollama."""
+async def extract_recipe_from_image(
+    request: ImageExtractionRequest,
+) -> Dict[str, Any]:
+    """
+    Extract a recipe from an image URL using OCR + Gemini/Ollama.
+    """
+    logger.info(
+        "[FLOW] extract_recipe_from_image START | image_url=%s", request.image_url
+    )
+
+    # 1. Download + OCR
     try:
-        data = req.image_data
-        if "," in data:
-            data = data.split(",", 1)[1]
-        image_bytes = base64.b64decode(data)
-        text = extract_text_from_image(image_bytes)
-        if not text or len(text) < 40:
+        ocr_text = await extract_text_from_image(request.image_url)
+    except Exception as exc:
+        logger.error(
+            "[IMAGE] OCR extraction failed: %s | url=%s",
+            exc,
+            request.image_url,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "OCR_ERROR",
+                "message": "Failed to extract text from image.",
+                "details": {"image_url": request.image_url},
+            },
+        )
+
+    # 2. Prompt & LLM
+    prompt = create_recipe_extraction_prompt(ocr_text, source_url=request.image_url)
+
+    model = get_gemini_model()
+    try:
+        response = model.generate_content(
+            prompt,
+            generation_config={
+                "temperature": 0.2,
+                "max_output_tokens": 2048,
+                "response_mime_type": "application/json",
+            },
+        )
+    except Exception as exc:
+        logger.error("[IMAGE] Gemini error during extraction: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "LLM_ERROR",
+                "message": "Unexpected error while extracting recipe from image.",
+                "details": {"image_url": request.image_url, "error": str(exc)},
+            },
+        )
+
+    llm_output = getattr(response, "text", None) or str(response)
+
+    try:
+        recipe_dict: Dict[str, Any] = json.loads(llm_output)
+    except Exception:
+        try:
+            recipe_dict = await extract_and_parse_llm_json(llm_output)
+        except Exception as exc:
+            logger.error(
+                "[IMAGE] Failed to parse JSON from Gemini: %s | head=%r",
+                exc,
+                llm_output[:200],
+                exc_info=True,
+            )
             raise HTTPException(
-                status_code=400, detail="Not enough text extracted from image"
+                status_code=500,
+                detail={
+                    "code": "LLM_JSON_PARSE",
+                    "message": "Failed to parse JSON response from Gemini.",
+                    "details": {
+                        "image_url": request.image_url,
+                        "raw_head": llm_output[:200],
+                    },
+                },
             )
 
-        prompt = create_recipe_extraction_prompt(text)
-        payload = {
-            "model": MODEL_NAME,
-            "prompt": prompt,
-            "stream": False,
-            "format": "json",
-            "options": {
-                "temperature": 0,
-                "num_ctx": 4096,
-                "top_k": 40,
-                "top_p": 0.9,
-            },
-        }
-        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-            r = await client.post(OLLAMA_API_URL, json=payload)
-            r.raise_for_status()
-            data = r.json()
-        output = data.get("response", "")
+    recipe_dict.setdefault("url", request.image_url)
+    recipe_dict = normalize_recipe_fields(recipe_dict)
+    recipe_model = RecipeModel(**recipe_dict)
 
-        try:
-            recipe_dict = json.loads(output)
-        except Exception:
-            recipe_dict = await extract_and_parse_llm_json(output)
+    logger.info(
+        "[FLOW] extract_recipe_from_image DONE | title=%r", recipe_model.title
+    )
+    return recipe_model.model_dump()
 
-        recipe_model = normalize_recipe_fields(recipe_dict)
-        return recipe_model.model_dump()
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("[IMG] error: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=500, detail=f"Error processing image: {str(e)}"
-        )
+# =============================================================================
+# ROUTE: /upload_recipe_image (file upload)
+# =============================================================================
 
 
 @router.post("/upload_recipe_image")
-async def upload_recipe_image(file: UploadFile = File(...)):
-    """Upload and extract recipe from multipart image file."""
+async def upload_recipe_image(file: UploadFile = File(...)) -> Dict[str, Any]:
+    """
+    Upload an image file and extract a recipe from it.
+    """
+    logger.info("[FLOW] upload_recipe_image START | filename=%s", file.filename)
+
     try:
-        contents = await file.read()
-        text = extract_text_from_image(contents)
-        if not text or len(text) < 40:
+        content = await file.read()
+    except Exception as exc:
+        logger.error("[UPLOAD] Failed to read uploaded file: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "FILE_READ_ERROR",
+                "message": "Failed to read uploaded file.",
+                "details": {"filename": file.filename},
+            },
+        )
+
+    # Convert file bytes to base64 for OCR service (if needed)
+    image_b64 = base64.b64encode(content).decode("ascii")
+
+    try:
+        ocr_text = await extract_text_from_image(image_b64, is_base64=True)
+    except Exception as exc:
+        logger.error("[UPLOAD] OCR failed: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "OCR_ERROR",
+                "message": "Failed to extract text from uploaded image.",
+                "details": {"filename": file.filename},
+            },
+        )
+
+    prompt = create_recipe_extraction_prompt(ocr_text, source_url="uploaded-image")
+
+    model = get_gemini_model()
+    try:
+        response = model.generate_content(
+            prompt,
+            generation_config={
+                "temperature": 0.2,
+                "max_output_tokens": 2048,
+                "response_mime_type": "application/json",
+            },
+        )
+    except Exception as exc:
+        logger.error("[UPLOAD] Gemini error: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "LLM_ERROR",
+                "message": "Unexpected error while extracting recipe from uploaded image.",
+                "details": {"filename": file.filename, "error": str(exc)},
+            },
+        )
+
+    llm_output = getattr(response, "text", None) or str(response)
+
+    try:
+        recipe_dict: Dict[str, Any] = json.loads(llm_output)
+    except Exception:
+        try:
+            recipe_dict = await extract_and_parse_llm_json(llm_output)
+        except Exception as exc:
+            logger.error(
+                "[UPLOAD] Failed to parse JSON from Gemini: %s | head=%r",
+                exc,
+                llm_output[:200],
+                exc_info=True,
+            )
             raise HTTPException(
-                status_code=400, detail="Not enough text extracted from image"
+                status_code=500,
+                detail={
+                    "code": "LLM_JSON_PARSE",
+                    "message": "Failed to parse JSON response from Gemini.",
+                    "details": {"raw_head": llm_output[:200]},
+                },
             )
 
-        prompt = create_recipe_extraction_prompt(text)
-        payload = {
-            "model": MODEL_NAME,
-            "prompt": prompt,
-            "stream": False,
-            "format": "json",
-            "options": {
-                "temperature": 0,
-                "num_ctx": 4096,
-                "top_k": 40,
-                "top_p": 0.9,
-            },
-        }
-        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-            r = await client.post(OLLAMA_API_URL, json=payload)
-            r.raise_for_status()
-            data = r.json()
-        output = data.get("response", "")
+    recipe_dict.setdefault("url", "uploaded-image")
+    recipe_dict = normalize_recipe_fields(recipe_dict)
+    recipe_model = RecipeModel(**recipe_dict)
 
-        try:
-            recipe_dict = json.loads(output)
-        except Exception:
-            recipe_dict = await extract_and_parse_llm_json(output)
-        recipe_model = normalize_recipe_fields(recipe_dict)
-        return recipe_model.model_dump()
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("[UPLOAD] error: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=500, detail=f"Error processing uploaded image: {str(e)}"
-        )
+    logger.info("[FLOW] upload_recipe_image DONE | title=%r", recipe_model.title)
+    return recipe_model.model_dump()
 
 
-# =====================================================================
-# TEST ZYTE RAW OUTPUT (JSON ONLY, NO HTML PAGE)
-# =====================================================================
-
-
-@router.get("/test_zyte")
-async def test_zyte(
-    url: str = "https://kerenagam.co.il/%d7%a8%d7%95%d7%9c%d7%93%d7%aa-%d7%98%d7%99%d7%a8%d7%9e%d7%99%d7%a1%d7%95-%d7%99%d7%a4%d7%99%d7%a4%d7%99%d7%99%d7%94/",
-):
-    """Test endpoint to fetch raw JSON from Zyte API (for debugging)."""
-    if not ZYTE_API_KEY:
-        raise HTTPException(status_code=500, detail="ZYTE_API_KEY not configured")
-
-    payload = {
-        "url": url,
-        "pageContent": True,
-        "pageContentOptions": {"extractFrom": "httpResponseBody"},
-        "followRedirect": True,
-    }
-
-    try:
-        async with httpx.AsyncClient(
-            timeout=HTTP_TIMEOUT, auth=(ZYTE_API_KEY, "")
-        ) as client:
-            resp = await client.post("https://api.zyte.com/v1/extract", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-
-        logger.info("[TEST_ZYTE] Successfully fetched from Zyte for url=%s", url)
-        return data
-
-    except httpx.HTTPStatusError as e:
-        status_code = e.response.status_code if e.response is not None else None
-        text_preview = ""
-        try:
-            text_preview = e.response.text[:1000] if e.response is not None else ""
-        except Exception:
-            pass
-
-        logger.error(
-            "[TEST_ZYTE] HTTP error: status=%s, url=%s, body=%s",
-            status_code,
-            url,
-            text_preview or "no body",
-        )
-        raise HTTPException(
-            status_code=502,
-            detail=f"Zyte API error: HTTP {status_code}: {str(e)}",
-        )
-    except Exception as e:
-        logger.error("[TEST_ZYTE] Error: %s, url=%s", e, url, exc_info=True)
-        raise HTTPException(
-            status_code=500, detail=f"Error calling Zyte API: {str(e)}"
-        )
-
-
-# =====================================================================
-# CUSTOM RECIPE (OLLAMA)
-# =====================================================================
+# =============================================================================
+# ROUTE: /custom_recipe
+# =============================================================================
 
 
 @router.post("/custom_recipe")
-async def custom_recipe(req: CustomRecipeRequest):
-    """Generate custom recipe from groceries and description using Ollama."""
+async def custom_recipe(request: CustomRecipeRequest) -> Dict[str, Any]:
+    """
+    Generate a custom recipe (not tied to a URL) from user instructions.
+    """
+    logger.info("[FLOW] custom_recipe START | title=%s", request.title)
+
+    prompt = create_custom_recipe_prompt(request)
+
+    model = get_gemini_model()
     try:
-        prompt = create_custom_recipe_prompt(req.groceries, req.description)
-        payload = {
-            "model": MODEL_NAME,
-            "prompt": prompt,
-            "stream": False,
-            "format": "json",
-            "options": {
-                "temperature": 0.5,
-                "num_ctx": 4096,
-                "top_k": 50,
-                "top_p": 0.95,
+        response = model.generate_content(
+            prompt,
+            generation_config={
+                "temperature": 0.6,
+                "max_output_tokens": 2048,
+                "response_mime_type": "application/json",
             },
-        }
-        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-            r = await client.post(OLLAMA_API_URL, json=payload)
-            r.raise_for_status()
-            data = r.json()
-        output = data.get("response", "")
-
-        try:
-            recipe_dict = json.loads(output)
-        except Exception:
-            recipe_dict = await extract_and_parse_llm_json(output)
-        recipe_model = normalize_recipe_fields(recipe_dict)
-        return recipe_model.model_dump()
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("[CUSTOM] error: %s", e, exc_info=True)
+        )
+    except Exception as exc:
+        logger.error("[CUSTOM] Gemini error: %s", exc, exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail="An unexpected error occurred during custom recipe generation",
+            detail={
+                "code": "LLM_ERROR",
+                "message": "Unexpected error while generating custom recipe.",
+                "details": {"error": str(exc)},
+            },
         )
+
+    llm_output = getattr(response, "text", None) or str(response)
+
+    try:
+        recipe_dict: Dict[str, Any] = json.loads(llm_output)
+    except Exception:
+        try:
+            recipe_dict = await extract_and_parse_llm_json(llm_output)
+        except Exception as exc:
+            logger.error(
+                "[CUSTOM] Failed to parse JSON from Gemini: %s | head=%r",
+                exc,
+                llm_output[:200],
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "code": "LLM_JSON_PARSE",
+                    "message": "Failed to parse JSON response from Gemini.",
+                    "details": {"raw_head": llm_output[:200]},
+                },
+            )
+
+    recipe_dict.setdefault("url", "custom")
+    recipe_dict = normalize_recipe_fields(recipe_dict)
+    recipe_model = RecipeModel(**recipe_dict)
+
+    logger.info("[FLOW] custom_recipe DONE | title=%r", recipe_model.title)
+    return recipe_model.model_dump()

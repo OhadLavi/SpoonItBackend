@@ -3,76 +3,192 @@
 
 import json
 import re
+from typing import Any, Dict
 
 
 def _strip_code_fences(text: str) -> str:
-    """Remove markdown code fences from text."""
+    """Remove markdown code fences / leading 'json' labels."""
     s = text.strip()
+
+    # ```json ... ```
     m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", s, re.IGNORECASE)
     if m:
         return m.group(1).strip()
+
+    # Generic ``` ... ``` wrappers
     if s.startswith("```"):
         s = s.split("```", 1)[1]
     if s.endswith("```"):
         s = s.rsplit("```", 1)[0]
+
+    # Leading "json\n" label
     if s.lstrip().lower().startswith("json\n"):
         s = s.lstrip()[5:]
+
     return s.strip()
 
 
 def _normalize_quotes(text: str) -> str:
-    """Normalize various quote characters to standard quotes."""
+    """Normalize various unicode quote characters to standard ASCII quotes."""
     return (
-        text.replace("\u201c", '"').replace("\u201d", '"')
+        text
+        # Curly double quotes
+        .replace("\u201c", '"').replace("\u201d", '"')
+        # Low double quote
+        .replace("\u201e", '"')
+        # Angle quotes
+        .replace("\u00ab", '"').replace("\u00bb", '"')
+        # Curly single quotes
         .replace("\u2018", "'").replace("\u2019", "'")
-        .replace(""", '"').replace(""", '"').replace("'", "'").replace("'", "'")
+        # Low single quote
+        .replace("\u201a", "'")
     )
 
 
+def _extract_balanced_block(text: str, opener: str, closer: str) -> str | None:
+    """
+    Extract a balanced {...} or [...] block starting at the first occurrence
+    of `opener`, tracking nested braces and ignoring braces inside strings.
+    """
+    start = text.find(opener)
+    if start == -1:
+        return None
+
+    depth = 0
+    in_string = False
+    escape = False
+
+    for i, ch in enumerate(text[start:], start):
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+        else:
+            if ch == '"':
+                in_string = True
+            elif ch == opener:
+                depth += 1
+            elif ch == closer:
+                depth -= 1
+                if depth == 0:
+                    return text[start : i + 1]
+
+    # If we never fully balanced, just return from the opener onward
+    return text[start:]
+
+
+def _extract_json_block(text: str) -> str:
+    """
+    Best-effort extraction of the main JSON payload from an LLM response.
+    Prefers an object, then an array, but otherwise returns the original text.
+    """
+    for opener, closer in (("{", "}"), ("[", "]")):
+        block = _extract_balanced_block(text, opener, closer)
+        if block is not None:
+            return block.strip()
+    return text.strip()
+
+
+def _fix_newlines_inside_strings(s: str) -> str:
+    """
+    Replace literal newlines that appear *inside* JSON strings with spaces.
+
+    Example:
+        "description": "line 1
+        line 2"
+
+    becomes:
+        "description": "line 1 line 2"
+    """
+    out: list[str] = []
+    in_string = False
+    escape = False
+
+    for ch in s:
+        if in_string:
+            if escape:
+                out.append(ch)
+                escape = False
+            elif ch == "\\":
+                out.append(ch)
+                escape = True
+            elif ch in ("\n", "\r"):
+                # Keep JSON valid; for descriptions a space is fine.
+                out.append(" ")
+            elif ch == '"':
+                out.append(ch)
+                in_string = False
+            else:
+                out.append(ch)
+        else:
+            if ch == '"':
+                out.append(ch)
+                in_string = True
+            else:
+                out.append(ch)
+
+    return "".join(out)
+
+
 def _remove_trailing_commas(s: str) -> str:
-    """Remove trailing commas before closing braces/brackets."""
+    """Remove trailing commas before closing } or ]."""
     return re.sub(r",(\s*[}\]])", r"\1", s)
 
 
 def _quote_unquoted_keys(s: str) -> str:
-    """Add quotes around unquoted object keys."""
-    return re.sub(r'(?<=[{,])\s*([A-Za-z_][A-Za-z0-9_\-]*)\s*:', r'"\1":', s)
+    """
+    Quote object keys that look like identifiers but are not quoted.
 
-
-def _quote_unquoted_string_values(s: str) -> str:
-    """Add quotes around unquoted string values."""
-    s = re.sub(
-        r'(:\s*)(?!-?\d+(?:\.\d+)?\b)(?!true\b|false\b|null\b)(?!\"|\{|\[)([^,\}\]]+)',
-        lambda m: m.group(1) + '"' + m.group(2).strip().replace('"', '\\"') + '"',
-        s, flags=re.IGNORECASE,
+    {title: "x"} -> {"title": "x"}
+    """
+    return re.sub(
+        r'(?<=[{,])\s*([A-Za-z_][A-Za-z0-9_\-]*)\s*:',
+        lambda m: f'"{m.group(1)}":',
+        s,
     )
-    s = re.sub(
-        r'(?:(?<=\[)|(?<=,))\s*(?!-?\d+(?:\.\d+)?\b)(?!true\b|false\b|null\b)(?!\"|\{|\[)([^,\]\}]+)\s*(?=,|\])',
-        lambda m: ' "' + m.group(1).strip().replace('"', '\\"') + '"',
-        s, flags=re.IGNORECASE,
-    )
-    return s
 
 
 def _collapse_whitespace(s: str) -> str:
-    """Collapse multiple whitespace characters to single space."""
+    """Collapse multiple whitespace characters into a single space."""
     return re.sub(r"\s+", " ", s).strip()
 
 
-async def extract_and_parse_llm_json(output: str) -> dict:
-    """Extract and parse JSON from LLM output with multiple repair strategies."""
-    s = _strip_code_fences(_normalize_quotes(output))
-    s = _remove_trailing_commas(_quote_unquoted_keys(s))
+def _repair_and_load(output: str) -> Dict[str, Any]:
+    """
+    Core repair pipeline used by both sync and async entrypoints.
+    Raises json.JSONDecodeError if we still can't parse.
+    """
+    # Basic cleanup: fences, quotes, extract main JSON block
+    s = _strip_code_fences(output)
+    s = _normalize_quotes(s)
+    s = _extract_json_block(s)
+
+    # Fix common structural issues
+    s = _fix_newlines_inside_strings(s)
+    s = _remove_trailing_commas(s)
+
+    # First, try straight JSON
     try:
         return json.loads(s)
     except json.JSONDecodeError:
         pass
-    s2 = _quote_unquoted_string_values(s)
-    s2 = _remove_trailing_commas(s2)
-    try:
-        return json.loads(s2)
-    except json.JSONDecodeError:
-        s3 = _collapse_whitespace(s2)
-        s3 = _remove_trailing_commas(s3)
-        return json.loads(s3)
 
+    # Second attempt: quote unquoted keys + collapse whitespace
+    s2 = _quote_unquoted_keys(s)
+    s2 = _remove_trailing_commas(s2)
+    s2 = _collapse_whitespace(s2)
+
+    return json.loads(s2)
+
+
+async def extract_and_parse_llm_json(output: str) -> Dict[str, Any]:
+    """
+    Extract and parse JSON from LLM output with multiple repair strategies.
+
+    This is defined as async so it can be awaited from FastAPI routes, but the
+    work is synchronous and CPU-only.
+    """
+    return _repair_and_load(output)
