@@ -4,9 +4,11 @@ import base64
 import json
 import re
 from typing import Any, Dict, List
+from urllib.parse import urljoin, urlparse
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 import httpx
+from bs4 import BeautifulSoup
 
 from config import (
     GEMINI_API_KEY,
@@ -39,20 +41,33 @@ router = APIRouter()
 
 
 # =====================================================================
-# ZYTE INTEGRATION
+# ZYTE INTEGRATION USING ARTICLE API
 # =====================================================================
-
 
 async def fetch_zyte_content(url: str) -> Dict[str, Any]:
     """
-    Fetch article content from Zyte API.
+    Fetch article content from Zyte API using `article` extraction.
 
-    Returns a dictionary with:
-    - itemMain: main article content (string)
-    - images: list of image URLs (list[str])
-    - headline: article title
-    - title: page title
-    - url: article URL
+    Expects Zyte response like:
+    {
+      "article": {
+        "itemMain": "... main recipe text ...",
+        "mainImage": { "url": "..." } OR "https://...",
+        "images": [ { "url": "..." }, "https://...", ... ],
+        "headline": "...",
+        "title": "..."
+      },
+      "canonicalUrl": "...",
+      "url": "..."
+    }
+
+    Returns a dict with:
+    - itemMain: main article text (string)
+    - mainImage: main image URL (string or "")
+    - images: list[str] of all image URLs (main image first)
+    - headline: article headline (string)
+    - title: article/page title (string)
+    - url: canonical or original URL
     """
     if not ZYTE_API_KEY:
         raise APIError(
@@ -63,10 +78,21 @@ async def fetch_zyte_content(url: str) -> Dict[str, Any]:
 
     payload: Dict[str, Any] = {
         "url": url,
-        "pageContent": True,
-        "pageContentOptions": {"extractFrom": "httpResponseBody"},
+        "article": True,
+        "articleOptions": {"extractFrom": "httpResponseBody"},
         "followRedirect": True,
     }
+
+    def _normalize_image(img: Any) -> str | None:
+        """Turn Zyte image object/string into a plain URL string if possible."""
+        if isinstance(img, str):
+            return img.strip() or None
+        if isinstance(img, dict):
+            # Zyte usually returns {"url": "..."}
+            candidate = img.get("url") or img.get("src")
+            if candidate and isinstance(candidate, str):
+                return candidate.strip() or None
+        return None
 
     try:
         async with httpx.AsyncClient(
@@ -88,94 +114,63 @@ async def fetch_zyte_content(url: str) -> Dict[str, Any]:
                 details={"code": "ZYTE_BAD_FORMAT", "url": url},
             )
 
-        # 1) Prefer top-level fields
-        item_main = data.get("itemMain")
-        headline = data.get("headline")
-        title = data.get("title")
-        images = data.get("images")
+        article = data.get("article") or {}
+        if not isinstance(article, dict):
+            article = {}
 
-        # 2) If pageContent exists, it can override / augment these
-        page_content_raw = data.get("pageContent")
-        page_content_dict: Dict[str, Any] | None = None
+        item_main = article.get("itemMain") or article.get("body") or article.get("text") or ""
+        headline = article.get("headline") or ""
+        title = article.get("title") or data.get("title") or ""
 
-        if page_content_raw:
-            if isinstance(page_content_raw, str):
-                try:
-                    page_content_dict = json.loads(page_content_raw)
-                except json.JSONDecodeError:
-                    logger.warning(
-                        "[ZYTE] pageContent is not valid JSON, treating as plain text"
-                    )
-                    page_content_dict = {"itemMain": page_content_raw}
-            elif isinstance(page_content_raw, dict):
-                page_content_dict = page_content_raw
-            else:
-                logger.warning(
-                    "[ZYTE] pageContent is unexpected type: %s, converting to string",
-                    type(page_content_raw),
-                )
-                page_content_dict = {"itemMain": str(page_content_raw)}
+        main_image_raw = article.get("mainImage")
+        images_raw = article.get("images") or []
 
-            # Override with values from pageContent if present
-            item_main = page_content_dict.get("itemMain", item_main)
-            headline = page_content_dict.get("headline", headline)
-            title = page_content_dict.get("title", title)
-            images = page_content_dict.get("images", images)
+        # Normalize images
+        all_images: list[str] = []
+        main_image_url = _normalize_image(main_image_raw)
+        if main_image_url:
+            all_images.append(main_image_url)
 
-        # Fallbacks back to top-level if still missing
-        if not item_main:
-            item_main = data.get("itemMain", "")
+        if isinstance(images_raw, list):
+            for img in images_raw:
+                url_candidate = _normalize_image(img)
+                if url_candidate and url_candidate not in all_images:
+                    all_images.append(url_candidate)
 
-        if not headline:
-            headline = data.get("headline", "")
-
-        if not title:
-            title = data.get("title", "")
-
-        if not images:
-            images = data.get("images", [])
-
-        if not item_main or len(str(item_main).strip()) < 20:
+        if not item_main or len(str(item_main).strip()) < 100:
             logger.error(
-                "[ZYTE] No usable itemMain in response for %s. Response keys: %s",
+                "[ZYTE] No usable itemMain in article for %s. article keys=%s",
                 url,
-                list(data.keys()),
+                list(article.keys()),
             )
             raise APIError(
-                "No page content found in Zyte response",
+                "No article content found in Zyte response",
                 status_code=502,
                 details={
-                    "code": "ZYTE_NO_PAGE_CONTENT",
+                    "code": "ZYTE_NO_ARTICLE_CONTENT",
                     "url": url,
-                    "response_keys": list(data.keys()),
+                    "article_keys": list(article.keys()),
                 },
             )
 
-        # Normalize images into list[str]
-        all_images: List[str] = []
-        if isinstance(images, list):
-            for img in images:
-                if isinstance(img, dict):
-                    img_url = img.get("url")
-                    if img_url:
-                        all_images.append(img_url)
-                elif isinstance(img, str) and img:
-                    all_images.append(img)
+        canonical_url = data.get("canonicalUrl") or data.get("url") or url
 
         logger.info(
-            "[ZYTE] Extracted itemMain=%d chars, headline=%r, title=%r, images=%d",
-            len(item_main) if item_main else 0,
-            (headline[:50] if isinstance(headline, str) and headline else "none"),
-            (title[:50] if isinstance(title, str) and title else "none"),
+            "[ZYTE] Extracted article itemMain=%d chars, headline=%r, title=%r, mainImage=%r, images=%d",
+            len(str(item_main)),
+            (headline[:50] if headline else "none"),
+            (title[:50] if title else "none"),
+            main_image_url if main_image_url else "none",
             len(all_images),
         )
 
         return {
             "itemMain": str(item_main),
+            "mainImage": main_image_url or "",
             "images": all_images,
-            "headline": headline or "",
-            "title": title or "",
-            "url": data.get("canonicalUrl") or data.get("url") or url,
+            "headline": headline,
+            "title": title,
+            "url": canonical_url,
         }
 
     except httpx.HTTPStatusError as e:
@@ -194,7 +189,7 @@ async def fetch_zyte_content(url: str) -> Dict[str, Any]:
             exc_info=True,
         )
 
-        # Special handling for 520 from origin via Zyte
+        # Keep the special-case handling if you want (520 etc.)
         if status_code == 520:
             raise APIError(
                 "Zyte API received 520 error from origin server (site may be blocking Zyte). Try again later.",
@@ -231,7 +226,7 @@ async def fetch_zyte_content(url: str) -> Dict[str, Any]:
         )
 
     except APIError:
-        # Preserve earlier APIError details
+        # Re-raise APIErrors as-is
         raise
 
     except Exception as e:
@@ -254,9 +249,10 @@ async def fetch_zyte_content(url: str) -> Dict[str, Any]:
         )
 
 
+
 async def extract_recipe_from_zyte(url: str) -> Dict[str, Any]:
     """
-    Extract recipe using Zyte API and Gemini for ingredients/instructions.
+    Extract recipe using Zyte article API and Gemini for ingredients/instructions.
 
     Returns a complete RecipeModel dictionary.
     """
@@ -287,7 +283,7 @@ async def extract_recipe_from_zyte(url: str) -> Dict[str, Any]:
     }
 
     response = model.generate_content(prompt, generation_config=generation_config)
-    response_text = (getattr(response, "text", None) or "").strip()
+    response_text = (response.text or "").strip()
 
     if not response_text:
         logger.error("[ZYTE] Empty response from Gemini")
@@ -297,54 +293,57 @@ async def extract_recipe_from_zyte(url: str) -> Dict[str, Any]:
             details={"code": "LLM_EMPTY", "url": url},
         )
 
-    # Parse JSON with robust repair
-    try:
-        gemini_dict = await extract_and_parse_llm_json(response_text)
-    except Exception as e:
-        logger.error("[ZYTE] JSON parse error. Raw head: %r", response_text[:220])
-        raise APIError(
-            f"Failed to parse JSON response from Gemini: {str(e)}",
-            status_code=500,
-            details={
-                "code": "LLM_JSON_PARSE",
-                "raw_head": response_text[:500],
-                "url": url,
-            },
-        )
+    # Strip code fences if any
+    if response_text.startswith("```"):
+        lines = response_text.split("\n")
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        response_text = "\n".join(lines).strip()
 
-    # Images - normalize to list of strings
-    image_url = ""
-    all_images: List[str] = []
-    images = zyte_data.get("images", [])
-    if isinstance(images, list) and images:
-        for img in images:
-            if isinstance(img, str) and img:
-                all_images.append(img)
-            elif isinstance(img, dict) and img.get("url"):
-                all_images.append(str(img["url"]))
-        if all_images:
-            image_url = all_images[0]
+    # Parse JSON with repair fallback
+    try:
+        recipe_from_llm = json.loads(response_text)
+    except Exception:
+        try:
+            recipe_from_llm = await extract_and_parse_llm_json(response_text)
+        except Exception as e:
+            logger.error("[ZYTE] JSON parse error. Raw head: %r", response_text[:220])
+            raise APIError(
+                f"Failed to parse JSON response from Gemini: {str(e)}",
+                status_code=500,
+                details={
+                    "code": "LLM_JSON_PARSE",
+                    "raw_head": response_text[:500],
+                    "url": url,
+                },
+            )
+
+    # Images
+    all_images: list[str] = zyte_data.get("images") or []
+    main_image_url: str = zyte_data.get("mainImage") or (all_images[0] if all_images else "")
 
     # Build final recipe dict from Zyte + Gemini
     recipe_dict: Dict[str, Any] = {
-        "title": zyte_data.get("headline", "") or zyte_data.get("title", ""),
-        "description": zyte_data.get("title", ""),
-        "ingredients": gemini_dict.get("ingredients", []),
-        "ingredientsGroups": gemini_dict.get("ingredientsGroups", []),
-        "instructions": gemini_dict.get("instructions", []),
-        "prepTime": int(gemini_dict.get("prepTime", 0) or 0),
-        "cookTime": int(gemini_dict.get("cookTime", 0) or 0),
-        "servings": int(gemini_dict.get("servings", 1) or 1),
-        "tags": [],
-        "notes": "",
+        "title": zyte_data.get("headline", "") or zyte_data.get("title", "") or recipe_from_llm.get("title", ""),
+        "description": zyte_data.get("title", "") or recipe_from_llm.get("description", ""),
+        "ingredients": recipe_from_llm.get("ingredients", []),
+        "ingredientsGroups": recipe_from_llm.get("ingredientsGroups", []),
+        "instructions": recipe_from_llm.get("instructions", []),
+        "prepTime": int(recipe_from_llm.get("prepTime", 0) or 0),
+        "cookTime": int(recipe_from_llm.get("cookTime", 0) or 0),
+        "servings": int(recipe_from_llm.get("servings", 1) or 1),
+        "tags": recipe_from_llm.get("tags", []),
+        "notes": recipe_from_llm.get("notes", ""),
         "source": zyte_data.get("url", url),
-        "imageUrl": image_url,
+        "imageUrl": main_image_url,
         "images": all_images,
     }
 
     # Remove numbering from instructions (strip existing numbers, don't add new ones)
     instructions = recipe_dict.get("instructions", [])
-    cleaned_instructions: List[str] = []
+    cleaned_instructions: list[str] = []
     for instruction in instructions:
         instruction_str = str(instruction).strip()
         instruction_str = re.sub(r"^\d+[\.\)]\s*", "", instruction_str)
@@ -383,12 +382,14 @@ async def extract_recipe_from_zyte(url: str) -> Dict[str, Any]:
     )
 
     logger.info(
-        "[ZYTE] done | title='%s' ings=%d steps=%d prep=%d cook=%d",
+        "[ZYTE] done | title='%s' ings=%d steps=%d prep=%d cook=%d images=%d mainImage=%r",
         recipe_model.title,
         len(recipe_model.ingredients),
         len(recipe_model.instructions),
         recipe_model.prepTime,
         recipe_model.cookTime,
+        len(recipe_model.images or []),
+        recipe_model.imageUrl,
     )
 
     return recipe_model.model_dump()
@@ -397,6 +398,57 @@ async def extract_recipe_from_zyte(url: str) -> Dict[str, Any]:
 # =====================================================================
 # STANDARD URL → GEMINI PATH (WITH ZYTE FALLBACK ON 403)
 # =====================================================================
+
+
+def extract_image_from_html(html_content: str, base_url: str) -> str:
+    """
+    Extract the first recipe image URL from HTML content.
+    
+    Returns the first valid image URL found, or empty string if none found.
+    """
+    try:
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # Look for common recipe image selectors
+        image_selectors = [
+            ('img', {'class': re.compile(r'recipe|food|dish|main', re.I)}),
+            ('img', {'id': re.compile(r'recipe|food|dish|main', re.I)}),
+            ('img', {'data-src': True}),  # Lazy-loaded images
+            ('img', {'src': True}),
+        ]
+        
+        for tag, attrs in image_selectors:
+            images = soup.find_all(tag, attrs)
+            for img in images:
+                # Try data-src first (lazy loading), then src
+                img_url = img.get('data-src') or img.get('src') or img.get('data-lazy-src')
+                if not img_url:
+                    continue
+                
+                # Skip small images (likely icons) and data URIs
+                if img_url.startswith('data:'):
+                    continue
+                
+                # Skip common non-recipe images
+                skip_patterns = ['logo', 'icon', 'avatar', 'button', 'badge', 'spinner']
+                if any(pattern in img_url.lower() for pattern in skip_patterns):
+                    continue
+                
+                # Make absolute URL if relative
+                if not img_url.startswith('http'):
+                    img_url = urljoin(base_url, img_url)
+                
+                # Validate it's a proper URL
+                parsed = urlparse(img_url)
+                if parsed.scheme in ('http', 'https') and parsed.netloc:
+                    logger.info("[FLOW] Extracted image from HTML: %s", img_url)
+                    return img_url
+        
+        logger.info("[FLOW] No recipe image found in HTML")
+        return ""
+    except Exception as e:
+        logger.warning("[FLOW] Error extracting image from HTML: %s", e)
+        return ""
 
 
 async def get_page_content(url: str) -> str:
@@ -645,6 +697,23 @@ async def extract_recipe(request: RecipeExtractionRequest):
             "[FLOW] Page content fetched (%d chars), sending to Gemini",
             len(page_content),
         )
+        
+        # Extract image URL from HTML before sending to Gemini
+        # This ensures we get the image even if Gemini doesn't extract it
+        extracted_image_url = ""
+        try:
+            # Get raw HTML for image extraction (separate fetch for raw HTML)
+            async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
+                response = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+                response.raise_for_status()
+                raw_html = response.text
+                if raw_html:
+                    extracted_image_url = extract_image_from_html(raw_html, url)
+                    if extracted_image_url:
+                        logger.info("[FLOW] Extracted image URL from HTML: %s", extracted_image_url)
+        except Exception as e:
+            logger.warning("[FLOW] Failed to extract image from HTML: %s", e)
+        
         model = get_gemini_model()
         prompt = create_extraction_prompt_from_content(page_content, url)
 
@@ -690,6 +759,16 @@ async def extract_recipe(request: RecipeExtractionRequest):
 
         if not recipe_dict.get("source"):
             recipe_dict["source"] = url
+
+        # Use extracted image URL if Gemini didn't provide one or if extracted one is better
+        gemini_image_url = recipe_dict.get("imageUrl", "").strip()
+        if not gemini_image_url and extracted_image_url:
+            recipe_dict["imageUrl"] = extracted_image_url
+            logger.info("[FLOW] Using HTML-extracted image URL: %s", extracted_image_url)
+        elif extracted_image_url and gemini_image_url != extracted_image_url:
+            # Prefer HTML-extracted URL if it's different (usually more reliable)
+            recipe_dict["imageUrl"] = extracted_image_url
+            logger.info("[FLOW] Overriding Gemini image URL with HTML-extracted: %s", extracted_image_url)
 
         # Remove numbering from instructions (strip existing numbers, don't add new ones)
         instructions = recipe_dict.get("instructions", [])
@@ -859,22 +938,21 @@ async def upload_recipe_image(file: UploadFile = File(...)):
 
 
 # =====================================================================
-# TEST ZYTE RAW OUTPUT
+# TEST ZYTE RAW OUTPUT (ARTICLE MODE)
 # =====================================================================
-
 
 @router.get("/test_zyte")
 async def test_zyte(
     url: str = "https://kerenagam.co.il/%d7%a8%d7%95%d7%9c%d7%93%d7%aa-%d7%98%d7%99%d7%a8%d7%9e%d7%99%d7%a1%d7%95-%d7%99%d7%a4%d7%99%d7%a4%d7%99%d7%99%d7%94/",
 ):
-    """Test endpoint to fetch raw JSON from Zyte API."""
+    """Test endpoint to fetch raw JSON from Zyte API in article mode."""
     if not ZYTE_API_KEY:
         raise HTTPException(status_code=500, detail="ZYTE_API_KEY not configured")
 
     payload = {
         "url": url,
-        "pageContent": True,
-        "pageContentOptions": {"extractFrom": "httpResponseBody"},
+        "article": True,
+        "articleOptions": {"extractFrom": "httpResponseBody"},
         "followRedirect": True,
     }
 
@@ -886,7 +964,7 @@ async def test_zyte(
             resp.raise_for_status()
             data = resp.json()
 
-        logger.info("[TEST_ZYTE] Successfully fetched from Zyte for url=%s", url)
+        logger.info("[TEST_ZYTE] Successfully fetched from Zyte (article) for url=%s", url)
         return data
 
     except httpx.HTTPStatusError as e:
