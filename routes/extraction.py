@@ -6,10 +6,17 @@ import json
 import re
 from typing import Any, Dict
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
 import httpx
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from config import GEMINI_API_KEY, HTTP_TIMEOUT, MODEL_NAME, OLLAMA_API_URL, ZYTE_API_KEY, logger
+from config import (
+    GEMINI_API_KEY,
+    HTTP_TIMEOUT,
+    MODEL_NAME,
+    OLLAMA_API_URL,
+    ZYTE_API_KEY,
+    logger,
+)
 from errors import APIError
 from models import (
     CustomRecipeRequest,
@@ -18,6 +25,7 @@ from models import (
     RecipeExtractionRequest,
     RecipeModel,
 )
+from services.fetcher_service import fetch_html_content
 from services.gemini_service import get_gemini_model
 from services.ocr_service import extract_text_from_image
 from services.prompt_service import (
@@ -25,7 +33,6 @@ from services.prompt_service import (
     create_recipe_extraction_prompt,
     create_zyte_extraction_prompt,
 )
-from services.fetcher_service import fetch_html_content
 from utils.json_repair import extract_and_parse_llm_json
 from utils.normalization import normalize_recipe_fields
 
@@ -36,6 +43,7 @@ router = APIRouter()
 # ZYTE INTEGRATION
 # =====================================================================
 
+
 async def fetch_zyte_content(url: str) -> Dict[str, Any]:
     """
     Fetch article content from Zyte API.
@@ -45,7 +53,7 @@ async def fetch_zyte_content(url: str) -> Dict[str, Any]:
     - images: list of image URLs (list[str])
     - headline: article title
     - title: page title
-    - url: article URL
+    - url: article URL (canonical if available)
     """
     if not ZYTE_API_KEY:
         raise APIError(
@@ -54,8 +62,6 @@ async def fetch_zyte_content(url: str) -> Dict[str, Any]:
             details={"code": "ZYTE_NOT_CONFIGURED"},
         )
 
-    # NOTE: we *don’t* request explicit headline/images/title flags.
-    # Zyte already returns top-level headline/title/itemMain as in your sample.
     payload: Dict[str, Any] = {
         "url": url,
         "pageContent": True,
@@ -65,11 +71,38 @@ async def fetch_zyte_content(url: str) -> Dict[str, Any]:
 
     try:
         async with httpx.AsyncClient(
-            timeout=HTTP_TIMEOUT, auth=(ZYTE_API_KEY, "")
+            timeout=HTTP_TIMEOUT,
+            auth=(ZYTE_API_KEY, ""),
         ) as client:
             resp = await client.post("https://api.zyte.com/v1/extract", json=payload)
             resp.raise_for_status()
+
+        # Explicit JSON decode handling so we don't hide it as ZYTE_UNEXPECTED
+        try:
             data = resp.json()
+        except json.JSONDecodeError as e:
+            body_preview = ""
+            try:
+                body_preview = resp.text[:500]
+            except Exception:
+                pass
+
+            logger.error(
+                "[ZYTE] JSON decode error for %s: %s | body=%s",
+                url,
+                e,
+                body_preview or "no body",
+                exc_info=True,
+            )
+            raise APIError(
+                "Zyte returned non-JSON response",
+                status_code=502,
+                details={
+                    "code": "ZYTE_BAD_JSON",
+                    "url": url,
+                    "body_preview": body_preview or None,
+                },
+            )
 
         logger.info(
             "[ZYTE] Response keys: %s",
@@ -83,7 +116,7 @@ async def fetch_zyte_content(url: str) -> Dict[str, Any]:
                 details={"code": "ZYTE_BAD_FORMAT", "url": url},
             )
 
-        # 1) Prefer top-level fields (matches the JSON you pasted)
+        # 1) Prefer top-level fields
         item_main = data.get("itemMain")
         headline = data.get("headline")
         title = data.get("title")
@@ -153,13 +186,13 @@ async def fetch_zyte_content(url: str) -> Dict[str, Any]:
                 if isinstance(img, dict):
                     img_url = img.get("url")
                     if img_url:
-                        all_images.append(img_url)
+                        all_images.append(str(img_url))
                 elif isinstance(img, str) and img:
                     all_images.append(img)
 
         logger.info(
             "[ZYTE] Extracted itemMain=%d chars, headline=%r, title=%r, images=%d",
-            len(item_main) if item_main else 0,
+            len(str(item_main)) if item_main else 0,
             (headline[:50] if isinstance(headline, str) and headline else "none"),
             (title[:50] if isinstance(title, str) and title else "none"),
             len(all_images),
@@ -198,7 +231,7 @@ async def fetch_zyte_content(url: str) -> Dict[str, Any]:
                     "code": "ZYTE_520_ERROR",
                     "url": url,
                     "message": "Origin server returned invalid response to Zyte",
-                    "response_preview": text_preview,
+                    "response_preview": text_preview or None,
                 },
             )
 
@@ -267,9 +300,7 @@ async def extract_recipe_from_zyte(url: str) -> Dict[str, Any]:
             details={"code": "ZYTE_INSUFFICIENT_CONTENT", "url": url},
         )
 
-    logger.info(
-        "[ZYTE] Extracting ingredients/instructions from Zyte content using Gemini"
-    )
+    logger.info("[ZYTE] Extracting ingredients/instructions from Zyte content using Gemini")
     model = get_gemini_model()
     prompt = create_zyte_extraction_prompt(item_main)
 
@@ -342,8 +373,8 @@ async def extract_recipe_from_zyte(url: str) -> Dict[str, Any]:
         "prepTime": int(gemini_dict.get("prepTime", 0) or 0),
         "cookTime": int(gemini_dict.get("cookTime", 0) or 0),
         "servings": int(gemini_dict.get("servings", 1) or 1),
-        "tags": [],
-        "notes": "",
+        "tags": gemini_dict.get("tags", []),
+        "notes": gemini_dict.get("notes", ""),
         "source": zyte_data.get("url", url),
         "imageUrl": image_url,
         "images": all_images,
@@ -361,34 +392,35 @@ async def extract_recipe_from_zyte(url: str) -> Dict[str, Any]:
 
     # ingredientsGroups → Pydantic objects
     ingredients_groups = None
-    if recipe_dict.get("ingredientsGroups"):
+    raw_groups = recipe_dict.get("ingredientsGroups")
+    if isinstance(raw_groups, list):
         try:
             ingredients_groups = [
                 IngredientGroup(
                     category=(group.get("category", "") if isinstance(group, dict) else ""),
                     ingredients=(group.get("ingredients", []) if isinstance(group, dict) else []),
                 )
-                for group in recipe_dict["ingredientsGroups"]
+                for group in raw_groups
             ]
         except Exception as e:
-            logger.warning("Failed to parse ingredientsGroups: %s", e)
+            logger.warning("[ZYTE] Failed to parse ingredientsGroups: %s", e)
             ingredients_groups = None
 
-        recipe_model = RecipeModel(
-            title=recipe_dict.get("title", ""),
-            description=recipe_dict.get("description", ""),
-            ingredients=recipe_dict.get("ingredients", []),
-            ingredientsGroups=ingredients_groups,
-            instructions=cleaned_instructions,
-            prepTime=recipe_dict.get("prepTime", 0),
-            cookTime=recipe_dict.get("cookTime", 0),
-            servings=recipe_dict.get("servings", 1),
-            tags=recipe_dict.get("tags", []),
-            notes=recipe_dict.get("notes", ""),
-            source=recipe_dict.get("source", url),
-            imageUrl=recipe_dict.get("imageUrl", ""),
-            images=recipe_dict.get("images", []),
-        )
+    recipe_model = RecipeModel(
+        title=recipe_dict.get("title", ""),
+        description=recipe_dict.get("description", ""),
+        ingredients=recipe_dict.get("ingredients", []),
+        ingredientsGroups=ingredients_groups,
+        instructions=cleaned_instructions,
+        prepTime=recipe_dict.get("prepTime", 0),
+        cookTime=recipe_dict.get("cookTime", 0),
+        servings=recipe_dict.get("servings", 1),
+        tags=recipe_dict.get("tags", []),
+        notes=recipe_dict.get("notes", ""),
+        source=recipe_dict.get("source", url),
+        imageUrl=recipe_dict.get("imageUrl", ""),
+        images=recipe_dict.get("images", []),
+    )
 
     logger.info(
         "[ZYTE] done | title='%s' ings=%d steps=%d prep=%d cook=%d",
@@ -406,10 +438,11 @@ async def extract_recipe_from_zyte(url: str) -> Dict[str, Any]:
 # STANDARD URL → GEMINI PATH (WITH ZYTE FALLBACK ON 403)
 # =====================================================================
 
+
 async def get_page_content(url: str) -> str:
     """
-    Fetches the page content using httpx with automatic Playwright fallback.
-    If 403 error occurs, we signal the caller to use Zyte fallback.
+    Fetches the page content using httpx/Playwright (via fetch_html_content).
+    If a 403 error occurs, we signal the caller to use Zyte fallback.
     """
     try:
         text = await fetch_html_content(url)
@@ -487,7 +520,7 @@ STEP 1: EXTRACT ALL INGREDIENTS (MANDATORY - DO NOT MISS ANY)
 Hebrew patterns (MOST COMMON):
 - "מצרכים למתכון:" or "מצרכים:" or "חומרים:" → Main ingredients
 - "למילוי:" → Filling ingredients
-- "לציפוי:" → Topping/coating ingredients  
+- "לציפוי:" → Topping/coating ingredients
 - "לבצק:" → Dough ingredients
 - "לרוטב:" → Sauce ingredients
 
@@ -521,12 +554,6 @@ English patterns:
 4. IF NO INGREDIENTS EXTRACTED = COMPLETE FAILURE:
    - Recipes ALWAYS have ingredients
    - Empty "ingredientsGroups" and "ingredients" = YOU FAILED
-
-❌ THESE ARE COMPLETE FAILURES:
-- {{"ingredientsGroups": [], "ingredients": []}} when recipe has clear ingredients
-- Only extracting "מצרכים למתכון:" and skipping "למילוי:", "לציפוי:"
-- Changing ANY word, number, or unit in ingredients
-- Missing ingredients from sub-sections
 
 ═══════════════════════════════════════════════════════════════
 STEP 2: EXTRACT TIME AND SERVINGS (MANDATORY - BE ACCURATE)
@@ -566,14 +593,6 @@ Look for these patterns:
   - If no servings mentioned → servings: 1 (default)
   - Extract the ACTUAL number, not a range (if you see "4-6", use 4 or the first number)
 
-❌ COMMON MISTAKES TO AVOID:
-- Setting prepTime = total time (should be separate)
-- Setting cookTime = total time (should be separate)
-- Confusing hours with minutes (1 hour = 60 minutes)
-- Using ranges for servings (use the first number or most common)
-- Setting times to 0 when they are clearly mentioned on the page
-- Mixing up prep time and cook time
-
 ═══════════════════════════════════════════════════════════════
 STEP 3: COPY INSTRUCTIONS EXACTLY AS WRITTEN (ZERO TOLERANCE)
 ═══════════════════════════════════════════════════════════════
@@ -586,13 +605,7 @@ STEP 3: COPY INSTRUCTIONS EXACTLY AS WRITTEN (ZERO TOLERANCE)
 - Do NOT correct spelling or grammar
 - Only add step numbers (1., 2., 3., ...) at the start if not already present
 - Extract ALL steps - do not skip any
-- If recipe says "מחממים תנור ל 180 מעלות" → Write: "1. מחממים תנור ל 180 מעלות" (NOT "1. Preheat oven to 180 degrees")
-
-❌ INSTRUCTION FAILURES:
-- Changing "מכניסים לגומה כף גדושה מאוד של בשר" to "מכניסים כף בשר" (WRONG - removed words)
-- Changing "אופים כ 20-25 דקות" to "אופים 25 דקות" (WRONG - changed range)
-- Translating Hebrew to English or vice versa (WRONG - keep original language)
-- Combining multiple steps into one (WRONG - keep separate)
+- If recipe says "מחממים תנור ל 180 מעלות" → Write: "1. מחממים תנור ל 180 מעלות"
 
 ⚠️ FINAL CHECKLIST BEFORE RESPONDING:
 1. ✅ Did I extract ALL ingredients from ALL sections? (Check the entire content)
@@ -703,14 +716,14 @@ async def extract_recipe(req: RecipeExtractionRequest):
         cleaned_instructions: list[str] = []
         for instruction in instructions:
             instruction_str = str(instruction).strip()
-            # Remove leading numbers (e.g., "1. ", "2) ", "3. ", etc.)
             instruction_str = re.sub(r"^\d+[\.\)]\s*", "", instruction_str)
             cleaned_instructions.append(instruction_str)
         recipe_dict["instructions"] = cleaned_instructions
 
         # ingredientsGroups → Pydantic objects
         ingredients_groups = None
-        if recipe_dict.get("ingredientsGroups"):
+        raw_groups = recipe_dict.get("ingredientsGroups")
+        if isinstance(raw_groups, list):
             try:
                 ingredients_groups = [
                     IngredientGroup(
@@ -723,7 +736,7 @@ async def extract_recipe(req: RecipeExtractionRequest):
                             else []
                         ),
                     )
-                    for group in recipe_dict["ingredientsGroups"]
+                    for group in raw_groups
                 ]
             except Exception as e:
                 logger.warning("Failed to parse ingredientsGroups: %s", e)
@@ -768,6 +781,7 @@ async def extract_recipe(req: RecipeExtractionRequest):
 # =====================================================================
 # IMAGE → OCR → OLLAMA
 # =====================================================================
+
 
 @router.post("/extract_recipe_from_image")
 async def extract_recipe_from_image(req: ImageExtractionRequest):
@@ -866,14 +880,15 @@ async def upload_recipe_image(file: UploadFile = File(...)):
 
 
 # =====================================================================
-# TEST ZYTE RAW OUTPUT
+# TEST ZYTE RAW OUTPUT (JSON ONLY, NO HTML PAGE)
 # =====================================================================
+
 
 @router.get("/test_zyte")
 async def test_zyte(
     url: str = "https://kerenagam.co.il/%d7%a8%d7%95%d7%9c%d7%93%d7%aa-%d7%98%d7%99%d7%a8%d7%9e%d7%99%d7%a1%d7%95-%d7%99%d7%a4%d7%99%d7%a4%d7%99%d7%99%d7%94/",
 ):
-    """Test endpoint to fetch raw JSON from Zyte API."""
+    """Test endpoint to fetch raw JSON from Zyte API (for debugging)."""
     if not ZYTE_API_KEY:
         raise HTTPException(status_code=500, detail="ZYTE_API_KEY not configured")
 
@@ -923,6 +938,7 @@ async def test_zyte(
 # =====================================================================
 # CUSTOM RECIPE (OLLAMA)
 # =====================================================================
+
 
 @router.post("/custom_recipe")
 async def custom_recipe(req: CustomRecipeRequest):
