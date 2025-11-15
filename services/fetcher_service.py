@@ -310,7 +310,17 @@ async def fetch_html_content(url: str) -> str:
 # Zyte fallback (used only when fetch_html_content fails / 403)
 # ---------------------------------------------------------------------------
 async def fetch_zyte_article(url: str) -> Dict[str, Any]:
-    """Fetch article content from Zyte (article mode) for blocked pages."""
+    """Fetch page content from Zyte using pageContent mode for blocked pages.
+
+    This follows the official Zyte example:
+
+        json={
+            "url": "...",
+            "pageContent": True,
+            "pageContentOptions": {"extractFrom": "httpResponseBody"},
+            "followRedirect": False,
+        }
+    """
     if not ZYTE_API_KEY:
         raise APIError(
             "ZYTE_API_KEY not configured",
@@ -320,15 +330,17 @@ async def fetch_zyte_article(url: str) -> Dict[str, Any]:
 
     payload: Dict[str, Any] = {
         "url": url,
-        "article": True,
-        "articleOptions": {"extractFrom": "httpResponseBody"},
-        "followRedirect": True,
+        "pageContent": True,
+        "pageContentOptions": {"extractFrom": "httpResponseBody"},
+        # You used False in your working example – we’ll match that:
+        "followRedirect": False,
     }
 
     async with httpx.AsyncClient(
         timeout=HTTP_TIMEOUT, auth=(ZYTE_API_KEY, "")
     ) as client:
         try:
+            logger.info("[ZYTE] Fetching pageContent for url=%s", url)
             resp = await client.post("https://api.zyte.com/v1/extract", json=payload)
             resp.raise_for_status()
         except httpx.HTTPStatusError as e:
@@ -354,38 +366,57 @@ async def fetch_zyte_article(url: str) -> Dict[str, Any]:
             )
 
     data = resp.json()
-    article = data.get("article") or {}
-    if not isinstance(article, dict):
-        article = {}
+    page_content = data.get("pageContent") or {}
+    if not isinstance(page_content, dict):
+        logger.error(
+            "[ZYTE] pageContent missing or not a dict | keys=%s",
+            list(data.keys()),
+        )
+        raise APIError(
+            "Zyte did not return pageContent",
+            status_code=502,
+            details={"code": "ZYTE_NO_PAGE_CONTENT", "url": url, "keys": list(data.keys())},
+        )
 
+    # Try to get the main text the way Zyte gives it to you (itemMain, articleBody, etc.)
     content = ""
     for key in ("itemMain", "articleBody", "text", "body"):
-        val = article.get(key)
+        val = page_content.get(key)
         if isinstance(val, str) and val.strip():
             content = val.strip()
             break
 
-    if not content and isinstance(article.get("articleBodyHtml"), str):
-        content = html_to_text(article["articleBodyHtml"])
+    # Fallback: HTML → text
+    if not content and isinstance(page_content.get("articleBodyHtml"), str):
+        content = html_to_text(page_content["articleBodyHtml"])
 
     if not content:
+        logger.error(
+            "[ZYTE] No usable content found in pageContent for %s. pageContent keys=%s",
+            url,
+            list(page_content.keys()),
+        )
         raise APIError(
-            "Zyte did not return usable article content",
+            "Zyte did not return usable page content",
             status_code=502,
-            details={"code": "ZYTE_NO_CONTENT", "url": url},
+            details={
+                "code": "ZYTE_NO_CONTENT",
+                "url": url,
+                "page_content_keys": list(page_content.keys()),
+            },
         )
 
     title = (
-        article.get("headline")
-        or article.get("title")
+        page_content.get("headline")
+        or page_content.get("title")
         or data.get("title")
         or ""
     )
-    description = article.get("description") or data.get("description") or ""
+    description = page_content.get("description") or data.get("description") or ""
     canonical_url = (
-        article.get("canonicalUrl")
+        page_content.get("canonicalUrl")
         or data.get("canonicalUrl")
-        or article.get("url")
+        or page_content.get("url")
         or data.get("url")
         or url
     )
@@ -402,8 +433,8 @@ async def fetch_zyte_article(url: str) -> Dict[str, Any]:
         if u and u not in images:
             images.append(u)
 
-    _add_image(article.get("mainImage"))
-    raw_images = article.get("images") or []
+    _add_image(page_content.get("mainImage"))
+    raw_images = page_content.get("images") or []
     if isinstance(raw_images, list):
         for img in raw_images:
             _add_image(img)
@@ -411,9 +442,9 @@ async def fetch_zyte_article(url: str) -> Dict[str, Any]:
     main_image = images[0] if images else ""
 
     logger.info(
-        "[ZYTE] article fetched | len=%d title=%r main_image=%r images=%d",
+        "[ZYTE] pageContent fetched | len=%d title=%r main_image=%r images=%d",
         len(content),
-        title[:60] if title else "",
+        (title[:60] if title else ""),
         main_image,
         len(images),
     )
