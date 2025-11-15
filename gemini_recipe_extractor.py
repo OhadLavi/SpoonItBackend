@@ -66,7 +66,7 @@ def extract_recipe_from_url(url: str, api_key: Optional[str] = None) -> Dict[str
             "max_output_tokens": 8192,
             "response_mime_type": "application/json",  # Force JSON output
         }
-        
+        prompt = "return the recipe in JSON format, do not change anything from the original text, do not change amounts, keep the original text: " + url
         response = model.generate_content(prompt, generation_config=generation_config)
         
         # Get the text response

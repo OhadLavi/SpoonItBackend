@@ -1,2 +1,4 @@
-"""API route handlers for chat, extraction, and proxy endpoints."""
+# routes/__init__.py
+"""API routes for SpoonIt backend."""
 
+from . import chat, extraction, proxy  # noqa: F401

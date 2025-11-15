@@ -31,28 +31,19 @@ def _strip_code_fences(text: str) -> str:
 def _normalize_quotes(text: str) -> str:
     """Normalize various unicode quote characters to standard ASCII quotes."""
     return (
-        text
-        # Curly double quotes
-        .replace("\u201c", '"')
+        text.replace("\u201c", '"')
         .replace("\u201d", '"')
-        # Low double quote
         .replace("\u201e", '"')
-        # Angle quotes
         .replace("\u00ab", '"')
         .replace("\u00bb", '"')
-        # Curly single quotes
         .replace("\u2018", "'")
         .replace("\u2019", "'")
-        # Low single quote
         .replace("\u201a", "'")
     )
 
 
 def _extract_balanced_block(text: str, opener: str, closer: str) -> str | None:
-    """
-    Extract a balanced {...} or [...] block starting at the first occurrence
-    of `opener`, tracking nested braces and ignoring braces inside strings.
-    """
+    """Extract a balanced {...} or [...] block starting at the first opener."""
     start = text.find(opener)
     if start == -1:
         return None
@@ -79,15 +70,11 @@ def _extract_balanced_block(text: str, opener: str, closer: str) -> str | None:
                 if depth == 0:
                     return text[start : i + 1]
 
-    # If we never fully balanced, just return from the opener onward
     return text[start:]
 
 
 def _extract_json_block(text: str) -> str:
-    """
-    Best-effort extraction of the main JSON payload from an LLM response.
-    Prefers an object, then an array, but otherwise returns the original text.
-    """
+    """Best-effort extraction of the main JSON payload from an LLM response."""
     for opener, closer in (("{", "}"), ("[", "]")):
         block = _extract_balanced_block(text, opener, closer)
         if block is not None:
@@ -96,16 +83,7 @@ def _extract_json_block(text: str) -> str:
 
 
 def _fix_newlines_inside_strings(s: str) -> str:
-    """
-    Replace literal newlines that appear *inside* JSON strings with spaces.
-
-    Example:
-        "description": "line 1
-        line 2"
-
-    becomes:
-        "description": "line 1 line 2"
-    """
+    """Replace literal newlines that appear *inside* JSON strings with spaces."""
     out: list[str] = []
     in_string = False
     escape = False
@@ -119,7 +97,6 @@ def _fix_newlines_inside_strings(s: str) -> str:
                 out.append(ch)
                 escape = True
             elif ch in ("\n", "\r"):
-                # Keep JSON valid; for descriptions a space is fine.
                 out.append(" ")
             elif ch == '"':
                 out.append(ch)
@@ -137,17 +114,7 @@ def _fix_newlines_inside_strings(s: str) -> str:
 
 
 def _escape_unescaped_inner_quotes(s: str) -> str:
-    """
-    Inside JSON strings, escape inner quotes that are very likely to be part
-    of the value (e.g. ק"ג) rather than the end of the string.
-
-    Heuristic:
-      - While inside a string:
-        - If we see a quote (") that is NOT escaped:
-          - Look ahead to the next non-space character.
-          - If it's one of , } ] : or end-of-text -> treat as closing quote.
-          - Otherwise -> treat as inner quote and convert to \".
-    """
+    """Escape suspicious inner quotes inside JSON strings."""
     out: list[str] = []
     in_string = False
     escape = False
@@ -159,27 +126,22 @@ def _escape_unescaped_inner_quotes(s: str) -> str:
 
         if in_string:
             if escape:
-                # Previous char was a backslash, so this char is escaped.
                 out.append(ch)
                 escape = False
             elif ch == "\\":
                 out.append(ch)
                 escape = True
             elif ch == '"':
-                # Candidate closing or inner quote
                 j = i + 1
                 while j < n and s[j].isspace():
                     j += 1
 
-                if j >= n or s[j] in ",}]:":
-                    # Looks like a real closing quote
+                if j >= n or s[j] in ",}]:":  # looks like closing
                     out.append(ch)
                     in_string = False
-                else:
-                    # Looks like an inner quote (e.g. ק"ג) – escape it
+                else:  # treat as inner quote
                     out.append("\\")
                     out.append('"')
-                # Note: don't change `escape` here
             else:
                 out.append(ch)
         else:
@@ -200,11 +162,7 @@ def _remove_trailing_commas(s: str) -> str:
 
 
 def _quote_unquoted_keys(s: str) -> str:
-    """
-    Quote object keys that look like identifiers but are not quoted.
-
-    {title: "x"} -> {"title": "x"}
-    """
+    """Quote object keys that look like identifiers but are not quoted."""
     return re.sub(
         r'(?<=[{,])\s*([A-Za-z_][A-Za-z0-9_\-]*)\s*:',
         lambda m: f'"{m.group(1)}":',
@@ -213,32 +171,24 @@ def _quote_unquoted_keys(s: str) -> str:
 
 
 def _collapse_whitespace(s: str) -> str:
-    """Collapse multiple whitespace characters into a single space."""
     return re.sub(r"\s+", " ", s).strip()
 
 
 def _repair_and_load(output: str) -> Dict[str, Any]:
-    """
-    Core repair pipeline used by both sync and async entrypoints.
-    Raises json.JSONDecodeError if we still can't parse.
-    """
-    # Basic cleanup: fences, quotes, extract main JSON block
+    """Core repair pipeline used by both sync and async entrypoints."""
     s = _strip_code_fences(output)
     s = _normalize_quotes(s)
     s = _extract_json_block(s)
 
-    # Fix newlines inside strings and inner quotes
     s = _fix_newlines_inside_strings(s)
     s = _escape_unescaped_inner_quotes(s)
     s = _remove_trailing_commas(s)
 
-    # First, try straight JSON
     try:
         return json.loads(s)
     except json.JSONDecodeError:
         pass
 
-    # Second attempt: quote unquoted keys + collapse whitespace
     s2 = _quote_unquoted_keys(s)
     s2 = _escape_unescaped_inner_quotes(s2)
     s2 = _remove_trailing_commas(s2)
@@ -248,10 +198,5 @@ def _repair_and_load(output: str) -> Dict[str, Any]:
 
 
 async def extract_and_parse_llm_json(output: str) -> Dict[str, Any]:
-    """
-    Extract and parse JSON from LLM output with multiple repair strategies.
-
-    This is defined as async so it can be awaited from FastAPI routes, but the
-    work is synchronous and CPU-only.
-    """
+    """Extract and parse JSON from LLM output with multiple repair strategies."""
     return _repair_and_load(output)

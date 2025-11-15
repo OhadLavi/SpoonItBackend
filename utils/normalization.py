@@ -1,102 +1,126 @@
 # utils/normalization.py
-"""Recipe normalization utilities."""
+"""Recipe normalization utilities.
 
-from typing import Any, List
-from models import RecipeModel
+Goal: convert raw dicts from Gemini into RecipeModel **without** changing the
+actual ingredient or instruction text (beyond trimming whitespace).
+"""
+
+from __future__ import annotations
+
+from typing import Any, List, Optional
+
+from models import IngredientGroup, RecipeModel
 
 
-def safe_strip(v: Any) -> str:
-    """Safely strip whitespace from a value."""
-    return "" if v is None else str(v).strip()
+def _as_str(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
 
 
-def ensure_list(value: Any) -> list:
-    """Ensure value is a list."""
+def _as_str_list(value: Any) -> List[str]:
+    """Convert many possible inputs into a list of strings, preserving text."""
+    if value is None:
+        return []
     if isinstance(value, list):
-        return value
-    if isinstance(value, dict):
-        return list(value.values())
-    return [value] if value else []
+        out = []
+        for v in value:
+            s = str(v).strip()
+            if s:
+                out.append(s)
+        return out
+    if isinstance(value, str):
+        # split only on newlines; keep bullets / numbering as-is
+        lines = [line.strip() for line in value.splitlines()]
+        return [ln for ln in lines if ln]
+    return [str(value).strip()]
 
 
-def remove_exact_duplicates(seq: List[str]) -> List[str]:
-    """Remove exact duplicates while preserving order."""
-    seen = set()
-    out: List[str] = []
-    for item in seq:
-        if item and item not in seen:
-            seen.add(item)
-            out.append(item)
-    return out
+def _parse_int(value: Any, default: int) -> int:
+    try:
+        if isinstance(value, bool):
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
-def parse_time_value(time_str: Any) -> int:
-    """Parse time value to integer minutes."""
-    if isinstance(time_str, int):
-        return time_str
-    if isinstance(time_str, str):
-        try:
-            return int(time_str)
-        except ValueError:
-            return 0
-    return 0
+def _normalize_ingredient_groups(raw: Any) -> Optional[List[IngredientGroup]]:
+    if not raw:
+        return None
 
+    groups: List[IngredientGroup] = []
 
-def parse_servings(servings_str: Any) -> int:
-    """Parse servings value to integer."""
-    if isinstance(servings_str, int):
-        return servings_str
-    if isinstance(servings_str, str):
-        try:
-            return int(servings_str)
-        except ValueError:
-            return 1
-    return 1
+    if isinstance(raw, dict):
+        for category, ings in raw.items():
+            cat = _as_str(category)
+            ing_list = _as_str_list(ings)
+            if cat or ing_list:
+                groups.append(IngredientGroup(category=cat, ingredients=ing_list))
+    elif isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, IngredientGroup):
+                groups.append(item)
+            elif isinstance(item, dict):
+                cat = _as_str(item.get("category", ""))
+                ing_list = _as_str_list(item.get("ingredients", []))
+                if cat or ing_list:
+                    groups.append(IngredientGroup(category=cat, ingredients=ing_list))
+
+    return groups or None
 
 
 def normalize_recipe_fields(recipe_data: dict) -> RecipeModel:
-    """Normalize a recipe dictionary to RecipeModel."""
-    if not recipe_data.get("title") and recipe_data.get("recipeName"):
-        recipe_data["title"] = recipe_data["recipeName"]
+    """Normalize a raw recipe dictionary into RecipeModel."""
 
-    prep_time = parse_time_value(recipe_data.get("prepTime", 0))
-    cook_time = parse_time_value(recipe_data.get("cookTime", 0))
+    title = _as_str(recipe_data.get("title") or recipe_data.get("recipeName"))
+    description = _as_str(recipe_data.get("description"))
+
+    ingredients = _as_str_list(recipe_data.get("ingredients", []))
+    instructions = _as_str_list(recipe_data.get("instructions", []))
+
+    prep_time = _parse_int(recipe_data.get("prepTime", 0), 0)
+    cook_time = _parse_int(recipe_data.get("cookTime", 0), 0)
 
     if "servings" in recipe_data:
-        servings = parse_servings(recipe_data["servings"])
+        servings = _parse_int(recipe_data.get("servings"), 1)
     elif "recipeYield" in recipe_data:
-        servings = parse_servings(recipe_data["recipeYield"])
+        servings = _parse_int(recipe_data.get("recipeYield"), 1)
     else:
         servings = 1
 
-    ingredients = ensure_list(recipe_data.get("ingredients", []))
-    ingredients = [str(x).strip() for x in ingredients if x]
-    ingredients = remove_exact_duplicates(ingredients)
+    tags_raw = recipe_data.get("tags", [])
+    tags = _as_str_list(tags_raw)
 
-    instructions = recipe_data.get("instructions", [])
-    if isinstance(instructions, str):
-        instructions = [x.strip() for x in instructions.split("\n") if x.strip()]
+    notes = _as_str(recipe_data.get("notes"))
+    source = _as_str(recipe_data.get("source"))
+    image_url = _as_str(recipe_data.get("imageUrl"))
+
+    images_val = recipe_data.get("images")
+    images: Optional[List[str]]
+    if isinstance(images_val, list):
+        images = [str(u).strip() for u in images_val if str(u).strip()]
+    elif isinstance(images_val, str) and images_val.strip():
+        images = [images_val.strip()]
     else:
-        instructions = [str(x).strip() for x in ensure_list(instructions) if x]
-    instructions = remove_exact_duplicates(instructions)
+        images = None
 
-    tags = recipe_data.get("tags", [])
-    if isinstance(tags, str):
-        tags = [x.strip() for x in tags.split(",") if x.strip()]
-    else:
-        tags = [str(x).strip() for x in ensure_list(tags) if x]
-
-    return RecipeModel(
-        title=safe_strip(recipe_data.get("title", "")),
-        description=safe_strip(recipe_data.get("description", "")),
-        ingredients=ingredients,
-        instructions=instructions,
-        prepTime=prep_time,
-        cookTime=cook_time,
-        servings=servings,
-        tags=tags,
-        notes=safe_strip(recipe_data.get("notes", "")),
-        source=safe_strip(recipe_data.get("source", "")),
-        imageUrl=safe_strip(recipe_data.get("imageUrl", "")),
+    ingredients_groups = _normalize_ingredient_groups(
+        recipe_data.get("ingredientsGroups")
     )
 
+    return RecipeModel(
+        title=title,
+        description=description,
+        ingredients=ingredients,
+        ingredientsGroups=ingredients_groups,
+        instructions=instructions,
+        prepTime=prep_time,
+        cookTime=prep_time if cook_time is None else cook_time,
+        servings=servings,
+        tags=tags,
+        notes=notes,
+        source=source,
+        imageUrl=image_url,
+        images=images,
+    )

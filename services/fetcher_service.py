@@ -1,47 +1,37 @@
 # services/fetcher_service.py
-"""HTTP and Playwright fetching services for web scraping."""
+"""HTTP and Playwright-based fetching for recipe pages + Zyte fallback."""
+
+from __future__ import annotations
 
 import asyncio
 import os
 import random
 import re
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import httpx
 
 from config import (
-    logger,
-    HTTP_TIMEOUT,
-    PLAYWRIGHT_TIMEOUT_MS,
     BROWSER_UAS,
     BLOCK_PATTERNS,
+    HTTP_TIMEOUT,
+    PLAYWRIGHT_TIMEOUT_MS,
     ZYTE_API_KEY,
+    logger,
 )
 from errors import APIError
 
-# --- Safe/lazy Playwright import (prevents NameError if lib missing) ---
+# Lazy Playwright import – container might not have it installed
 try:
     from playwright.async_api import async_playwright  # type: ignore
-except Exception:
-    async_playwright = None  # will be checked at runtime
+except Exception:  # pragma: no cover
+    async_playwright = None  # type: ignore
 
 
-_ACCEPT_LANGS = [
-    "he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7",
-    "en-US,en;q=0.9,he;q=0.8",
-    "en-GB,en;q=0.9",
-]
-
-_REFERERS = [
-    "https://www.google.com/",
-    "https://www.bing.com/",
-    "https://duckduckgo.com/",
-]
-
-
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 def _sec_ch_for_ua(ua: str) -> Tuple[str, str, str]:
-    """Return sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform headers."""
-
     is_mobile = "mobile" in ua.lower()
     if "safari" in ua.lower() and "chrome" not in ua.lower():
         sec_ch = '"Not/A)Brand";v="8", "Safari";v="17"'
@@ -49,30 +39,34 @@ def _sec_ch_for_ua(ua: str) -> Tuple[str, str, str]:
     elif "android" in ua.lower():
         sec_ch = '"Not/A)Brand";v="8", "Chromium";v="127", "Google Chrome";v="127"'
         platform = '"Android"'
-    elif "mac os" in ua.lower():
-        sec_ch = '"Not/A)Brand";v="8", "Chromium";v="127", "Google Chrome";v="127"'
-        platform = '"macOS"'
     else:
         sec_ch = '"Not/A)Brand";v="8", "Chromium";v="127", "Google Chrome";v="127"'
         platform = '"Windows"'
-
     return sec_ch, "?1" if is_mobile else "?0", platform
 
 
-def _default_headers() -> dict:
-    """Generate default HTTP headers with random user agent."""
-
+def _default_headers() -> Dict[str, str]:
     ua = random.choice(BROWSER_UAS)
     sec_ch, sec_mobile, sec_platform = _sec_ch_for_ua(ua)
     return {
         "User-Agent": ua,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": random.choice(_ACCEPT_LANGS),
-        "Accept-Encoding": "gzip, deflate, br",
+        "Accept": (
+            "text/html,application/xhtml+xml,application/xml;q=0.9,"
+            "image/avif,image/webp,*/*;q=0.8"
+        ),
+        "Accept-Language": random.choice(
+            [
+                "he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7",
+                "en-US,en;q=0.9,he;q=0.8",
+                "en-GB,en;q=0.9",
+            ]
+        ),
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
         "Connection": "keep-alive",
-        "Referer": random.choice(_REFERERS),
+        "Referer": random.choice(
+            ["https://www.google.com/", "https://www.bing.com/", "https://duckduckgo.com/"]
+        ),
         "DNT": "1",
         "Sec-Fetch-Dest": "document",
         "Sec-Fetch-Mode": "navigate",
@@ -85,88 +79,90 @@ def _default_headers() -> dict:
     }
 
 
-def _looks_blocked(text: str) -> bool:
-    """Check if response looks like a bot blocker page with looser heuristics."""
+def html_to_text(html: str, max_bytes: int = 50_000) -> str:
+    """Strip scripts/styles/tags and collapse whitespace."""
+    html = re.sub(r"<script\b[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r"<style\b[^>]*>.*?</style>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = re.sub(r"\s+", " ", text)
+    encoded = text.encode("utf-8", errors="ignore")
+    if len(encoded) > max_bytes:
+        text = encoded[:max_bytes].decode("utf-8", errors="ignore")
+    return text.strip()
 
+
+def _looks_blocked(text: str) -> bool:
+    """Heuristic to detect bot-blocker / empty responses."""
     if not text:
         return True
-
     normalized = text.strip()
     if not normalized:
         return True
-
     if BLOCK_PATTERNS.search(normalized):
         return True
-
-    # Previously we flagged every short response as blocked which produced
-    # false positives for minimalist recipe pages. Only treat extremely short
-    # snippets as blocked when there is no meaningful content at all.
     if len(normalized) < 160:
         alnum_ratio = sum(ch.isalnum() for ch in normalized) / max(len(normalized), 1)
         return alnum_ratio < 0.25
-
     return False
 
 
-async def _httpx_fetch(url: str) -> str:
-    """Fetch HTML content using httpx."""
+# ---------------------------------------------------------------------------
+# Direct HTTP fetch (httpx)
+# ---------------------------------------------------------------------------
+async def _httpx_fetch_clean(url: str) -> str:
     async with httpx.AsyncClient(
         timeout=HTTP_TIMEOUT,
         headers=_default_headers(),
         follow_redirects=True,
         http2=True,
     ) as client:
-        r = await client.get(url)
-        r.raise_for_status()
-        html = r.text
-        html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
-        html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r'<[^>]+>', ' ', html)
-        text = re.sub(r'\s+', ' ', text)
-        if len(text.encode('utf-8')) > 50_000:
-            text = text[:50_000]
-        return text.strip()
+        resp = await client.get(url)
+        resp.raise_for_status()
+        return html_to_text(resp.text)
 
 
+# ---------------------------------------------------------------------------
+# Jina.ai readability proxy
+# ---------------------------------------------------------------------------
 def _jina_proxy_url(url: str) -> str:
-    """Return the URL wrapped in the r.jina.ai readability proxy."""
-
     normalized = url.strip()
     if not normalized.startswith(("http://", "https://")):
         normalized = f"https://{normalized.lstrip('/')}"
     return f"https://r.jina.ai/{normalized}"
 
 
-async def _jina_ai_fetch(url: str) -> str:
-    """Fetch page content through the jina.ai readability proxy service."""
-
+async def _jina_ai_fetch_clean(url: str) -> str:
     proxy_url = _jina_proxy_url(url)
     headers = _default_headers()
-    headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7"
-    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, headers=headers, follow_redirects=True) as client:
-        r = await client.get(proxy_url)
-        r.raise_for_status()
-        text = re.sub(r"\s+", " ", r.text)
-        if len(text.encode("utf-8")) > 50_000:
-            text = text[:50_000]
-        return text.strip()
+    headers["Accept"] = (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "text/plain;q=0.8,*/*;q=0.7"
+    )
+    async with httpx.AsyncClient(
+        timeout=HTTP_TIMEOUT, headers=headers, follow_redirects=True
+    ) as client:
+        resp = await client.get(proxy_url)
+        resp.raise_for_status()
+        return html_to_text(resp.text)
 
 
-async def _playwright_fetch(url: str) -> str:
-    """Fetch HTML content using Playwright for JavaScript-heavy sites."""
-    # If Playwright is not installed or import failed, report a structured 403
+# ---------------------------------------------------------------------------
+# Playwright dynamic fetch
+# ---------------------------------------------------------------------------
+async def _playwright_fetch_clean(url: str) -> str:
     if async_playwright is None:
         raise APIError(
             "Playwright not available in this container.",
             status_code=403,
-            details={"code": "PLAYWRIGHT_UNAVAILABLE", "hint": "Install playwright & browsers in the image"},
+            details={"code": "PLAYWRIGHT_UNAVAILABLE"},
         )
 
     if os.getenv("DISABLE_PLAYWRIGHT_FETCH", "").lower() in ("1", "true", "yes"):
-        raise RuntimeError("Playwright fetch disabled by env")
-
-    per_try_timeout_ms = PLAYWRIGHT_TIMEOUT_MS
-    max_retries = 2  # total tries = 3
+        raise APIError(
+            "Playwright fetch disabled by environment",
+            status_code=403,
+            details={"code": "PLAYWRIGHT_DISABLED"},
+        )
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -179,182 +175,254 @@ async def _playwright_fetch(url: str) -> str:
             ],
         )
         try:
-            last_error: Optional[Exception] = None
-            for attempt in range(max_retries + 1):
-                context = await browser.new_context(
-                    user_agent=random.choice(BROWSER_UAS),
-                    locale="he-IL",
-                    extra_http_headers=_default_headers(),
-                    bypass_csp=True,
-                    viewport={"width": 1366, "height": 900},
-                )
+            context = await browser.new_context(
+                user_agent=random.choice(BROWSER_UAS),
+                locale="he-IL",
+                extra_http_headers=_default_headers(),
+                viewport={"width": 1366, "height": 900},
+            )
 
-                # Block heavy resources to avoid 'networkidle' never completing
-                await context.route(
-                    "**/*",
-                    lambda route: asyncio.create_task(
-                        route.abort()
-                        if route.request.resource_type in {"image", "media", "font", "stylesheet"}
-                        else route.continue_()
-                    ),
-                )
+            await context.route(
+                "**/*",
+                lambda route: asyncio.create_task(
+                    route.abort()
+                    if route.request.resource_type
+                    in {"image", "media", "font", "stylesheet"}
+                    else route.continue_()
+                ),
+            )
 
-                page = await context.new_page()
+            page = await context.new_page()
 
-                # light stealth
-                await page.add_init_script("""
-                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                    window.chrome = { runtime: {} };
-                    Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3] });
-                    Object.defineProperty(navigator, 'languages', { get: () => ['he-IL','he','en-US','en'] });
-                """)
+            await page.add_init_script(
+                """
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                window.chrome = { runtime: {} };
+                Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3] });
+                Object.defineProperty(navigator, 'languages', { get: () => ['he-IL','he','en-US','en'] });
+                """
+            )
 
-                # Prefer DOM readiness chain over strict 'networkidle' (often never reached).
-                for wu in ("domcontentloaded", "load", "networkidle"):
-                    try:
-                        await page.goto(url, wait_until=wu, timeout=per_try_timeout_ms)
-                        break
-                    except Exception as e:
-                        last_error = e
-                else:
-                    await context.close()
-                    raise last_error or TimeoutError("page.goto failed for all wait states")
-
-                # Element-based readiness (more reliable than global load state)
+            for wait_state in ("domcontentloaded", "load", "networkidle"):
                 try:
-                    await page.wait_for_selector("main, article, [role='main'], .entry-content, .post-content, .recipe, body", timeout=3000)
+                    await page.goto(url, wait_until=wait_state, timeout=PLAYWRIGHT_TIMEOUT_MS)
+                    break
                 except Exception:
-                    pass
+                    continue
 
-                # Scroll to trigger lazy content
-                for _ in range(3):
-                    await page.mouse.wheel(0, 1200)
-                    await page.wait_for_timeout(300)
+            for _ in range(3):
+                await page.mouse.wheel(0, 1200)
+                await page.wait_for_timeout(300)
 
-                # Prefer meaningful containers
-                content_text = ""
-                for candidate in ["main", "article", "[role='main']", ".entry-content", ".post-content", ".recipe", "body"]:
-                    try:
-                        el = await page.query_selector(candidate)
-                        if el:
-                            t = await el.inner_text()
-                            if t and len(t) > len(content_text):
-                                content_text = t
-                    except Exception:
-                        continue
+            content_text = ""
+            for selector in (
+                "main",
+                "article",
+                "[role='main']",
+                ".entry-content",
+                ".post-content",
+                ".recipe",
+                "body",
+            ):
+                try:
+                    el = await page.query_selector(selector)
+                    if el:
+                        t = await el.inner_text()
+                        if t and len(t) > len(content_text):
+                            content_text = t
+                except Exception:
+                    continue
 
-                # Fallback to stripped HTML
-                if len(content_text or "") < 600:
-                    raw_html = await page.content()
-                    raw_html = re.sub(r'<script[^>]*>.*?</script>', '', raw_html, flags=re.DOTALL | re.IGNORECASE)
-                    raw_html = re.sub(r'<style[^>]*>.*?</style>', '', raw_html, flags=re.DOTALL | re.IGNORECASE)
-                    content_text = re.sub(r'<[^>]+>', ' ', raw_html)
+            if not content_text or len(content_text) < 600:
+                raw_html = await page.content()
+                content_text = html_to_text(raw_html)
 
-                text = re.sub(r"\s+", " ", (content_text or "")).strip()
-                if len(text.encode("utf-8")) > 50_000:
-                    text = text[:50_000]
-
-                # If body still looks like a block page, try cookie-sharing API request.
-                if _looks_blocked(text):
-                    try:
-                        resp = await context.request.get(url, headers=_default_headers(), timeout=per_try_timeout_ms/1000)
-                        if resp.ok:
-                            html = await resp.text()
-                            html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
-                            html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
-                            tx = re.sub(r'<[^>]+>', ' ', html)
-                            tx = re.sub(r'\s+', ' ', tx)
-                            text = tx.strip()
-                    except Exception:
-                        pass
-
-                await context.close()
-                return text
-
-            raise APIError("Playwright retries exhausted", status_code=504)
+            await context.close()
+            return content_text
         finally:
             await browser.close()
 
 
+# ---------------------------------------------------------------------------
+# Public: fetch_html_content
+# ---------------------------------------------------------------------------
 async def fetch_html_content(url: str) -> str:
-    """Fetch HTML content from URL with automatic fallback to Playwright if blocked."""
-
-    async def _try_jina_proxy(reason: str) -> Optional[str]:
-        try:
-            logger.info("[FETCH] Trying jina.ai proxy fallback (%s) for %s", reason, url)
-            proxy_text = await _jina_ai_fetch(url)
-            if _looks_blocked(proxy_text):
-                logger.warning("[FETCH] jina.ai proxy result still looks blocked/empty (%d chars)", len(proxy_text))
-                return None
-            return proxy_text
-        except Exception as proxy_error:
-            logger.warning("[FETCH] jina.ai proxy fetch failed: %s", proxy_error, exc_info=True)
-            return None
-
+    """Fetch readable page text using httpx → Playwright → Jina.ai chain."""
     try:
-        text = await _httpx_fetch(url)
-        if _looks_blocked(text):
-            logger.warning("[FETCH] httpx content looks blocked/short (%d chars). Trying Playwright.", len(text))
-            try:
-                text = await _playwright_fetch(url)
-            except APIError:
-                proxy = await _try_jina_proxy("playwright_unavailable")
-                if proxy:
-                    return proxy
-                raise
-        if _looks_blocked(text):
-            proxy = await _try_jina_proxy("blocked_after_playwright")
-            if proxy:
-                return proxy
-            raise APIError(
-                "Remote site is blocking server fetch (403). Ask client to supply html_content.",
-                status_code=403,
-                details={"code": "FETCH_FORBIDDEN", "url": url},
-            )
-        return text
+        text = await _httpx_fetch_clean(url)
     except httpx.HTTPStatusError as e:
-        status = e.response.status_code
+        status = e.response.status_code if e.response is not None else 0
         logger.warning("[FETCH] httpx status=%s for %s", status, url)
-        # If 403 error, immediately use Zyte (skip Playwright and Jina)
         if status == 403:
-            logger.info("[FETCH] 403 error detected, using Zyte fallback (skipping Playwright/Jina)")
             raise APIError(
-                "Remote site is blocking server fetch (403). Using Zyte fallback.",
+                "Remote site is blocking server fetch (403).",
                 status_code=403,
                 details={"code": "FETCH_FORBIDDEN", "url": url},
             )
-        # For other status codes, try Playwright/Jina as before
-        if status in (401, 406, 429, 451, 503):
-            try:
-                text = await _playwright_fetch(url)
-                if _looks_blocked(text):
-                    proxy = await _try_jina_proxy("blocked_after_status_playwright")
-                    if proxy:
-                        return proxy
-                    raise APIError(
-                        "Remote site is blocking server fetch.",
-                        status_code=status,
-                        details={"code": "FETCH_FORBIDDEN", "url": url},
-                    )
-                return text
-            except APIError:
-                proxy = await _try_jina_proxy("playwright_apierror")
-                if proxy:
-                    return proxy
-                raise
-            except Exception as e2:
-                logger.warning("[FETCH] Playwright fallback failed: %s", e2, exc_info=True)
-                proxy = await _try_jina_proxy("playwright_exception")
-                if proxy:
-                    return proxy
-                raise APIError(
-                    "Remote site is blocking server fetch.",
-                    status_code=status,
-                    details={"code": "FETCH_FORBIDDEN", "url": url},
-                )
         raise APIError(
             f"Fetch failed with status {status}.",
             status_code=status,
             details={"code": "FETCH_FAILED", "url": url},
         )
+    except httpx.RequestError as e:
+        logger.error("[FETCH] httpx request error for %s: %s", url, e, exc_info=True)
+        raise APIError(
+            "Network error while fetching page.",
+            status_code=502,
+            details={"code": "FETCH_REQUEST_ERROR", "url": url},
+        )
 
+    if not text or _looks_blocked(text):
+        logger.info("[FETCH] httpx content looks blocked/short, trying Playwright for %s", url)
+        try:
+            text = await _playwright_fetch_clean(url)
+        except APIError as e:
+            logger.warning("[FETCH] Playwright unavailable/disabled: %s", e.message)
+            raise
+        except Exception as e:
+            logger.warning("[FETCH] Playwright error: %s", e, exc_info=True)
+            text = ""
+
+    if not text or _looks_blocked(text):
+        logger.info("[FETCH] Trying Jina.ai proxy fallback for %s", url)
+        try:
+            text = await _jina_ai_fetch_clean(url)
+        except Exception as e:
+            logger.error("[FETCH] Jina.ai proxy failed: %s", e, exc_info=True)
+            raise APIError(
+                "Remote site is blocking server fetch.",
+                status_code=403,
+                details={"code": "FETCH_FORBIDDEN", "url": url},
+            )
+
+    if _looks_blocked(text):
+        raise APIError(
+            "Remote site is blocking server fetch.",
+            status_code=403,
+            details={"code": "FETCH_FORBIDDEN", "url": url},
+        )
+
+    logger.info("[FETCH] got %d chars from %s", len(text), url)
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Zyte fallback (used only when fetch_html_content fails / 403)
+# ---------------------------------------------------------------------------
+async def fetch_zyte_article(url: str) -> Dict[str, Any]:
+    """Fetch article content from Zyte (article mode) for blocked pages."""
+    if not ZYTE_API_KEY:
+        raise APIError(
+            "ZYTE_API_KEY not configured",
+            status_code=500,
+            details={"code": "ZYTE_NOT_CONFIGURED"},
+        )
+
+    payload: Dict[str, Any] = {
+        "url": url,
+        "article": True,
+        "articleOptions": {"extractFrom": "httpResponseBody"},
+        "followRedirect": True,
+    }
+
+    async with httpx.AsyncClient(
+        timeout=HTTP_TIMEOUT, auth=(ZYTE_API_KEY, "")
+    ) as client:
+        try:
+            resp = await client.post("https://api.zyte.com/v1/extract", json=payload)
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            status_code = e.response.status_code if e.response is not None else 0
+            logger.error(
+                "[ZYTE] HTTP error for %s: status=%s body_head=%r",
+                url,
+                status_code,
+                (e.response.text[:300] if e.response is not None else ""),
+                exc_info=True,
+            )
+            raise APIError(
+                f"Zyte request failed with status {status_code}",
+                status_code=502,
+                details={"code": "ZYTE_REQUEST_FAILED", "url": url, "http_status": status_code},
+            )
+        except httpx.RequestError as e:
+            logger.error("[ZYTE] Request error for %s: %s", url, e, exc_info=True)
+            raise APIError(
+                "Zyte request failed",
+                status_code=502,
+                details={"code": "ZYTE_REQUEST_ERROR", "url": url},
+            )
+
+    data = resp.json()
+    article = data.get("article") or {}
+    if not isinstance(article, dict):
+        article = {}
+
+    content = ""
+    for key in ("itemMain", "articleBody", "text", "body"):
+        val = article.get(key)
+        if isinstance(val, str) and val.strip():
+            content = val.strip()
+            break
+
+    if not content and isinstance(article.get("articleBodyHtml"), str):
+        content = html_to_text(article["articleBodyHtml"])
+
+    if not content:
+        raise APIError(
+            "Zyte did not return usable article content",
+            status_code=502,
+            details={"code": "ZYTE_NO_CONTENT", "url": url},
+        )
+
+    title = (
+        article.get("headline")
+        or article.get("title")
+        or data.get("title")
+        or ""
+    )
+    description = article.get("description") or data.get("description") or ""
+    canonical_url = (
+        article.get("canonicalUrl")
+        or data.get("canonicalUrl")
+        or article.get("url")
+        or data.get("url")
+        or url
+    )
+
+    images: list[str] = []
+
+    def _add_image(obj: Any):
+        if isinstance(obj, str):
+            u = obj.strip()
+        elif isinstance(obj, dict):
+            u = str(obj.get("url") or obj.get("src") or "").strip()
+        else:
+            u = ""
+        if u and u not in images:
+            images.append(u)
+
+    _add_image(article.get("mainImage"))
+    raw_images = article.get("images") or []
+    if isinstance(raw_images, list):
+        for img in raw_images:
+            _add_image(img)
+
+    main_image = images[0] if images else ""
+
+    logger.info(
+        "[ZYTE] article fetched | len=%d title=%r main_image=%r images=%d",
+        len(content),
+        title[:60] if title else "",
+        main_image,
+        len(images),
+    )
+
+    return {
+        "content": content,
+        "title": title or "",
+        "description": description or "",
+        "url": canonical_url,
+        "main_image": main_image,
+        "images": images,
+    }

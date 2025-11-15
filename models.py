@@ -1,53 +1,71 @@
 # models.py
 """Pydantic models for request/response validation."""
 
-from typing import Optional, List
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
 
 
+# ---------------------------------------------------------------------------
+# Request models
+# ---------------------------------------------------------------------------
 class ChatRequest(BaseModel):
-    """Request model for chat endpoint."""
+    """Request model for the chat endpoint.
+
+    `message` is the latest user utterance. `conversation_history` is optional
+    and can contain a list of {role, content} dicts.
+    """
+
     message: str
-    language: str = "en"
-    conversation_history: Optional[List[dict]] = None
+    language: str = "he"
+    conversation_history: Optional[List[Dict[str, Any]]] = None
 
 
 class RecipeExtractionRequest(BaseModel):
-    """Request model for recipe extraction from URL."""
+    """Recipe extraction from URL (optionally with client-provided HTML)."""
+
     url: str
     html_content: Optional[str] = None
 
 
 class ImageExtractionRequest(BaseModel):
-    """Request model for recipe extraction from image."""
-    image_data: str  # base64 (with or without data URI prefix)
+    """Recipe extraction from base64-encoded image."""
+
+    image_data: str  # base64 string, with or without data URI prefix
 
 
 class CustomRecipeRequest(BaseModel):
-    """Request model for custom recipe generation."""
+    """Generate a custom recipe from given groceries and description."""
+
     groceries: str
     description: str
 
 
+# ---------------------------------------------------------------------------
+# Recipe models
+# ---------------------------------------------------------------------------
 class IngredientGroup(BaseModel):
-    """Model for grouped ingredients with category."""
+    """Group of ingredients under a specific category header."""
+
     category: str = ""
-    ingredients: List[str] = Field(default_factory=list, min_length=0)
+    ingredients: List[str] = Field(default_factory=list)
 
 
 class RecipeModel(BaseModel):
-    """Complete recipe model with all fields."""
+    """Canonical recipe struct returned to the frontend."""
+
     title: str = ""
     description: str = ""
-    ingredients: List[str] = Field(default_factory=list, min_length=0)
+    ingredients: List[str] = Field(default_factory=list)
     ingredientsGroups: Optional[List[IngredientGroup]] = None
-    instructions: List[str] = Field(default_factory=list, min_length=0)
-    prepTime: int = 0
-    cookTime: int = 0
+    instructions: List[str] = Field(default_factory=list)
+    prepTime: int = 0  # minutes
+    cookTime: int = 0  # minutes
     servings: int = 1
-    tags: List[str] = Field(default_factory=list, min_length=0)
+    tags: List[str] = Field(default_factory=list)
     notes: str = ""
     source: str = ""
     imageUrl: str = ""
-    images: Optional[List[str]] = None  # Multiple images support
-
+    images: Optional[List[str]] = None
