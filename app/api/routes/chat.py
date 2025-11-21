@@ -7,7 +7,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
 from app.api.dependencies import get_recipe_extractor
-from app.middleware.auth import verify_api_key
 from app.middleware.rate_limit import rate_limit_dependency
 from app.models.recipe import Recipe
 from app.services.recipe_extractor import RecipeExtractor
@@ -38,7 +37,6 @@ class ChatResponse(BaseModel):
 async def chat(
     request: Request,
     chat_request: ChatRequest,
-    api_key: str = Depends(verify_api_key),
     _: None = Depends(rate_limit_dependency),
     recipe_extractor: RecipeExtractor = Depends(get_recipe_extractor),
 ) -> ChatResponse:

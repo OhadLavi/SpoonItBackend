@@ -10,7 +10,6 @@ class Settings(BaseSettings):
     # API Keys
     gemini_api_key: str
     zyte_api_key: str
-    api_keys: str  # Comma-separated list of valid API keys
 
     # Server
     port: int = 8080
@@ -43,11 +42,6 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
-
-    @property
-    def valid_api_keys(self) -> List[str]:
-        """Get list of valid API keys."""
-        return [key.strip() for key in self.api_keys.split(",") if key.strip()]
 
     @property
     def cors_origins_list(self) -> List[str]:

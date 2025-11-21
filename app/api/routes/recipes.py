@@ -9,7 +9,6 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.api.dependencies import get_recipe_extractor
-from app.middleware.auth import verify_api_key
 from app.middleware.rate_limit import rate_limit_dependency
 from app.models.recipe import Recipe
 from app.services.recipe_extractor import RecipeExtractor
@@ -29,7 +28,6 @@ router = APIRouter(prefix="/recipes", tags=["recipes"])
 async def extract_from_url(
     request: Request,
     url: str = Form(...),
-    api_key: str = Depends(verify_api_key),
     _: None = Depends(rate_limit_dependency),
     recipe_extractor: RecipeExtractor = Depends(get_recipe_extractor),
 ) -> Recipe:
@@ -76,7 +74,6 @@ async def extract_from_url(
 async def extract_from_image(
     request: Request,
     file: UploadFile = File(...),
-    api_key: str = Depends(verify_api_key),
     _: None = Depends(rate_limit_dependency),
     recipe_extractor: RecipeExtractor = Depends(get_recipe_extractor),
 ) -> Recipe:
@@ -119,7 +116,6 @@ async def extract_from_image(
 async def generate_recipe(
     request: Request,
     ingredients: List[str] = Form(...),
-    api_key: str = Depends(verify_api_key),
     _: None = Depends(rate_limit_dependency),
     recipe_extractor: RecipeExtractor = Depends(get_recipe_extractor),
 ) -> Recipe:

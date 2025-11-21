@@ -12,7 +12,6 @@ from app.api.dependencies import get_recipe_extractor
 from app.api.routes import chat, health, recipes
 from app.config import settings
 from app.core.request_id import get_request_id
-from app.middleware.auth import verify_api_key
 from app.middleware.logging import RequestLoggingMiddleware
 from app.middleware.rate_limit import get_rate_limit_exceeded_handler, limiter, rate_limit_dependency
 from app.middleware.security import SecurityHeadersMiddleware, setup_compression, setup_cors
@@ -134,7 +133,6 @@ class RecipeExtractionRequest(BaseModel):
 @app.post("/extract_recipe")
 async def extract_recipe_legacy(
     req: RecipeExtractionRequest = Body(...),
-    api_key: str = Depends(verify_api_key),
     _: None = Depends(rate_limit_dependency),
     recipe_extractor: RecipeExtractor = Depends(get_recipe_extractor),
 ):
