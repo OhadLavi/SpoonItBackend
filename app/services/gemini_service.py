@@ -19,16 +19,30 @@ class GeminiService:
 
     def __init__(self):
         """Initialize Gemini service."""
-        genai.configure(api_key=settings.gemini_api_key)
-        self.model = genai.GenerativeModel(
-            model_name=settings.gemini_model,
-            safety_settings={
-                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-            },
-        )
+        self._model = None
+        self._configured = False
+
+    def _ensure_configured(self):
+        """Lazy initialization of Gemini API."""
+        if not self._configured:
+            genai.configure(api_key=settings.gemini_api_key)
+            self._configured = True
+
+    @property
+    def model(self):
+        """Get or create the Gemini model (lazy initialization)."""
+        if self._model is None:
+            self._ensure_configured()
+            self._model = genai.GenerativeModel(
+                model_name=settings.gemini_model,
+                safety_settings={
+                    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+                },
+            )
+        return self._model
 
     async def extract_recipe_from_text(
         self, text: str, source_url: Optional[str] = None
