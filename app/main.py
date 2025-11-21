@@ -1,17 +1,22 @@
 """FastAPI application entry point."""
 
 import logging
+from typing import Optional
 
-from fastapi import FastAPI, Request, status
+from fastapi import Body, Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from slowapi.errors import RateLimitExceeded
 
+from app.api.dependencies import get_recipe_extractor
 from app.api.routes import chat, health, recipes
 from app.config import settings
 from app.core.request_id import get_request_id
+from app.middleware.auth import verify_api_key
 from app.middleware.logging import RequestLoggingMiddleware
-from app.middleware.rate_limit import get_rate_limit_exceeded_handler, limiter
+from app.middleware.rate_limit import get_rate_limit_exceeded_handler, limiter, rate_limit_dependency
 from app.middleware.security import SecurityHeadersMiddleware, setup_compression, setup_cors
+from app.services.recipe_extractor import RecipeExtractor
 from app.utils.exceptions import (
     AuthenticationError,
     GeminiError,
@@ -21,6 +26,7 @@ from app.utils.exceptions import (
     ValidationError,
 )
 from app.utils.logging_config import setup_logging
+from app.utils.validators import validate_url
 
 # Setup logging
 setup_logging(settings.log_level)
@@ -114,6 +120,75 @@ setup_cors(app)
 app.include_router(health.router)
 app.include_router(recipes.router)
 app.include_router(chat.router)
+
+
+# =============================================================================
+# Compatibility endpoints for backward compatibility with old frontend
+# =============================================================================
+
+class RecipeExtractionRequest(BaseModel):
+    """Legacy request model for /extract_recipe endpoint."""
+    url: str
+
+
+@app.post("/extract_recipe")
+async def extract_recipe_legacy(
+    req: RecipeExtractionRequest = Body(...),
+    api_key: str = Depends(verify_api_key),
+    _: None = Depends(rate_limit_dependency),
+    recipe_extractor: RecipeExtractor = Depends(get_recipe_extractor),
+):
+    """
+    Legacy compatibility endpoint for /extract_recipe.
+    Accepts JSON body with {"url": "..."} and returns recipe in old format.
+    """
+    try:
+        # Validate URL
+        validated_url = validate_url(req.url.strip())
+        
+        # Extract recipe using new service
+        recipe = await recipe_extractor.extract_from_url(validated_url)
+        
+        # Convert new Recipe format to old format for backward compatibility
+        # Old format: prepTime, cookTime (int), servings (int), notes (str), tags (list)
+        # New format: prepTimeMinutes, cookTimeMinutes (int), servings (str), notes (list)
+        result = {
+            "title": recipe.title or "",
+            "description": recipe.description or "",
+            "ingredients": recipe.ingredients or [],
+            "instructions": recipe.instructions or [],
+            "prepTime": recipe.prepTimeMinutes or 0,
+            "cookTime": recipe.cookTimeMinutes or 0,
+            "servings": int(recipe.servings) if recipe.servings and recipe.servings.isdigit() else 1,
+            "tags": [],
+            "notes": " ".join(recipe.notes) if recipe.notes else "",
+            "source": recipe.source or validated_url,
+            "imageUrl": str(recipe.imageUrl) if recipe.imageUrl else "",
+        }
+        
+        return result
+        
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "Invalid URL", "detail": str(e)},
+        ) from e
+    except ScrapingError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"error": "Failed to scrape recipe URL", "detail": str(e)},
+        ) from e
+    except GeminiError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"error": "Failed to extract recipe", "detail": str(e)},
+        ) from e
+    except Exception as e:
+        logger.error(f"Unexpected error in extract_recipe_legacy: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "Internal server error", "detail": "An unexpected error occurred"},
+        ) from e
 
 
 @app.on_event("startup")
