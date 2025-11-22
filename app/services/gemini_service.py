@@ -70,7 +70,8 @@ class GeminiService:
             )
 
             recipe_json = self._parse_response_to_json(response.text)
-            recipe = Recipe(**recipe_json)
+            normalized_recipe_json = self._normalize_recipe_json(recipe_json)
+            recipe = Recipe(**normalized_recipe_json)
 
             # Set source if provided
             if source_url:
@@ -112,7 +113,8 @@ class GeminiService:
             )
 
             recipe_json = self._parse_response_to_json(response.text)
-            recipe = Recipe(**recipe_json)
+            normalized_recipe_json = self._normalize_recipe_json(recipe_json)
+            recipe = Recipe(**normalized_recipe_json)
 
             return recipe
 
@@ -143,8 +145,9 @@ class GeminiService:
             )
 
             recipe_json = self._parse_response_to_json(response.text)
-            recipe = Recipe(**recipe_json)
-
+            normalized_recipe_json = self._normalize_recipe_json(recipe_json)
+            recipe = Recipe(**normalized_recipe_json)
+            
             return recipe
 
         except Exception as e:
@@ -298,4 +301,15 @@ Return ONLY valid JSON, no markdown, no code blocks, no explanations.
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse Gemini response as JSON: {text[:500]}")
             raise GeminiError(f"Invalid JSON response from Gemini: {str(e)}") from e
+
+    def _normalize_recipe_json(self, recipe_json: dict) -> dict:
+        """Normalize Gemini recipe JSON to satisfy Pydantic model types."""
+
+        normalized = dict(recipe_json)
+
+        servings = normalized.get("servings")
+        if servings is not None and not isinstance(servings, str):
+            normalized["servings"] = str(servings)
+
+        return normalized
 
