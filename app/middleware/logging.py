@@ -101,12 +101,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         
         # Restore request body if we consumed it
         if body_bytes is not None:
-            # Restore the original body for downstream handlers. After serving
-            # the cached body once, delegate to the original receive callable
-            # so Starlette can emit its expected `http.disconnect` event (or
-            # any other follow-up messages) instead of repeatedly sending
-            # `http.request`, which previously caused runtime errors during
-            # response handling.
             original_receive = request._receive
             body_sent = False
 
