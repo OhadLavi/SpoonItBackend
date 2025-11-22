@@ -39,12 +39,9 @@ def rate_limit_dependency(request: Request) -> None:
     Raises:
         RateLimitExceeded: If rate limit is exceeded
     """
-    # Test if request is within rate limit
-    # This will raise RateLimitExceeded if limit is exceeded
-    endpoint = request.url.path
-    if not limiter.test(request, endpoint):
-        raise RateLimitExceeded(
-            limiter.get_window_stats(request, endpoint),
-            limiter.get_window_stats(request, endpoint).limit,
-        )
+    # Manually evaluate the limiter because we are not using the middleware hook.
+    # slowapi's public API does not expose a "test" helper; instead `_check_request_limit`
+    # raises `RateLimitExceeded` when the limit is hit. Passing the Request object ensures
+    # both headers (for API key lookup) and path are available to the limiter.
+    limiter._check_request_limit(request, endpoint_func=None)
 
