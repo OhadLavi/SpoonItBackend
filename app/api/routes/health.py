@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import Dict
+from typing import Any, Dict
 
 import httpx
 from fastapi import APIRouter
@@ -25,7 +25,7 @@ async def health_check() -> Dict[str, str]:
 
 
 @router.get("/ready")
-async def readiness_check() -> Dict[str, any]:
+async def readiness_check() -> Dict[str, Any]:
     """
     Readiness check with dependency verification.
 
