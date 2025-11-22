@@ -101,6 +101,10 @@ class ScraperService:
         Raises:
             ZyteError: If Zyte API call fails
         """
+        # Check if Zyte API key is configured
+        if not settings.zyte_api_key or settings.zyte_api_key == "your_zyte_api_key_here":
+            raise ZyteError("Zyte API key is not configured. Please set ZYTE_API_KEY environment variable.")
+        
         zyte_url = "https://api.zyte.com/v1/extract"
 
         payload = {
