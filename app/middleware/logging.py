@@ -101,14 +101,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         
         # Restore request body if we consumed it
         if body_bytes is not None:
-            # Restore the original body for downstream handlers while ensuring
-            # subsequent receives return a disconnect message. Returning
-            # `http.request` repeatedly confuses Starlette's response handler
-            # (it expects only a single body message followed by
-            # `http.disconnect`), which results in a runtime error like
-            # "Unexpected message received: http.request" after the response
-            # is sent. Track whether the body has been served to mimic the
-            # default behaviour of the ASGI receive callable.
+            original_receive = request._receive
             body_sent = False
 
             async def receive():
@@ -116,7 +109,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 if not body_sent:
                     body_sent = True
                     return {"type": "http.request", "body": body_bytes, "more_body": False}
-                return {"type": "http.disconnect"}
+                return await original_receive()
 
             request._receive = receive
 
