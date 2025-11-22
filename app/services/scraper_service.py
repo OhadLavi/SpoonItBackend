@@ -115,12 +115,16 @@ class ScraperService:
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"apikey {settings.zyte_api_key}",
         }
 
         async with httpx.AsyncClient(timeout=self.zyte_timeout) as client:
             try:
-                response = await client.post(zyte_url, json=payload, headers=headers)
+                response = await client.post(
+                    zyte_url, 
+                    json=payload, 
+                    headers=headers,
+                    auth=(settings.zyte_api_key, "")
+                )
                 response.raise_for_status()
 
                 data = response.json()
