@@ -13,19 +13,18 @@ from app.core.request_id import generate_request_id, get_request_id, set_request
 logger = logging.getLogger(__name__)
 
 
-async def get_request_params(request: Request) -> Tuple[Dict[str, Any], Optional[bytes]]:
+async def get_request_params(request: Request) -> Dict[str, Any]:
     """
-    Extract request parameters from body/form/query.
-    Returns both params and the body bytes (to restore request).
+    Extract request parameters from query/path without consuming body.
+    Body parameters are logged by route handlers.
     
     Args:
         request: FastAPI request object
         
     Returns:
-        Tuple of (params dict, body bytes)
+        Dictionary with request parameters
     """
     params: Dict[str, Any] = {}
-    body_bytes: bytes | None = None
     
     # Get query parameters
     if request.query_params:
@@ -35,41 +34,20 @@ async def get_request_params(request: Request) -> Tuple[Dict[str, Any], Optional
     if hasattr(request, "path_params") and request.path_params:
         params["path"] = dict(request.path_params)
     
-    # Get body parameters based on content type
+    # Get content type for reference (but don't read body)
     content_type = request.headers.get("content-type", "").lower()
-    
-    try:
+    if content_type:
         if "application/json" in content_type:
-            # JSON body - read and restore
-            body_bytes = await request.body()
-            if body_bytes:
-                try:
-                    params["body"] = json.loads(body_bytes)
-                except json.JSONDecodeError:
-                    params["body"] = body_bytes.decode("utf-8", errors="ignore")[:500]  # Truncate if not JSON
+            params["content_type"] = "application/json"
+            params["note"] = "Body parameters logged by route handler"
         elif "multipart/form-data" in content_type:
-            # For multipart, we can't easily read and restore, so just log what we can
-            # The route handler will handle the form parsing
-            params["form"] = {"type": "multipart/form-data", "note": "Form data logged by route handler"}
+            params["content_type"] = "multipart/form-data"
+            params["note"] = "Form data logged by route handler"
         elif "application/x-www-form-urlencoded" in content_type:
-            # URL-encoded form - read and restore
-            body_bytes = await request.body()
-            if body_bytes:
-                try:
-                    from urllib.parse import parse_qs
-                    form_dict = {}
-                    decoded = body_bytes.decode("utf-8")
-                    parsed = parse_qs(decoded, keep_blank_values=True)
-                    for key, values in parsed.items():
-                        form_dict[key] = values[0] if len(values) == 1 else values
-                    params["form"] = form_dict
-                except Exception:
-                    params["form"] = {"raw": body_bytes.decode("utf-8", errors="ignore")[:500]}
-    except Exception as e:
-        logger.warning(f"Failed to parse request body: {str(e)}")
-        params["body_error"] = str(e)
+            params["content_type"] = "application/x-www-form-urlencoded"
+            params["note"] = "Form data logged by route handler"
     
-    return params, body_bytes
+    return params
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -96,22 +74,8 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             if route:
                 route_name = getattr(route, "path", None) or getattr(route, "name", None)
 
-        # Extract request parameters (and get body to restore if needed)
-        request_params, body_bytes = await get_request_params(request)
-        
-        # Restore request body if we consumed it
-        if body_bytes is not None:
-            original_receive = request._receive
-            body_sent = False
-
-            async def receive():
-                nonlocal body_sent
-                if not body_sent:
-                    body_sent = True
-                    return {"type": "http.request", "body": body_bytes, "more_body": False}
-                return await original_receive()
-
-            request._receive = receive
+        # Extract request parameters (without consuming body)
+        request_params = await get_request_params(request)
 
         # Mask sensitive data in logs
         def mask_sensitive_data(data: Any) -> Any:
