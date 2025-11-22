@@ -132,6 +132,7 @@ class RecipeExtractionRequest(BaseModel):
 
 @app.post("/extract_recipe")
 async def extract_recipe_legacy(
+    request: Request,
     req: RecipeExtractionRequest = Body(...),
     _: None = Depends(rate_limit_dependency),
     recipe_extractor: RecipeExtractor = Depends(get_recipe_extractor),
@@ -140,6 +141,16 @@ async def extract_recipe_legacy(
     Legacy compatibility endpoint for /extract_recipe.
     Accepts JSON body with {"url": "..."} and returns recipe in old format.
     """
+    # Log route-specific parameters
+    logger.info(
+        f"Route /extract_recipe called",
+        extra={
+            "request_id": getattr(request.state, "request_id", None),
+            "route": "/extract_recipe",
+            "params": {"url": req.url[:200]},  # Truncate long URLs
+        },
+    )
+    
     try:
         # Validate URL
         validated_url = validate_url(req.url.strip())

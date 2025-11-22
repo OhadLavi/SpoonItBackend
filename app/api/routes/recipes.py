@@ -9,6 +9,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.api.dependencies import get_recipe_extractor
+from app.core.request_id import get_request_id
 from app.middleware.rate_limit import rate_limit_dependency
 from app.models.recipe import Recipe
 from app.services.recipe_extractor import RecipeExtractor
@@ -37,6 +38,15 @@ async def extract_from_url(
     - **url**: Recipe URL to extract from
     - Returns unified Recipe JSON format
     """
+    # Log route-specific parameters
+    logger.info(
+        f"Route /recipes/from-url called",
+        extra={
+            "request_id": getattr(request.state, "request_id", None),
+            "route": "/recipes/from-url",
+            "params": {"url": url[:200]},  # Truncate long URLs
+        },
+    )
     
     try:
         # Validate URL
@@ -83,6 +93,19 @@ async def extract_from_image(
     - **file**: Image file (JPEG, PNG, or WebP, max 10MB)
     - Returns unified Recipe JSON format
     """
+    # Log route-specific parameters
+    logger.info(
+        f"Route /recipes/from-image called",
+        extra={
+            "request_id": getattr(request.state, "request_id", None),
+            "route": "/recipes/from-image",
+            "params": {
+                "filename": file.filename,
+                "content_type": file.content_type,
+                "size": getattr(file, "size", "unknown"),
+            },
+        },
+    )
     
     try:
         # Read file content
@@ -125,6 +148,15 @@ async def generate_recipe(
     - **ingredients**: List of ingredient strings
     - Returns unified Recipe JSON format
     """
+    # Log route-specific parameters
+    logger.info(
+        f"Route /recipes/generate called",
+        extra={
+            "request_id": getattr(request.state, "request_id", None),
+            "route": "/recipes/generate",
+            "params": {"ingredients": ingredients, "ingredients_count": len(ingredients)},
+        },
+    )
     
     try:
         # Validate ingredients

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
 from app.api.dependencies import get_recipe_extractor
+from app.core.request_id import get_request_id
 from app.middleware.rate_limit import rate_limit_dependency
 from app.models.recipe import Recipe
 from app.services.recipe_extractor import RecipeExtractor
@@ -48,6 +49,21 @@ async def chat(
     - **conversation_history**: Optional conversation history
     - Returns chat response with recipe if applicable
     """
+    # Log route-specific parameters
+    logger.info(
+        f"Route /chat called",
+        extra={
+            "request_id": getattr(request.state, "request_id", None),
+            "route": "/chat",
+            "params": {
+                "message": chat_request.message[:200],  # Truncate long messages
+                "language": chat_request.language,
+                "has_history": bool(chat_request.conversation_history),
+                "history_length": len(chat_request.conversation_history) if chat_request.conversation_history else 0,
+            },
+        },
+    )
+    
     try:
         # Build prompt from message and history
         prompt_parts = []

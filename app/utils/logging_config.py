@@ -23,9 +23,17 @@ class CloudRunJSONFormatter(logging.Formatter):
         if hasattr(record, "request_id"):
             log_data["request_id"] = record.request_id
 
-        # Add extra fields
-        if hasattr(record, "extra_fields"):
-            log_data.update(record.extra_fields)
+        # Add all extra fields from the record
+        # FastAPI/standard logging puts extra fields directly on the record
+        for key, value in record.__dict__.items():
+            if key not in [
+                "name", "msg", "args", "created", "filename", "funcName",
+                "levelname", "levelno", "lineno", "module", "msecs",
+                "message", "pathname", "process", "processName", "relativeCreated",
+                "thread", "threadName", "exc_info", "exc_text", "stack_info",
+                "asctime", "taskName", "getMessage"
+            ]:
+                log_data[key] = value
 
         # Add exception info if present
         if record.exc_info:
