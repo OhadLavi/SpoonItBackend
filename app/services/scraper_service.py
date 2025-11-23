@@ -79,7 +79,8 @@ class ScraperService:
                 if response.status_code in (403, 429, 451):
                     raise ScrapingError(f"Access blocked (HTTP {response.status_code})")
 
-                return response.text
+                # Clean HTML before returning
+                return self._clean_html(response.text)
 
             except httpx.HTTPStatusError as e:
                 raise ScrapingError(f"HTTP error {e.response.status_code}: {str(e)}") from e
@@ -135,31 +136,7 @@ class ScraperService:
                     from bs4 import BeautifulSoup
                     
                     html_content = base64.b64decode(data["httpResponseBody"]).decode("utf-8")
-                    
-                    # Clean HTML using BeautifulSoup
-                    soup = BeautifulSoup(html_content, "html.parser")
-                    
-                    # Remove script and style elements
-                    for script in soup(["script", "style"]):
-                        script.decompose()
-
-                    # Replace images with markers so Gemini can see them
-                    for img in soup.find_all('img'):
-                        src = img.get('src')
-                        if src:
-                            img.replace_with(f" [Image: {src}] ")
-                        
-                    # Get text
-                    text = soup.get_text()
-                    
-                    # Break into lines and remove leading/trailing space on each
-                    lines = (line.strip() for line in text.splitlines())
-                    # Break multi-headlines into a line each
-                    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-                    # Drop blank lines
-                    text = '\n'.join(chunk for chunk in chunks if chunk)
-                    
-                    return text
+                    return self._clean_html(html_content)
                 else:
                     raise ZyteError("Unexpected Zyte response format: missing httpResponseBody")
 
@@ -173,4 +150,41 @@ class ScraperService:
                 raise ZyteError(f"Unexpected Zyte response format: {str(e)}") from e
             except Exception as e:
                 raise ZyteError(f"Error processing Zyte response: {str(e)}") from e
+
+    def _clean_html(self, html_content: str) -> str:
+        """
+        Clean HTML content by removing scripts, styles and extracting text.
+        
+        Args:
+            html_content: Raw HTML string
+            
+        Returns:
+            Cleaned text content
+        """
+        from bs4 import BeautifulSoup
+        
+        # Parse HTML
+        soup = BeautifulSoup(html_content, "html.parser")
+        
+        # Remove script and style elements
+        for script in soup(["script", "style"]):
+            script.decompose()
+
+        # Replace images with markers so Gemini can see them
+        for img in soup.find_all('img'):
+            src = img.get('src')
+            if src:
+                img.replace_with(f" [Image: {src}] ")
+                
+        # Get text
+        text = soup.get_text()
+        
+        # Break into lines and remove leading/trailing space on each
+        lines = (line.strip() for line in text.splitlines())
+        # Break multi-headlines into a line each
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        # Drop blank lines
+        text = '\n'.join(chunk for chunk in chunks if chunk)
+        
+        return text
 
