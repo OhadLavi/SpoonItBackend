@@ -31,7 +31,7 @@ class Recipe(BaseModel):
     """Unified recipe model returned by all endpoints."""
 
     id: Optional[str] = Field(None, description="Recipe ID (null for extracted recipes)")
-    title: str = Field(..., description="Recipe title")
+    title: Optional[str] = Field(None, description="Recipe title")
     description: Optional[str] = Field(None, description="Recipe description")
     source: Optional[str] = Field(None, description="Source URL or identifier")
     language: Optional[str] = Field(None, description="Language code (e.g., 'he', 'en')")

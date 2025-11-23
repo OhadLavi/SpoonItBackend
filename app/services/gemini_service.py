@@ -78,24 +78,6 @@ class GeminiService:
                 recipe.source = source_url
 
             return recipe
-
-        except Exception as e:
-            logger.error(f"Gemini extraction failed: {str(e)}", exc_info=True)
-            raise GeminiError(f"Failed to extract recipe: {str(e)}") from e
-
-    async def extract_recipe_from_image(self, image_data: bytes, image_mime_type: str) -> Recipe:
-        """
-        Extract recipe from image using Gemini Vision.
-
-        Args:
-            image_data: Image file bytes
-            image_mime_type: MIME type of image (e.g., 'image/jpeg')
-
-        Returns:
-            Extracted Recipe object
-
-        Raises:
-            GeminiError: If extraction fails
         """
         prompt = self._build_image_extraction_prompt()
 
@@ -182,30 +164,6 @@ class GeminiService:
   "nutrition": {{
     "calories": number or null,
     "protein_g": number or null,
-    "fat_g": number or null,
-    "carbs_g": number or null,
-    "per": "per what" or null
-  }}
-}}
-
-CRITICAL RULES:
-1. Preserve EXACT ingredient text, amounts, and product names from the original. Do NOT translate, convert, or modify them.
-2. You can group ingredients into groups, but keep the raw text exactly as written.
-3. Extract all ingredients into both ingredientGroups (grouped) and ingredients (flat list).
-4. Return ONLY valid JSON, no markdown, no code blocks, no explanations.
-5. If information is missing, use null.
-
-Source URL: {source_url or "Not provided"}
-
-Text to extract from:
-{text}
-"""
-
-    def _build_image_extraction_prompt(self) -> str:
-        """Build prompt for recipe extraction from image."""
-        return """Extract the recipe information from this image and return it as a JSON object matching this exact structure:
-
-{
   "title": "Recipe title",
   "description": "Recipe description or null",
   "language": "Language code (e.g., 'he', 'en') or null",

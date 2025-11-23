@@ -174,6 +174,8 @@ async def extract_recipe_legacy(
             "notes": " ".join(recipe.notes) if recipe.notes else "",
             "source": recipe.source or validated_url,
             "imageUrl": str(recipe.imageUrl) if recipe.imageUrl else "",
+            "images": recipe.images or [],
+            "ingredientGroups": [group.dict() for group in recipe.ingredientGroups] if recipe.ingredientGroups else [],
         }
         
         return result

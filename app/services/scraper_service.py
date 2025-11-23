@@ -142,6 +142,12 @@ class ScraperService:
                     # Remove script and style elements
                     for script in soup(["script", "style"]):
                         script.decompose()
+
+                    # Replace images with markers so Gemini can see them
+                    for img in soup.find_all('img'):
+                        src = img.get('src')
+                        if src:
+                            img.replace_with(f" [Image: {src}] ")
                         
                     # Get text
                     text = soup.get_text()
