@@ -21,7 +21,7 @@ class ScraperService:
 
     async def fetch_recipe_content(self, url: str) -> str:
         """
-        Fetch recipe content from URL, using Zyte if direct scraping fails.
+        Fetch recipe content from URL, using Zyte if direct scraping fails or returns insufficient content.
 
         Args:
             url: Recipe URL to scrape
@@ -30,13 +30,40 @@ class ScraperService:
             Extracted text content
 
         Raises:
-            ScrapingError: If scraping fails
+            ScrapingError: If scraping fails or content is insufficient
         """
+        MIN_CONTENT_LENGTH = 200  # Minimum chars for valid recipe content
+        
         # Try direct HTTP request first
         try:
             content = await self._fetch_direct(url)
+            
+            # Check if content is sufficient
+            if len(content) < MIN_CONTENT_LENGTH:
+                logger.warning(
+                    f"Direct fetch returned insufficient content ({len(content)} chars) from {url}, trying Zyte..."
+                )
+                # Force Zyte fallback for better content
+                content = await self._fetch_with_zyte(url)
+                logger.info(f"Successfully fetched content via Zyte from {url}")
+                return content
+            
             logger.info(f"Successfully fetched content directly from {url}")
             return content
+            
+        except ScrapingError:
+            # If direct fetch threw ScrapingError, try Zyte
+            logger.warning(f"Direct fetch failed for {url}, trying Zyte...")
+            try:
+                content = await self._fetch_with_zyte(url)
+                logger.info(f"Successfully fetched content via Zyte from {url}")
+                return content
+            except Exception as zyte_error:
+                logger.error(f"Both direct and Zyte fetch failed for {url}")
+                raise ScrapingError(
+                    f"Failed to fetch content: Direct fetch failed, "
+                    f"Zyte fetch failed ({str(zyte_error)})"
+                ) from zyte_error
         except Exception as e:
             logger.warning(f"Direct fetch failed for {url}: {str(e)}, trying Zyte...")
             # Fallback to Zyte

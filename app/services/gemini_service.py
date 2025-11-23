@@ -87,6 +87,14 @@ class GeminiService:
             # Set source if provided
             if source_url:
                 recipe.source = source_url
+            
+            # Validate recipe has meaningful content
+            if not recipe.title or len(recipe.ingredients) == 0:
+                logger.error(f"Extracted recipe is empty or invalid: title='{recipe.title}', ingredients={len(recipe.ingredients)}")
+                raise GeminiError(
+                    "Failed to extract meaningful recipe content. The page may not contain a valid recipe, "
+                    "or the content may be blocked by the website."
+                )
 
             return recipe
 
