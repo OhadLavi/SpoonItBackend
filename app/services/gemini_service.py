@@ -63,14 +63,25 @@ class GeminiService:
         prompt = self._build_extraction_prompt(text, source_url)
 
         try:
+            # Log text length for debugging
+            logger.info(f"Extracting recipe from text (length: {len(text)} chars)")
+            
             # Run in executor to avoid blocking
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
                 None, lambda: self.model.generate_content(prompt)
             )
 
+            # Log Gemini response for debugging
+            logger.info(f"Gemini response received (length: {len(response.text)} chars)")
+            logger.debug(f"Gemini response text: {response.text[:500]}")  # First 500 chars
+
             recipe_json = self._parse_response_to_json(response.text)
             normalized_recipe_json = self._normalize_recipe_json(recipe_json)
+            
+            # Log parsed recipe for debugging
+            logger.info(f"Parsed recipe: title='{normalized_recipe_json.get('title')}', ingredients count={len(normalized_recipe_json.get('ingredients', []))}")
+            
             recipe = Recipe(**normalized_recipe_json)
 
             # Set source if provided
