@@ -222,3 +222,55 @@ async def generate_recipe(
             detail={"error": "Internal server error", "detail": "An unexpected error occurred"},
         ) from e
 
+
+@router.post("/upload-image")
+async def upload_image(
+    request: Request,
+    file: UploadFile = File(...),
+    _: None = Depends(rate_limit_dependency),
+):
+    """
+    Upload and validate an image.
+    
+    - **file**: Image file to validate
+    - Returns validation status and metadata
+    """
+    # Log route-specific parameters
+    logger.info(
+        f"Route /recipes/upload-image called",
+        extra={
+            "request_id": getattr(request.state, "request_id", None),
+            "route": "/recipes/upload-image",
+            "params": {
+                "filename": file.filename,
+                "content_type": file.content_type,
+            },
+        },
+    )
+
+    try:
+        # Read file content
+        content = await file.read()
+        
+        # Validate image
+        from app.services.image_service import ImageService
+        _, mime_type = ImageService.validate_image(content, file.filename or "image")
+        
+        return {
+            "status": "valid",
+            "filename": file.filename,
+            "mime_type": mime_type,
+            "size": len(content)
+        }
+
+    except ImageProcessingError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "Invalid image", "detail": str(e)},
+        ) from e
+    except Exception as e:
+        logger.error(f"Unexpected error in upload_image: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "Internal server error", "detail": "An unexpected error occurred"},
+        ) from e
