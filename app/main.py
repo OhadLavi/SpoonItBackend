@@ -5,6 +5,7 @@ from typing import Optional
 
 import httpx
 from fastapi import Body, Depends, FastAPI, File, HTTPException, Query, Request, status, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from slowapi.errors import RateLimitExceeded
@@ -46,6 +47,33 @@ app.state.limiter = limiter
 
 # Add exception handler for rate limiting
 app.add_exception_handler(RateLimitExceeded, get_rate_limit_exceeded_handler())
+
+
+# Add validation error handler for better error messages
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Handle request validation errors with detailed messages."""
+    request_id = get_request_id()
+    
+    logger.warning(
+        f"Validation error: {str(exc)}",
+        extra={
+            "request_id": request_id,
+            "path": request.url.path,
+            "method": request.method,
+            "errors": exc.errors(),
+        },
+    )
+    
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "error": "Validation error",
+            "detail": exc.errors(),
+            "request_id": request_id,
+            "message": "Request validation failed. Check the 'detail' field for specific errors.",
+        },
+    )
 
 
 # Global exception handler
@@ -206,13 +234,15 @@ async def extract_recipe_legacy(
 @app.post("/extract_recipe_from_image")
 async def extract_recipe_from_image_legacy(
     request: Request,
-    file: UploadFile = File(...),
+    file: UploadFile = File(..., description="Image file to extract recipe from"),
     _: None = Depends(rate_limit_dependency),
     recipe_extractor: RecipeExtractor = Depends(get_recipe_extractor),
 ):
     """
     Legacy compatibility endpoint for /extract_recipe_from_image.
     Accepts multipart/form-data with an image file and returns recipe in old format.
+    
+    The file should be sent as multipart/form-data with field name 'file'.
     """
     # Log route-specific parameters
     logger.info(
@@ -221,8 +251,8 @@ async def extract_recipe_from_image_legacy(
             "request_id": getattr(request.state, "request_id", None),
             "route": "/extract_recipe_from_image",
             "params": {
-                "filename": file.filename,
-                "content_type": file.content_type,
+                "filename": file.filename if file else None,
+                "content_type": file.content_type if file else None,
             },
         },
     )
