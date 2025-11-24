@@ -4,7 +4,7 @@ import logging
 from typing import Optional
 
 import httpx
-from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import Body, Depends, FastAPI, File, HTTPException, Query, Request, status, UploadFile
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from slowapi.errors import RateLimitExceeded
@@ -197,6 +197,75 @@ async def extract_recipe_legacy(
         ) from e
     except Exception as e:
         logger.error(f"Unexpected error in extract_recipe_legacy: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "Internal server error", "detail": "An unexpected error occurred"},
+        ) from e
+
+
+@app.post("/extract_recipe_from_image")
+async def extract_recipe_from_image_legacy(
+    request: Request,
+    file: UploadFile = File(...),
+    _: None = Depends(rate_limit_dependency),
+    recipe_extractor: RecipeExtractor = Depends(get_recipe_extractor),
+):
+    """
+    Legacy compatibility endpoint for /extract_recipe_from_image.
+    Accepts multipart/form-data with an image file and returns recipe in old format.
+    """
+    # Log route-specific parameters
+    logger.info(
+        f"Route /extract_recipe_from_image called",
+        extra={
+            "request_id": getattr(request.state, "request_id", None),
+            "route": "/extract_recipe_from_image",
+            "params": {
+                "filename": file.filename,
+                "content_type": file.content_type,
+            },
+        },
+    )
+    
+    try:
+        # Read file content
+        image_data = await file.read()
+        filename = file.filename or "image"
+        
+        # Extract recipe using new service
+        recipe = await recipe_extractor.extract_from_image(image_data, filename)
+        
+        # Convert new Recipe format to old format for backward compatibility
+        result = {
+            "title": recipe.title or "",
+            "description": recipe.description or "",
+            "ingredients": recipe.ingredients or [],
+            "instructions": recipe.instructions or [],
+            "prepTime": recipe.prepTimeMinutes or 0,
+            "cookTime": recipe.cookTimeMinutes or 0,
+            "servings": int(recipe.servings) if recipe.servings and recipe.servings.isdigit() else 1,
+            "tags": [],
+            "notes": " ".join(recipe.notes) if recipe.notes else "",
+            "source": recipe.source or "",
+            "imageUrl": str(recipe.imageUrl) if recipe.imageUrl else "",
+            "images": recipe.images or [],
+            "ingredientGroups": [group.dict() for group in recipe.ingredientGroups] if recipe.ingredientGroups else [],
+        }
+        
+        return result
+        
+    except ImageProcessingError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "Invalid image", "detail": str(e)},
+        ) from e
+    except GeminiError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"error": "Failed to extract recipe from image", "detail": str(e)},
+        ) from e
+    except Exception as e:
+        logger.error(f"Unexpected error in extract_recipe_from_image_legacy: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": "Internal server error", "detail": "An unexpected error occurred"},
