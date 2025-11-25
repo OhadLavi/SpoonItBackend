@@ -107,3 +107,29 @@ class RecipeExtractor:
             logger.error(f"Unexpected error generating recipe: {str(e)}", exc_info=True)
             raise GeminiError(f"Failed to generate recipe: {str(e)}") from e
 
+    async def generate_from_text(self, prompt: str) -> Recipe:
+        """
+        Generate recipe from free-form text prompt.
+        
+        This method is designed for chat-based interactions where the prompt
+        is already fully formed.
+
+        Args:
+            prompt: Complete prompt text for recipe generation
+
+        Returns:
+            Generated Recipe object
+
+        Raises:
+            GeminiError: If generation fails
+        """
+        try:
+            recipe = await self.gemini_service.generate_recipe_from_text(prompt)
+            return recipe
+
+        except GeminiError:
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error generating recipe from text: {str(e)}", exc_info=True)
+            raise GeminiError(f"Failed to generate recipe: {str(e)}") from e
+

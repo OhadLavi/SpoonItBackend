@@ -175,6 +175,39 @@ class GeminiService:
             logger.error(f"Gemini recipe generation failed: {str(e)}", exc_info=True)
             raise GeminiError(f"Failed to generate recipe: {str(e)}") from e
 
+    async def generate_recipe_from_text(self, prompt: str) -> Recipe:
+        """
+        Generate a recipe from a free-form text prompt.
+        
+        This method is designed for chat-based interactions where the prompt
+        is already fully formed and should not be wrapped with additional context.
+
+        Args:
+            prompt: Complete prompt text for recipe generation
+
+        Returns:
+            Generated Recipe object
+
+        Raises:
+            GeminiError: If generation fails
+        """
+        try:
+            # Run in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None, lambda: self.model.generate_content(prompt)
+            )
+
+            recipe_json = self._parse_response_to_json(response.text)
+            normalized_recipe_json = self._normalize_recipe_json(recipe_json)
+            recipe = Recipe(**normalized_recipe_json)
+            
+            return recipe
+
+        except Exception as e:
+            logger.error(f"Gemini recipe generation from text failed: {str(e)}", exc_info=True)
+            raise GeminiError(f"Failed to generate recipe: {str(e)}") from e
+
     def _build_extraction_prompt(self, text: str, source_url: Optional[str] = None) -> str:
         """Build prompt for recipe extraction from text."""
         return f"""Extract the recipe information from the following text and return it as a JSON object matching this exact structure:

@@ -91,10 +91,40 @@ async def chat(
         
         # Add current message
         prompt_parts.append(f"User: {chat_request.message}")
+        
+        # Build the instruction for recipe generation
         prompt_parts.append(
-            "Based on the conversation above, please respond to the user. "
-            "If this is a recipe request or you decide to suggest a full recipe, respond with a SINGLE JSON object for one recipe, no extra text. "
-            "Otherwise, provide a helpful text response."
+            f"Based on the user's request, generate a recipe in JSON format matching this exact structure:\n\n"
+            f"{{\n"
+            f'  "title": "Recipe title",\n'
+            f'  "description": "Brief recipe description",\n'
+            f'  "language": "{chat_request.language}",\n'
+            f'  "servings": "Number of servings",\n'
+            f'  "prepTimeMinutes": number or null,\n'
+            f'  "cookTimeMinutes": number or null,\n'
+            f'  "totalTimeMinutes": number or null,\n'
+            f'  "ingredientGroups": [\n'
+            f'    {{\n'
+            f'      "name": "Group name or null",\n'
+            f'      "ingredients": [\n'
+            f'        {{"raw": "ingredient with amount"}}\n'
+            f'      ]\n'
+            f'    }}\n'
+            f'  ],\n'
+            f'  "ingredients": ["flat list of all ingredients with amounts"],\n'
+            f'  "instructions": ["detailed step 1", "detailed step 2", ...],\n'
+            f'  "notes": ["helpful tip 1", ...] or [],\n'
+            f'  "imageUrl": null,\n'
+            f'  "images": [],\n'
+            f'  "nutrition": {{\n'
+            f'    "calories": number or null,\n'
+            f'    "protein_g": number or null,\n'
+            f'    "fat_g": number or null,\n'
+            f'    "carbs_g": number or null,\n'
+            f'    "per": "serving" or null\n'
+            f'  }}\n'
+            f"}}\n\n"
+            f"Return ONLY valid JSON, no markdown, no code blocks, no explanations."
         )
         
         full_prompt = "\n\n".join(prompt_parts)
@@ -119,7 +149,8 @@ async def chat(
             # The recipe_extractor.generate_from_ingredients calls gemini_service.generate_recipe.
             # Let's see if we can pass the full prompt there.
             
-            recipe = await recipe_extractor.generate_from_ingredients([full_prompt])
+            # Use the new generate_from_text method which accepts the full prompt directly
+            recipe = await recipe_extractor.generate_from_text(full_prompt)
             
             return ChatResponse(
                 response="Here's a recipe based on your request:",
