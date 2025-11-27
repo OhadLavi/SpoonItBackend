@@ -45,5 +45,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # --workers: Number of worker processes (reduced to 2 for faster startup and lower memory)
 # --timeout: Request timeout (120s)
 # --graceful-timeout: Time to wait for workers to finish on shutdown (30s)
-CMD ["gunicorn", "app.main:app", "--workers", "2", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8080", "--timeout", "120", "--graceful-timeout", "30", "--access-logfile", "-", "--error-logfile", "-"]
+CMD ["gunicorn", "app.main:app", "--workers", "2", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8080", "--timeout", "0", "--graceful-timeout", "30", "--access-logfile", "-", "--error-logfile", "-"]
 
