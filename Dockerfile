@@ -41,15 +41,9 @@ USER appuser
 # Expose port for Cloud Run
 EXPOSE 8080
 
-# Health check—internal self test
+# Health check—internal self test (NO heredoc, works on Cloud Build)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD python3 - << 'EOF'
-import httpx
-try:
-    httpx.get("http://localhost:8080/health", timeout=3)
-except Exception as e:
-    exit(1)
-EOF
+  CMD python3 -c "import httpx, sys; sys.exit(0 if httpx.get('http://localhost:8080/health', timeout=3).status_code == 200 else 1)"
 
 # Gunicorn command (fast cold start)
 CMD [
