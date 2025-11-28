@@ -26,30 +26,35 @@ WORKDIR /app
 # Create a non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 
-# Copy installed Python packages
+# Copy installed Python packages from builder
 COPY --from=builder /root/.local /home/appuser/.local
 
-# Copy application code
+# Copy application code into container
 COPY --chown=appuser:appuser . .
 
-# Add local bin path
+# Expose Python user base executables
 ENV PATH="/home/appuser/.local/bin:${PATH}"
 
+# Switch to non-root user
 USER appuser
 
-# Cloud Run port
+# Expose port for Cloud Run
 EXPOSE 8080
 
-# Health check (internal)
+# Health check—internal self test
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD python - <<EOF
-import httpx; httpx.get("http://localhost:8080/health", timeout=3)
+  CMD python3 - << 'EOF'
+import httpx
+try:
+    httpx.get("http://localhost:8080/health", timeout=3)
+except Exception as e:
+    exit(1)
 EOF
 
-# Run app with Gunicorn + Uvicorn worker
+# Gunicorn command (fast cold start)
 CMD [
   "gunicorn", "app.main:app",
-  "--workers", "1",                          # Faster cold start, Cloud Run autoscale handles load
+  "--workers", "1",
   "--worker-class", "uvicorn.workers.UvicornWorker",
   "--bind", "0.0.0.0:8080",
   "--timeout", "0",
