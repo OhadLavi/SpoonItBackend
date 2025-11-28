@@ -158,25 +158,24 @@ async def chat(
                 is_recipe=True,
                 recipe=recipe.model_dump(),
             )
-        except Exception:
-            # If recipe generation fails (e.g. model returns text instead of JSON), return a text response
-            # In a real implementation, we would want to distinguish between "failed to generate recipe" 
-            # and "model chose to reply with text".
-            # For now, we'll assume if it's not a recipe JSON, it's a text response.
+        except Exception as e:
+            # Log the specific error that caused the fallback
+            logger.warning(f"Chat recipe generation failed: {str(e)}")
             
-            # Since we can't easily get the text response if generate_from_ingredients fails (it raises error),
-            # we might need a more flexible service method. 
-            # But for this task, we'll stick to the plan: if recipe gen fails, return a generic fallback 
-            # OR ideally, we should call a chat-specific method.
+            # Localize fallback message
+            fallback_msg = (
+                f"I understand you're asking about: {chat_request.message}. "
+                "Please provide specific ingredients or a recipe URL for me to help you better."
+            )
             
-            # Let's just return a placeholder for the text response for now, 
-            # as the current backend architecture is heavily recipe-centric.
-            # To truly support chat, we'd need a method that returns (text, is_recipe).
-            
-            # For this iteration, we'll keep the simple fallback.
+            if chat_request.language == "he":
+                fallback_msg = (
+                    f"הבנתי שאתה שואל על: {chat_request.message}. "
+                    "אנא ספק רשימת מצרכים או קישור למתכון כדי שאוכל לעזור לך טוב יותר."
+                )
+
             return ChatResponse(
-                response=f"I understand you're asking about: {chat_request.message}. "
-                        "Please provide specific ingredients or a recipe URL for me to help you better.",
+                response=fallback_msg,
                 model="gemini-1.5-pro",
                 is_recipe=False,
             )
