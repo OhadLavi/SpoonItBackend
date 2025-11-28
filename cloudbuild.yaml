@@ -38,14 +38,7 @@ steps:
         "--min-instances", "0",
 
         # 🚀 Fast cold starts (free)
-        "--cpu-boost",
-        "--startup-cpu-boost",
-
-        # ✔ Cloud Run will not route traffic until app is actually ready
-        "--readiness-check-path=/health/ready",
-
-        # ⏳ Allow slow dependencies during cold start
-        "--startup-timeout=300"
+        "--cpu-boost"
       ]
 
 substitutions:
