@@ -27,37 +27,12 @@ async def health_check() -> Dict[str, str]:
 @router.get("/ready")
 async def readiness_check() -> Dict[str, Any]:
     """
-    Readiness check with dependency verification.
-
-    Returns:
-        Readiness status with dependency checks
+    Readiness check for Cloud Run.
+    Called before traffic is routed to this instance.
     """
-    checks = {
+    return {
         "status": "ready",
-        "dependencies": {
-            "gemini": "unknown",
-            "zyte": "unknown",
-        },
+        "startup": True
     }
 
-    # Check Gemini API
-    try:
-        # Simple connectivity check
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            # Just check if we can make a request (Gemini API key validation happens on actual use)
-            checks["dependencies"]["gemini"] = "available"
-    except Exception as e:
-        logger.warning(f"Gemini check failed: {str(e)}")
-        checks["dependencies"]["gemini"] = "unavailable"
-
-    # Check Zyte API
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            # Simple connectivity check
-            checks["dependencies"]["zyte"] = "available"
-    except Exception as e:
-        logger.warning(f"Zyte check failed: {str(e)}")
-        checks["dependencies"]["zyte"] = "unavailable"
-
-    return checks
 
