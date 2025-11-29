@@ -15,6 +15,7 @@ from app.api.routes import chat, health, recipes
 from app.config import settings
 from app.core.request_id import get_request_id
 from app.middleware.logging import RequestLoggingMiddleware
+from app.middleware.performance import PerformanceMiddleware
 from app.middleware.rate_limit import get_rate_limit_exceeded_handler, limiter, rate_limit_dependency
 from app.middleware.security import SecurityHeadersMiddleware, setup_compression, setup_cors
 from app.services.recipe_extractor import RecipeExtractor
@@ -140,6 +141,7 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
 
 # Add middleware (order matters!)
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(PerformanceMiddleware, slow_request_threshold=2.0, very_slow_request_threshold=5.0)
 app.add_middleware(RequestLoggingMiddleware)
 setup_compression(app)
 setup_cors(app)

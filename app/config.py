@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     # Zyte Settings
     zyte_timeout: int = 30
 
+    # Worker Settings
+    workers: int = 4  # Number of Gunicorn workers
+    worker_timeout: int = 120  # Worker timeout in seconds
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

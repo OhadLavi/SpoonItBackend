@@ -18,6 +18,48 @@ class ScraperService:
         """Initialize scraper service."""
         self.timeout = settings.http_timeout
         self.zyte_timeout = settings.zyte_timeout
+        # Persistent HTTP client with connection pooling for better performance
+        self._client = None
+        self._zyte_client = None
+        # Content limits
+        self.max_content_size = 500 * 1024  # 500KB limit
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        """Get or create persistent HTTP client with connection pooling."""
+        if self._client is None:
+            # Configure connection pooling
+            limits = httpx.Limits(
+                max_keepalive_connections=20,
+                max_connections=100,
+                keepalive_expiry=30.0
+            )
+            self._client = httpx.AsyncClient(
+                timeout=self.timeout,
+                follow_redirects=True,
+                limits=limits
+            )
+        return self._client
+    
+    @property
+    def zyte_client(self) -> httpx.AsyncClient:
+        """Get or create persistent HTTP client for Zyte API."""
+        if self._zyte_client is None:
+            self._zyte_client = httpx.AsyncClient(timeout=self.zyte_timeout)
+        return self._zyte_client
+    
+    async def close(self):
+        """Close persistent HTTP clients."""
+        if self._client:
+            await self._client.aclose()
+        if self._zyte_client:
+            await self._zyte_client.aclose()
+    
+    def __del__(self):
+        """Cleanup on deletion."""
+        # Note: This is not ideal for async cleanup, but provides fallback
+        # In production, use proper lifespan management
+        pass
 
     async def fetch_recipe_content(self, url: str) -> str:
         """
@@ -97,24 +139,30 @@ class ScraperService:
             "Accept-Language": "en-US,en;q=0.5",
         }
 
-        async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
-            try:
-                response = await client.get(url, headers=headers)
-                response.raise_for_status()
+        try:
+            # Use persistent client with connection pooling
+            response = await self.client.get(url, headers=headers)
+            response.raise_for_status()
 
-                # Check if blocked (403, 429, etc.)
-                if response.status_code in (403, 429, 451):
-                    raise ScrapingError(f"Access blocked (HTTP {response.status_code})")
+            # Check if blocked (403, 429, etc.)
+            if response.status_code in (403, 429, 451):
+                raise ScrapingError(f"Access blocked (HTTP {response.status_code})")
+            
+            # Check content size
+            content = response.text
+            if len(content) > self.max_content_size:
+                logger.warning(f"Content size {len(content)} exceeds limit {self.max_content_size}, truncating")
+                content = content[:self.max_content_size]
 
-                # Clean HTML before returning
-                return self._clean_html(response.text)
+            # Clean HTML before returning
+            return self._clean_html(content)
 
-            except httpx.HTTPStatusError as e:
-                raise ScrapingError(f"HTTP error {e.response.status_code}: {str(e)}") from e
-            except httpx.TimeoutException as e:
-                raise ScrapingError(f"Request timeout: {str(e)}") from e
-            except httpx.RequestError as e:
-                raise ScrapingError(f"Request failed: {str(e)}") from e
+        except httpx.HTTPStatusError as e:
+            raise ScrapingError(f"HTTP error {e.response.status_code}: {str(e)}") from e
+        except httpx.TimeoutException as e:
+            raise ScrapingError(f"Request timeout: {str(e)}") from e
+        except httpx.RequestError as e:
+            raise ScrapingError(f"Request failed: {str(e)}") from e
 
     async def _fetch_with_zyte(self, url: str) -> str:
         """
@@ -145,38 +193,43 @@ class ScraperService:
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=self.zyte_timeout) as client:
-            try:
-                response = await client.post(
-                    zyte_url, 
-                    json=payload, 
-                    headers=headers,
-                    auth=(settings.zyte_api_key, "")
-                )
-                response.raise_for_status()
+        try:
+            # Use persistent Zyte client
+            response = await self.zyte_client.post(
+                zyte_url, 
+                json=payload, 
+                headers=headers,
+                auth=(settings.zyte_api_key, "")
+            )
+            response.raise_for_status()
 
-                data = response.json()
+            data = response.json()
+            
+            if "httpResponseBody" in data:
+                # Decode base64 response body
+                import base64
                 
-                if "httpResponseBody" in data:
-                    # Decode base64 response body
-                    import base64
-                    from bs4 import BeautifulSoup
-                    
-                    html_content = base64.b64decode(data["httpResponseBody"]).decode("utf-8")
-                    return self._clean_html(html_content)
-                else:
-                    raise ZyteError("Unexpected Zyte response format: missing httpResponseBody")
+                html_content = base64.b64decode(data["httpResponseBody"]).decode("utf-8")
+                
+                # Check content size
+                if len(html_content) > self.max_content_size:
+                    logger.warning(f"Zyte content size {len(html_content)} exceeds limit, truncating")
+                    html_content = html_content[:self.max_content_size]
+                
+                return self._clean_html(html_content)
+            else:
+                raise ZyteError("Unexpected Zyte response format: missing httpResponseBody")
 
-            except httpx.HTTPStatusError as e:
-                raise ZyteError(f"Zyte API HTTP error {e.response.status_code}: {str(e)}") from e
-            except httpx.TimeoutException as e:
-                raise ZyteError(f"Zyte API timeout: {str(e)}") from e
-            except httpx.RequestError as e:
-                raise ZyteError(f"Zyte API request failed: {str(e)}") from e
-            except KeyError as e:
-                raise ZyteError(f"Unexpected Zyte response format: {str(e)}") from e
-            except Exception as e:
-                raise ZyteError(f"Error processing Zyte response: {str(e)}") from e
+        except httpx.HTTPStatusError as e:
+            raise ZyteError(f"Zyte API HTTP error {e.response.status_code}: {str(e)}") from e
+        except httpx.TimeoutException as e:
+            raise ZyteError(f"Zyte API timeout: {str(e)}") from e
+        except httpx.RequestError as e:
+            raise ZyteError(f"Zyte API request failed: {str(e)}") from e
+        except KeyError as e:
+            raise ZyteError(f"Unexpected Zyte response format: {str(e)}") from e
+        except Exception as e:
+            raise ZyteError(f"Error processing Zyte response: {str(e)}") from e
 
     def _clean_html(self, html_content: str) -> str:
         """
@@ -190,8 +243,13 @@ class ScraperService:
         """
         from bs4 import BeautifulSoup
         
-        # Parse HTML
-        soup = BeautifulSoup(html_content, "html.parser")
+        # Parse HTML with lxml for better performance (3-5x faster)
+        try:
+            soup = BeautifulSoup(html_content, "lxml")
+        except Exception:
+            # Fallback to html.parser if lxml fails
+            logger.warning("lxml parser failed, falling back to html.parser")
+            soup = BeautifulSoup(html_content, "html.parser")
         
         # Remove script and style elements
         for script in soup(["script", "style"]):
