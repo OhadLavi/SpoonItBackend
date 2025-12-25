@@ -154,7 +154,7 @@ async def chat(
             
             return ChatResponse(
                 response="Here's a recipe based on your request:",
-                model="gemini-1.5-pro",
+                model="gemini-2.5-flash",
                 is_recipe=True,
                 recipe=recipe.model_dump(),
             )
@@ -176,7 +176,7 @@ async def chat(
 
             return ChatResponse(
                 response=fallback_msg,
-                model="gemini-1.5-pro",
+                model="gemini-2.5-flash",
                 is_recipe=False,
             )
 

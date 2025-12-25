@@ -1,12 +1,15 @@
 # SpoonIt Backend
 
-A FastAPI-based backend server for the SpoonIt recipe application. Provides recipe extraction from URLs and images, recipe generation from ingredients, and AI-powered chat functionality using Google's Gemini API.
+A FastAPI-based backend server for the SpoonIt recipe application. Provides recipe extraction from URLs and images, recipe generation from ingredients, and AI-powered chat functionality using Google's Gemini API with built-in URL context fetching.
 
 ## Features
 
-- 🍳 **Recipe Extraction**: Extract recipes from public URLs or uploaded images
+- 🍳 **Recipe Extraction**: Extract recipes directly from URLs using Gemini's url_context (no web scraping needed)
+- 📸 **Image Extraction**: Extract recipes from uploaded images using Gemini Vision
 - 🤖 **AI Recipe Generation**: Generate recipes from a list of ingredients using Gemini AI
 - 💬 **Chat Interface**: Interactive recipe-focused conversations with AI
+- 📝 **Instruction Groups**: Support for organized instruction groups (e.g., "הכנת הבצק", "הגשה")
+- 📌 **Notes Support**: Extract tips, notes, and recommendations from recipes
 - 🔒 **Security**: Rate limiting, CORS, security headers, and request validation
 - 📊 **Logging**: Comprehensive request logging with request IDs
 - 🐳 **Docker Support**: Ready for containerized deployment (Cloud Run compatible)
@@ -15,7 +18,6 @@ A FastAPI-based backend server for the SpoonIt recipe application. Provides reci
 
 - Python 3.11 or higher
 - Google Gemini API key ([Get one here](https://makersuite.google.com/app/apikey))
-- Zyte API key for web scraping ([Get one here](https://www.zyte.com/))
 
 ## Setup
 
@@ -44,7 +46,6 @@ cp env.example .env
 
 Edit `.env` and set:
 - `GEMINI_API_KEY`: Your Google Gemini API key
-- `ZYTE_API_KEY`: Your Zyte API key (for web scraping)
 - Adjust other settings as needed (see `env.example` for all options)
 
 ## Running the Server
@@ -124,7 +125,7 @@ Once the server is running, interactive API documentation is available at:
     ```json
     {
       "response": "AI response text",
-      "model": "gemini-1.5-pro",
+      "model": "gemini-2.5-flash",
       "is_recipe": true,
       "recipe": { ... }
     }
@@ -145,7 +146,6 @@ All configuration is done via environment variables (see `env.example`):
 
 ### Required
 - `GEMINI_API_KEY`: Google Gemini API key
-- `ZYTE_API_KEY`: Zyte API key for web scraping
 
 ### Optional
 - `PORT`: Server port (default: 8080)
@@ -153,7 +153,7 @@ All configuration is done via environment variables (see `env.example`):
 - `LOG_LEVEL`: Logging level (default: INFO)
 - `RATE_LIMIT_PER_HOUR`: Rate limit per IP (default: 100)
 - `CORS_ORIGINS`: Allowed CORS origins (default: *)
-- `GEMINI_MODEL`: Gemini model to use (default: gemini-2.5-pro)
+- `GEMINI_MODEL`: Gemini model to use (default: gemini-2.5-flash)
 - `GEMINI_TEMPERATURE`: Model temperature (default: 0.3)
 - `GEMINI_MAX_TOKENS`: Max response tokens (default: 4096)
 
@@ -178,6 +178,25 @@ backend/
 └── README.md               # This file
 ```
 
+## How It Works
+
+### Recipe Extraction from URLs
+
+The backend uses Google's Gemini API with the `url_context` tool to directly fetch and extract recipes from URLs. This eliminates the need for traditional web scraping:
+
+1. **Direct URL Processing**: Gemini fetches the URL content automatically
+2. **Intelligent Extraction**: AI extracts recipe data while preserving exact text
+3. **Structured Output**: Returns JSON with ingredients, instructions, notes, and instruction groups
+4. **Hebrew Support**: Optimized prompts for Hebrew recipe extraction
+
+### Recipe Model
+
+Recipes support:
+- **Ingredient Groups**: Organized ingredient lists (e.g., "לבסיס", "לקרם")
+- **Instruction Groups**: Organized instruction sections (e.g., "הכנת הבצק", "הגשה")
+- **Notes**: Tips, recommendations, and additional information
+- **Flat Lists**: Both grouped and flat lists for maximum compatibility
+
 ## Development
 
 ### Running Tests
@@ -191,6 +210,7 @@ pytest tests/
 The project uses:
 - FastAPI for the web framework
 - Pydantic for data validation
+- Google Genai SDK (new API) for Gemini integration
 - SlowAPI for rate limiting
 - Structured logging with request IDs
 
