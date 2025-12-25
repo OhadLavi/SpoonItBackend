@@ -17,6 +17,13 @@ class IngredientGroup(BaseModel):
     ingredients: List[Ingredient] = Field(..., description="List of ingredients in this group")
 
 
+class InstructionGroup(BaseModel):
+    """Group of instructions (e.g., 'הכנת הבצק', 'הגשה')."""
+
+    name: Optional[str] = Field(None, description="Group name (e.g., 'הכנת הבצק', 'הגשה')")
+    instructions: List[str] = Field(..., description="List of instructions in this group")
+
+
 class Nutrition(BaseModel):
     """Nutritional information."""
 
@@ -45,7 +52,10 @@ class Recipe(BaseModel):
     ingredients: List[str] = Field(
         default_factory=list, description="Flat list of all ingredients (raw text)"
     )
-    instructions: List[str] = Field(default_factory=list, description="Cooking instructions")
+    instructionGroups: List[InstructionGroup] = Field(
+        default_factory=list, description="Grouped instructions (e.g., 'הכנת הבצק', 'הגשה')"
+    )
+    instructions: List[str] = Field(default_factory=list, description="Flat list of all cooking instructions")
     notes: List[str] = Field(default_factory=list, description="Additional notes")
     imageUrl: Optional[HttpUrl] = Field(None, description="Main recipe image URL")
     images: List[str] = Field(default_factory=list, description="All recipe image URLs")

@@ -37,12 +37,6 @@ class GeminiError(SpoonItException):
     pass
 
 
-class ZyteError(SpoonItException):
-    """Raised when Zyte API call fails."""
-
-    pass
-
-
 class ImageProcessingError(SpoonItException):
     """Raised when image processing fails."""
 

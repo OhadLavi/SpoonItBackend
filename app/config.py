@@ -9,7 +9,6 @@ class Settings(BaseSettings):
 
     # API Keys
     gemini_api_key: str
-    zyte_api_key: str
 
     # Server
     port: int = 8080
@@ -29,12 +28,9 @@ class Settings(BaseSettings):
     cors_origins: str = "*"  # Comma-separated origins or "*" for all
 
     # Gemini Settings
-    gemini_model: str = "gemini-1.5-pro"
+    gemini_model: str = "gemini-2.0-flash-exp"
     gemini_temperature: float = 0.3
     gemini_max_tokens: int = 4096
-
-    # Zyte Settings
-    zyte_timeout: int = 30
 
     # Worker Settings
     workers: int = 4  # Number of Gunicorn workers

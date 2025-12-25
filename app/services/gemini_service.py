@@ -4,8 +4,8 @@ import asyncio
 import logging
 from typing import Optional
 
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
+from google import genai
+from google.genai import types
 
 from app.config import settings
 from app.models.recipe import Recipe
@@ -19,30 +19,14 @@ class GeminiService:
 
     def __init__(self):
         """Initialize Gemini service."""
-        self._model = None
-        self._configured = False
-
-    def _ensure_configured(self):
-        """Lazy initialization of Gemini API."""
-        if not self._configured:
-            genai.configure(api_key=settings.gemini_api_key)
-            self._configured = True
+        self._client = None
 
     @property
-    def model(self):
-        """Get or create the Gemini model (lazy initialization)."""
-        if self._model is None:
-            self._ensure_configured()
-            self._model = genai.GenerativeModel(
-                model_name=settings.gemini_model,
-                safety_settings={
-                    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-                },
-            )
-        return self._model
+    def client(self):
+        """Get or create Gemini client (lazy initialization)."""
+        if self._client is None:
+            self._client = genai.Client(api_key=settings.gemini_api_key)
+        return self._client
 
     async def extract_recipe_from_text(
         self, text: str, source_url: Optional[str] = None
@@ -60,7 +44,7 @@ class GeminiService:
         Raises:
             GeminiError: If extraction fails
         """
-        prompt = self._build_extraction_prompt(text, source_url)
+        prompt = self._build_extraction_prompt(text)
 
         try:
             # Log text length for debugging
@@ -69,7 +53,14 @@ class GeminiService:
             # Run in executor to avoid blocking
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
-                None, lambda: self.model.generate_content(prompt)
+                None,
+                lambda: self.client.models.generate_content(
+                    model="gemini-2.0-flash-exp",
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                    ),
+                )
             )
 
             # Log Gemini response for debugging
@@ -92,8 +83,7 @@ class GeminiService:
             if not recipe.title or len(recipe.ingredients) == 0:
                 logger.error(f"Extracted recipe is empty or invalid: title='{recipe.title}', ingredients={len(recipe.ingredients)}")
                 raise GeminiError(
-                    "Failed to extract meaningful recipe content. The page may not contain a valid recipe, "
-                    "or the content may be blocked by the website."
+                    "Failed to extract meaningful recipe content. The page may not contain a valid recipe."
                 )
 
             return recipe
@@ -130,7 +120,14 @@ class GeminiService:
             # Run in executor to avoid blocking
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
-                None, lambda: self.model.generate_content([prompt, image])
+                None,
+                lambda: self.client.models.generate_content(
+                    model="gemini-2.0-flash-exp",
+                    contents=[prompt, {"inline_data": {"mime_type": mime_type, "data": image_data}}],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                    ),
+                )
             )
 
             recipe_json = self._parse_response_to_json(response.text)
@@ -162,7 +159,14 @@ class GeminiService:
             # Run in executor to avoid blocking
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
-                None, lambda: self.model.generate_content(prompt)
+                None,
+                lambda: self.client.models.generate_content(
+                    model="gemini-2.0-flash-exp",
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                    ),
+                )
             )
 
             recipe_json = self._parse_response_to_json(response.text)
@@ -195,7 +199,14 @@ class GeminiService:
             # Run in executor to avoid blocking
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
-                None, lambda: self.model.generate_content(prompt)
+                None,
+                lambda: self.client.models.generate_content(
+                    model="gemini-2.0-flash-exp",
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                    ),
+                )
             )
 
             recipe_json = self._parse_response_to_json(response.text)
@@ -208,7 +219,7 @@ class GeminiService:
             logger.error(f"Gemini recipe generation from text failed: {str(e)}", exc_info=True)
             raise GeminiError(f"Failed to generate recipe: {str(e)}") from e
 
-    def _build_extraction_prompt(self, text: str, source_url: Optional[str] = None) -> str:
+    def _build_extraction_prompt(self, text: str) -> str:
         """Build prompt for recipe extraction from text."""
         return f"""Extract the recipe information from the following text and return it as a JSON object matching this exact structure:
 
@@ -229,7 +240,13 @@ class GeminiService:
     }}
   ],
   "ingredients": ["flat list of all ingredient raw texts"],
-  "instructions": ["step 1", "step 2", ...],
+  "instructionGroups": [
+    {{
+      "name": "Instruction group name (e.g., 'הכנת הבצק', 'הגשה', 'Preparation') or null",
+      "instructions": ["step 1", "step 2"]
+    }}
+  ],
+  "instructions": ["flat list of all instructions in order"],
   "notes": ["note 1", "note 2", ...] or [],
   "imageUrl": "main image URL or null",
   "images": ["image URL 1", ...] or [],
@@ -246,8 +263,10 @@ CRITICAL RULES:
 1. Preserve EXACT ingredient text, amounts, and product names. Do NOT translate, convert, or modify them.
 2. You can group ingredients, but keep the raw text exactly as written.
 3. Extract all ingredients into both ingredientGroups (grouped) and ingredients (flat list).
-4. Return ONLY valid JSON, no markdown, no code blocks, no explanations.
-5. If information is missing, use null.
+4. If instructions are organized in groups (like "הכנת הבצק", "הגשה", "Preparation", "Serving"), extract them into instructionGroups AND as a flat list in instructions.
+5. Extract any notes, tips, or recommendations into the notes array.
+6. Return ONLY valid JSON, no markdown, no code blocks, no explanations.
+7. If information is missing, use null.
 
 Text to extract:
 {text}
@@ -274,7 +293,13 @@ Text to extract:
     }}
   ],
   "ingredients": ["flat list of all ingredient raw texts"],
-  "instructions": ["step 1", "step 2", ...],
+  "instructionGroups": [
+    {{
+      "name": "Instruction group name (e.g., 'הכנת הבצק', 'הגשה', 'Preparation') or null",
+      "instructions": ["step 1", "step 2"]
+    }}
+  ],
+  "instructions": ["flat list of all instructions in order"],
   "notes": ["note 1", "note 2", ...] or [],
   "imageUrl": null,
   "images": [],
@@ -291,8 +316,10 @@ CRITICAL RULES:
 1. Preserve EXACT ingredient text, amounts, and product names from the image. Do NOT translate, convert, or modify them.
 2. You can group ingredients into groups, but keep the raw text exactly as written.
 3. Extract all ingredients into both ingredientGroups (grouped) and ingredients (flat list).
-4. Return ONLY valid JSON, no markdown, no code blocks, no explanations.
-5. If information is missing, use null.
+4. If instructions are organized in groups (like "הכנת הבצק", "הגשה"), extract them into instructionGroups AND as a flat list in instructions.
+5. Extract any notes, tips, or recommendations into the notes array.
+6. Return ONLY valid JSON, no markdown, no code blocks, no explanations.
+7. If information is missing, use null.
 """
 
 
@@ -319,7 +346,13 @@ CRITICAL RULES:
     }}
   ],
   "ingredients": ["flat list of all ingredients with amounts"],
-  "instructions": ["detailed step 1", "detailed step 2", ...],
+  "instructionGroups": [
+    {{
+      "name": "Instruction group name (e.g., 'Preparation', 'Cooking', 'Serving') or null",
+      "instructions": ["step 1", "step 2"]
+    }}
+  ],
+  "instructions": ["flat list of all detailed instructions in order"],
   "notes": ["helpful tip 1", ...] or [],
   "imageUrl": null,
   "images": [],
@@ -365,4 +398,3 @@ Return ONLY valid JSON, no markdown, no code blocks, no explanations.
             normalized["servings"] = str(servings)
 
         return normalized
-

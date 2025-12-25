@@ -33,20 +33,14 @@ class RecipeExtractor:
 
         Raises:
             ScrapingError: If scraping fails
-            GeminiError: If extraction fails
         """
         try:
-            # Fetch content
-            content = await self.scraper_service.fetch_recipe_content(url)
-
-            # Extract recipe using Gemini
-            recipe = await self.gemini_service.extract_recipe_from_text(content, source_url=url)
+            # Extract recipe directly using Gemini with url_context
+            recipe = await self.scraper_service.extract_recipe_from_url(url)
 
             return recipe
 
         except ScrapingError:
-            raise
-        except GeminiError:
             raise
         except Exception as e:
             logger.error(f"Unexpected error extracting recipe from URL: {str(e)}", exc_info=True)
