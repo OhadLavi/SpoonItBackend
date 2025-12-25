@@ -62,13 +62,59 @@ class ScraperService:
             )
 
             logger.info(f"Gemini response received for {url}")
-            logger.debug(f"Gemini response text: {response.text[:500]}")  # First 500 chars
+            
+            # Get text from response - handle different response structures
+            response_text = None
+            try:
+                # Try direct text access first (might be a property)
+                try:
+                    if response.text is not None:
+                        response_text = response.text
+                except (AttributeError, TypeError):
+                    pass
+                
+                # If direct access didn't work, try accessing through candidates
+                if not response_text and hasattr(response, 'candidates') and response.candidates:
+                    candidate = response.candidates[0]
+                    if hasattr(candidate, 'content'):
+                        content = candidate.content
+                        if hasattr(content, 'parts') and content.parts:
+                            # Get text from the first part
+                            part = content.parts[0]
+                            if hasattr(part, 'text'):
+                                response_text = part.text
+                            elif hasattr(part, 'inline_data'):
+                                raise ScrapingError("Gemini returned image data instead of text")
+                            else:
+                                response_text = str(part)
+                        elif hasattr(content, 'text'):
+                            response_text = content.text
+                        else:
+                            response_text = str(content)
+                    else:
+                        response_text = str(candidate)
+            except Exception as e:
+                logger.error(f"Error accessing response text: {str(e)}")
+                logger.error(f"Response type: {type(response)}, attributes: {[a for a in dir(response) if not a.startswith('_')]}")
+                if hasattr(response, 'candidates'):
+                    logger.error(f"Candidates: {response.candidates}")
+            
+            if not response_text:
+                logger.error(f"Could not extract text from response. Response type: {type(response)}")
+                if hasattr(response, 'candidates'):
+                    logger.error(f"Response candidates: {response.candidates}")
+                raise ScrapingError("Gemini response has no extractable text content")
+            
+            logger.debug(f"Gemini response text (first 500 chars): {response_text[:500]}")
 
             # Parse JSON response - remove markdown code blocks if present
-            response_text = response.text.strip()
+            response_text = response_text.strip()
             response_text = re.sub(r"^```json\s*", "", response_text, flags=re.MULTILINE)
             response_text = re.sub(r"^```\s*", "", response_text, flags=re.MULTILINE)
             response_text = response_text.strip()
+            
+            if not response_text:
+                raise ScrapingError("Gemini returned empty response")
             
             recipe_json = json.loads(response_text)
             
