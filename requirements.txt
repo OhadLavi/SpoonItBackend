@@ -4,8 +4,8 @@ gunicorn==21.2.0
 python-multipart==0.0.6
 requests==2.31.0
 python-dotenv==1.0.1
-pydantic==2.6.1
-pydantic-settings==2.1.0
+pydantic>=2.9.0,<3.0.0
+pydantic-settings>=2.1.0
 slowapi==0.1.9
 httpx>=0.28.1,<1.0.0
 google-genai>=1.56.0
