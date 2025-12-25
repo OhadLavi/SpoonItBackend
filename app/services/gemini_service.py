@@ -1,4 +1,4 @@
-""""Gemini LLM service for recipe extraction and generation (structured JSON + guarded search)."""
+"""Gemini LLM service for recipe extraction and generation (structured JSON + guarded tool usage)."""
 
 from __future__ import annotations
 
@@ -13,11 +13,7 @@ from pydantic import ValidationError
 from app.config import settings
 from app.models.recipe import Recipe
 from app.utils.exceptions import GeminiError
-from app.services.gemini_utils import (
-    get_response_text,
-    has_google_search_tool,
-    safe_json_loads,
-)
+from app.services.gemini_utils import get_response_text, safe_json_loads
 
 logger = logging.getLogger(__name__)
 
@@ -31,14 +27,9 @@ class GeminiService:
 
     @property
     def client(self) -> genai.Client:
-        """Get or create Gemini client (lazy initialization)."""
         if self._client is None:
             self._client = genai.Client(api_key=settings.gemini_api_key)
         return self._client
-
-    # -------------------------
-    # Guarded config builder
-    # -------------------------
 
     def _build_config(
         self,
@@ -50,31 +41,26 @@ class GeminiService:
         max_output_tokens: Optional[int] = None,
     ) -> types.GenerateContentConfig:
         """
-        Enforces the known limitation:
-        - Cannot use Google Search grounding AND structured JSON output in the same request.
+        Current Gemini constraint (as seen in your logs):
+          Tool use with response_mime_type='application/json' is unsupported.
 
-        Rule:
-          if google_search in tools:
-            - force text/plain
-            - forbid response_json_schema
-          else:
-            - if response_json_schema is provided -> force application/json
+        Therefore:
+          - If tools are provided -> must be text/plain and MUST NOT include response_json_schema.
+          - If no tools and response_json_schema is provided -> force application/json.
         """
-        if tools and has_google_search_tool(tools):
+        if tools:
             if response_json_schema is not None:
                 raise GeminiError(
-                    "Unsupported config: cannot use Google Search and JSON schema together in one request. "
-                    "Use 2-step pipeline: (1) search->text, (2) json without search."
+                    "Unsupported config: cannot use tools together with response_json_schema. "
+                    "Use 2-step pipeline: (1) tool->text, (2) json without tools."
                 )
             if response_mime_type and response_mime_type.lower() == "application/json":
                 raise GeminiError(
-                    "Unsupported config: cannot request application/json while using Google Search. "
-                    "Use text/plain for the search call, then a second JSON call without search."
+                    "Unsupported config: tool use with response_mime_type='application/json' is unsupported. "
+                    "Use text/plain for tool call, then a second JSON call without tools."
                 )
-            # force plain text
-            response_mime_type = "text/plain"
+            response_mime_type = response_mime_type or "text/plain"
         else:
-            # If schema requested, force JSON response
             if response_json_schema is not None:
                 response_mime_type = "application/json"
 
@@ -87,15 +73,10 @@ class GeminiService:
         )
 
     # -------------------------
-    # 2-step URL pipeline (search -> text -> JSON)
+    # 2-step URL pipeline (google_search -> text -> JSON)
     # -------------------------
 
     async def fetch_recipe_text_via_google_search(self, url: str) -> str:
-        """
-        Step 1:
-        Use Google Search grounding to access a URL and extract the recipe content as TEXT (not JSON).
-        This avoids the search+json limitation.
-        """
         prompt = f"""
 Use Google Search to access and read this URL:
 {url}
@@ -107,10 +88,14 @@ STRICT RULES:
 - Preserve ingredient lines and measurements EXACTLY as written.
 - Do NOT normalize, translate, or convert units.
 - Do NOT invent missing ingredients/steps.
-- Output MUST be plain text, organized as:
+
+Output MUST be plain text, organized as:
 
 TITLE:
 <one line>
+
+DESCRIPTION:
+<one paragraph or empty>
 
 INGREDIENTS:
 - <line 1 exactly>
@@ -126,7 +111,11 @@ NOTES:
 - <note 1 exactly>
 - <note 2 exactly>
 
-If a section does not exist, output it but leave it empty (e.g. NOTES: then nothing).
+IMAGES:
+- <image url 1 if present>
+- <image url 2 if present>
+
+If a section does not exist, output it but leave it empty.
 Return plain text ONLY (no JSON, no markdown).
 """.strip()
 
@@ -140,14 +129,13 @@ Return plain text ONLY (no JSON, no markdown).
                     tools=tools,
                     response_mime_type="text/plain",
                     temperature=0.0,
-                    max_output_tokens=4096,
+                    max_output_tokens=3072,
                 ),
             )
 
             text = get_response_text(response).strip()
             if not text:
                 raise GeminiError("Google Search call returned empty text.")
-
             return text
 
         except Exception as e:
@@ -155,15 +143,11 @@ Return plain text ONLY (no JSON, no markdown).
             raise GeminiError(f"Failed to fetch recipe text via Google Search: {str(e)}") from e
 
     async def extract_recipe_from_url_via_google_search(self, url: str) -> Recipe:
-        """
-        Step 1: google_search -> plain text
-        Step 2: JSON structured extraction (no search) -> Recipe
-        """
         recipe_text = await self.fetch_recipe_text_via_google_search(url)
         return await self.extract_recipe_from_text(recipe_text, source_url=url)
 
     # -------------------------
-    # Structured JSON methods (NO SEARCH)
+    # Structured JSON methods (NO TOOLS)
     # -------------------------
 
     async def extract_recipe_from_text(self, text: str, source_url: Optional[str] = None) -> Recipe:
@@ -352,28 +336,23 @@ Available ingredients:
         if source_url:
             normalized["source"] = source_url
 
-        # ensure list fields exist
         for k in ("ingredientGroups", "ingredients", "instructionGroups", "instructions", "notes", "images"):
             if normalized.get(k) is None:
                 normalized[k] = []
 
-        # servings -> str
         if "servings" in normalized and normalized["servings"] is not None and not isinstance(normalized["servings"], str):
             normalized["servings"] = str(normalized["servings"])
 
-        # imageUrl strictness (HttpUrl)
         img = normalized.get("imageUrl")
         if isinstance(img, str):
             s = img.strip()
             if not s or not s.startswith(("http://", "https://")):
                 normalized["imageUrl"] = None
 
-        # images: remove empties
         imgs = normalized.get("images")
         if isinstance(imgs, list):
             normalized["images"] = [x for x in imgs if isinstance(x, str) and x.strip()]
 
-        # tolerate ingredientGroups ingredients being ["..."] instead of [{"raw": "..."}]
         ig = normalized.get("ingredientGroups")
         if isinstance(ig, list):
             fixed_groups = []

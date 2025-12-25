@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from app.models.recipe import Recipe
 from app.services.gemini_service import GeminiService
@@ -24,20 +23,25 @@ class RecipeExtractor:
 
     async def extract_from_url(self, url: str) -> Recipe:
         """
-        Extraction strategy:
-          A) Try url_context (1 call, structured JSON)
-          B) If fails -> Google Search + TEXT (call 1) -> JSON (call 2)
+        Strategy:
+          1) Try url_context -> TEXT
+             then TEXT -> JSON (no tools)
+          2) If fails -> Google Search -> TEXT
+             then TEXT -> JSON (no tools)
 
-        This avoids the unsupported combo: Google Search + JSON in the same request.
+        Rationale:
+          Tool use + response_mime_type='application/json' is unsupported (400).
+          So all tool calls must be text/plain, and JSON must be produced in a second call without tools.
         """
-        # A) url_context
+        # 1) url_context -> text -> json
         try:
-            logger.info(f"[extract_from_url] Trying url_context for: {url}")
-            return await self.scraper_service.extract_recipe_from_url(url)
+            logger.info(f"[extract_from_url] Trying url_context (text) for: {url}")
+            text = await self.scraper_service.fetch_recipe_text_via_url_context(url)
+            return await self.gemini_service.extract_recipe_from_text(text, source_url=url)
         except ScrapingError as e:
             logger.warning(f"[extract_from_url] url_context failed, fallback to Google Search. Reason: {e}")
 
-        # B) google_search 2-step
+        # 2) google_search -> text -> json
         try:
             logger.info(f"[extract_from_url] Trying Google Search 2-step for: {url}")
             return await self.gemini_service.extract_recipe_from_url_via_google_search(url)
