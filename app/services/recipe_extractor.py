@@ -24,29 +24,25 @@ class RecipeExtractor:
     async def extract_from_url(self, url: str) -> Recipe:
         """
         Strategy:
-          1) Try url_context -> TEXT
-             then TEXT -> JSON (no tools)
-          2) If fails -> Google Search -> TEXT
-             then TEXT -> JSON (no tools)
+          A) Try url_context tool (text/plain JSON-as-text) -> parse/validate -> (repair if needed)
+          B) If fails -> Google Search tool (text/plain JSON-as-text) -> parse/validate -> (repair if needed)
 
-        Rationale:
-          Tool use + response_mime_type='application/json' is unsupported (400).
-          So all tool calls must be text/plain, and JSON must be produced in a second call without tools.
+        This avoids unsupported combo: tools + response_mime_type=application/json on 2.5-flash,
+        while still returning your Recipe JSON structure.
         """
-        # 1) url_context -> text -> json
+        # A) url_context
         try:
-            logger.info(f"[extract_from_url] Trying url_context (text) for: {url}")
-            text = await self.scraper_service.fetch_recipe_text_via_url_context(url)
-            return await self.gemini_service.extract_recipe_from_text(text, source_url=url)
+            logger.info(f"[extract_from_url] Trying url_context for: {url}")
+            return await self.scraper_service.extract_recipe_from_url(url)
         except ScrapingError as e:
             logger.warning(f"[extract_from_url] url_context failed, fallback to Google Search. Reason: {e}")
 
-        # 2) google_search -> text -> json
+        # B) google_search (one-call JSON-as-text + repair fallback)
         try:
-            logger.info(f"[extract_from_url] Trying Google Search 2-step for: {url}")
+            logger.info(f"[extract_from_url] Trying Google Search for: {url}")
             return await self.gemini_service.extract_recipe_from_url_via_google_search(url)
         except GeminiError as e:
-            logger.error(f"[extract_from_url] Google Search 2-step failed: {e}", exc_info=True)
+            logger.error(f"[extract_from_url] Google Search failed: {e}", exc_info=True)
             raise ScrapingError(f"Failed to extract recipe from URL using fallbacks: {e}") from e
 
     async def extract_from_image(self, image_data: bytes, filename: str) -> Recipe:

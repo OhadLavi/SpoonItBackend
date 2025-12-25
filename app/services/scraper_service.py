@@ -1,25 +1,36 @@
-"""Web extraction service using Gemini url_context (TEXT ONLY)."""
+"""Web extraction service using Gemini url_context (tool) with JSON-as-text output."""
 
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from google import genai
 from google.genai import types
+from pydantic import ValidationError
 
 from app.config import settings
+from app.models.recipe import Recipe
 from app.utils.exceptions import ScrapingError
-from app.services.gemini_utils import get_response_text
+from app.services.gemini_utils import (
+    get_response_text,
+    log_empty_response,
+    safe_json_loads,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class ScraperService:
-    """Service for fetching recipe text from URLs using Gemini url_context."""
+    """
+    IMPORTANT:
+    Gemini 2.5 Flash does NOT support tool-use with response_mime_type=application/json.
+    So we ask for text/plain and force the model to output JSON as text.
+    """
 
     def __init__(self):
         self._client: Optional[genai.Client] = None
+        self._recipe_schema: Dict[str, Any] = Recipe.model_json_schema()
 
     @property
     def client(self) -> genai.Client:
@@ -27,15 +38,18 @@ class ScraperService:
             self._client = genai.Client(api_key=settings.gemini_api_key)
         return self._client
 
-    async def fetch_recipe_text_via_url_context(self, url: str) -> str:
+    async def extract_recipe_from_url(self, url: str) -> Recipe:
         """
-        Tool use + application/json is unsupported.
-        So url_context must be text/plain, then JSON is created in a second call without tools.
-        """
-        prompt = self._build_url_text_prompt(url)
+        Single-call attempt:
+          url_context tool + text/plain + JSON-as-text
 
+        If JSON parsing/validation fails, we do a repair call WITHOUT tools using structured output schema.
+        """
+        prompt = self._build_url_context_json_prompt(url)
+
+        # retries help with flakiness/tool retrieval issues
         last_text = ""
-        for attempt in (1, 2):
+        for attempt in range(1, 3):
             try:
                 response = await self.client.aio.models.generate_content(
                     model="gemini-2.5-flash",
@@ -44,72 +58,183 @@ class ScraperService:
                         tools=[{"url_context": {}}],
                         response_mime_type="text/plain",
                         temperature=0.0,
-                        max_output_tokens=3072,
+                        max_output_tokens=4096,
                     ),
                 )
 
                 text = get_response_text(response).strip()
                 last_text = text
 
-                # Handle explicit sentinel
-                if text.strip() == "UNABLE_TO_ACCESS_PAGE":
-                    raise ScrapingError("url_context could not access the page (sentinel returned).")
+                if not text:
+                    log_empty_response(f"url_context returned empty text (attempt {attempt}/2).", response)
+                    continue
 
-                if text:
-                    return text
+                data = safe_json_loads(text)
+                data = self._normalize_recipe_json(data, source_url=url)
+                recipe = Recipe.model_validate(data)
 
-                logger.warning(f"url_context returned empty text (attempt {attempt}/2).")
+                if not recipe.title or len(recipe.ingredients) == 0:
+                    raise ScrapingError("Extracted recipe is empty/invalid (missing title or ingredients).")
 
+                return recipe
+
+            except (ValueError, ValidationError) as e:
+                logger.warning(
+                    f"url_context JSON parse/validation failed (attempt {attempt}/2): {str(e)}",
+                    exc_info=True,
+                )
+                # try structured repair once (no tools)
+                try:
+                    repaired = await self._repair_to_schema(last_text, source_url=url)
+                    return repaired
+                except Exception:
+                    # continue retry loop for tool call
+                    continue
             except Exception as e:
-                if attempt == 2:
-                    logger.error(f"url_context fetch failed (final): {str(e)}", exc_info=True)
-                    raise ScrapingError(f"Failed to fetch recipe text via url_context: {str(e)}") from e
-                logger.warning(f"url_context attempt {attempt} failed: {e}")
+                logger.warning(
+                    f"url_context attempt {attempt}/2 failed: {str(e)}",
+                    exc_info=True,
+                )
+                continue
 
-        # Shouldn't reach here
         raise ScrapingError(f"url_context returned empty text after retries. last_text_len={len(last_text)}")
 
-    def _build_url_text_prompt(self, url: str) -> str:
+    def _build_url_context_json_prompt(self, url: str) -> str:
+        # Keep it explicit and aligned with your Pydantic model fields
         return f"""
-Use url_context to access and read this URL:
+יש לך גישה לתוכן העמוד באמצעות url_context עבור ה-URL הבא:
 {url}
 
-TASK:
-Extract ONLY the recipe content exactly as it appears on the page.
+מטרה: להחזיר אובייקט JSON תקין בלבד, בתבנית המדויקת של Recipe (כמו במודל Pydantic).
 
-If you cannot access/read the page for any reason, output EXACTLY:
-UNABLE_TO_ACCESS_PAGE
+כללים נוקשים:
+- שמור על טקסט מדויק של המרכיבים כפי שמופיע בעמוד (ingredientGroups.ingredients[].raw + ingredients[]). אל תתרגם, אל תנרמל, אל תשנה יחידות/כמויות.
+- אל תמציא מרכיבים/שלבים שלא קיימים בעמוד.
+- אם מידע לא מופיע: null לשדות אופציונליים, [] לרשימות.
+- מלא גם ingredientGroups וגם ingredients.
+- מלא גם instructionGroups וגם instructions (לפי הסדר).
+- notes: כל טיפים/המלצות/הערות שמופיעים בעמוד.
+- imageUrl: כתובת מלאה (http/https) אם קיימת, אחרת null. images: רשימת URLים לתמונות אם קיימת, אחרת [].
+- id/createdAt/updatedAt: null עבור מתכון שחולץ.
+- source: שים את ה-URL במחרוזת.
 
-STRICT RULES:
-- Preserve ingredient lines and measurements EXACTLY as written.
-- Do NOT normalize, translate, or convert units.
-- Do NOT invent missing ingredients/steps.
-- Output MUST be plain text, organized as:
+החזר JSON בלבד. ללא markdown. ללא code blocks. ללא הסברים.
 
-TITLE:
-<one line>
-
-DESCRIPTION:
-<one paragraph or empty>
-
-INGREDIENTS:
-- <line 1 exactly>
-- <line 2 exactly>
-...
-
-INSTRUCTIONS:
-1. <step 1 exactly>
-2. <step 2 exactly>
-...
-
-NOTES:
-- <note 1 exactly>
-- <note 2 exactly>
-
-IMAGES:
-- <image url 1 if present>
-- <image url 2 if present>
-
-If a section does not exist, output it but leave it empty.
-Return plain text ONLY (no JSON, no markdown).
+תבנית JSON (דוגמה לשדות, לא תוכן):
+{{
+  "id": null,
+  "title": null,
+  "description": null,
+  "source": "{url}",
+  "language": null,
+  "servings": null,
+  "prepTimeMinutes": null,
+  "cookTimeMinutes": null,
+  "totalTimeMinutes": null,
+  "ingredientGroups": [{{"name": null, "ingredients": [{{"raw": ""}}]}}],
+  "ingredients": [""],
+  "instructionGroups": [{{"name": null, "instructions": [""]}}],
+  "instructions": [""],
+  "notes": [],
+  "imageUrl": null,
+  "images": [],
+  "nutrition": {{
+    "calories": null,
+    "protein_g": null,
+    "fat_g": null,
+    "carbs_g": null,
+    "per": null
+  }},
+  "createdAt": null,
+  "updatedAt": null
+}}
 """.strip()
+
+    async def _repair_to_schema(self, broken_json_text: str, source_url: str) -> Recipe:
+        """
+        Second call (no tools) using structured output schema to repair invalid JSON-as-text.
+        """
+        prompt = f"""
+You will be given a JSON-like text that is supposed to match this Recipe schema.
+Fix it and output ONLY valid JSON that matches the schema exactly.
+
+Rules:
+- Do not add ingredients/steps that are not present in the given text.
+- Preserve raw ingredient lines as-is.
+- If missing: null for optional scalars, [] for lists.
+- Ensure "source" is "{source_url}"
+- id/createdAt/updatedAt must be null.
+
+Broken JSON-like text:
+<<<
+{broken_json_text}
+>>>
+""".strip()
+
+        response = await self.client.aio.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_json_schema=self._recipe_schema,
+                temperature=0.0,
+                max_output_tokens=4096,
+            ),
+        )
+
+        # Prefer parsed if available
+        parsed = getattr(response, "parsed", None)
+        if isinstance(parsed, dict):
+            data = parsed
+        else:
+            text = get_response_text(response).strip()
+            data = safe_json_loads(text)
+
+        data = self._normalize_recipe_json(data, source_url=source_url)
+        return Recipe.model_validate(data)
+
+    def _normalize_recipe_json(self, recipe_json: Dict[str, Any], source_url: str) -> Dict[str, Any]:
+        normalized: Dict[str, Any] = dict(recipe_json or {})
+        normalized["source"] = source_url
+
+        # Ensure list fields exist
+        for k in ("ingredientGroups", "ingredients", "instructionGroups", "instructions", "notes", "images"):
+            if normalized.get(k) is None:
+                normalized[k] = []
+
+        # servings -> str
+        if "servings" in normalized and normalized["servings"] is not None and not isinstance(normalized["servings"], str):
+            normalized["servings"] = str(normalized["servings"])
+
+        # id/createdAt/updatedAt for extracted recipes
+        normalized.setdefault("id", None)
+        normalized.setdefault("createdAt", None)
+        normalized.setdefault("updatedAt", None)
+
+        # imageUrl strictness
+        img = normalized.get("imageUrl")
+        if isinstance(img, str):
+            s = img.strip()
+            if not s or not s.startswith(("http://", "https://")):
+                normalized["imageUrl"] = None
+
+        # images: remove empties
+        imgs = normalized.get("images")
+        if isinstance(imgs, list):
+            normalized["images"] = [x for x in imgs if isinstance(x, str) and x.strip()]
+
+        # tolerate ingredientGroups.ingredients as ["..."] instead of [{"raw": "..."}]
+        ig = normalized.get("ingredientGroups")
+        if isinstance(ig, list):
+            fixed_groups = []
+            for g in ig:
+                if not isinstance(g, dict):
+                    continue
+                ingr = g.get("ingredients")
+                if isinstance(ingr, list) and ingr and all(isinstance(x, str) for x in ingr):
+                    g = dict(g)
+                    g["ingredients"] = [{"raw": x} for x in ingr if x.strip()]
+                fixed_groups.append(g)
+            normalized["ingredientGroups"] = fixed_groups
+
+        return normalized

@@ -1,10 +1,13 @@
-"""Shared helpers for Gemini responses and tool/config validation."""
+"""Shared helpers for Gemini responses, parsing, and debugging."""
 
 from __future__ import annotations
 
 import json
+import logging
 import re
-from typing import Any, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def has_google_search_tool(tools: Optional[Iterable[Any]]) -> bool:
@@ -29,63 +32,80 @@ def has_google_search_tool(tools: Optional[Iterable[Any]]) -> bool:
     return False
 
 
-def extract_balanced_json_object(text: str) -> str:
+def extract_first_json_value(text: str) -> str:
     """
-    Extract the first balanced JSON object {...} from a string.
-    Handles braces inside strings and escaped quotes.
+    Best-effort extraction of a single JSON object/array from a model response.
 
-    This is more robust than slicing from first '{' to last '}'.
+    Handles:
+    - markdown fences
+    - leading/trailing prose
+    - trailing garbage
     """
-    s = (text or "").strip()
-    if not s:
-        return s
+    t = (text or "").strip()
+    if not t:
+        return t
 
-    # Remove markdown fences (common failure mode)
-    s = re.sub(r"^```(?:json)?\s*", "", s, flags=re.IGNORECASE | re.MULTILINE)
-    s = re.sub(r"\s*```\s*$", "", s, flags=re.MULTILINE).strip()
+    # Remove markdown fences
+    t = re.sub(r"^```(?:json)?\s*", "", t, flags=re.IGNORECASE | re.MULTILINE)
+    t = re.sub(r"\s*```\s*$", "", t, flags=re.MULTILINE).strip()
 
-    start = s.find("{")
-    if start == -1:
-        return s
+    # If it already looks like JSON
+    if (t.startswith("{") and t.endswith("}")) or (t.startswith("[") and t.endswith("]")):
+        return t
 
-    in_string = False
-    escape = False
-    depth = 0
-    for i in range(start, len(s)):
-        ch = s[i]
+    # Slice from first "{" or "[" to last matching closing brace/bracket (best effort)
+    first_obj = t.find("{")
+    first_arr = t.find("[")
+    if first_obj == -1 and first_arr == -1:
+        return t
 
-        if escape:
-            escape = False
-            continue
+    start = first_obj
+    if start == -1 or (first_arr != -1 and first_arr < start):
+        start = first_arr
 
-        if ch == "\\":
-            escape = True
-            continue
+    # Very tolerant: take from start to last '}' or ']' whichever is later
+    end_obj = t.rfind("}")
+    end_arr = t.rfind("]")
+    end = max(end_obj, end_arr)
 
-        if ch == '"':
-            in_string = not in_string
-            continue
+    if end > start:
+        return t[start : end + 1].strip()
 
-        if in_string:
-            continue
+    return t
 
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return s[start : i + 1].strip()
 
-    # If we didn't find a balanced end, return the tail (will likely fail json.loads)
-    return s[start:].strip()
+def _strip_trailing_commas(json_text: str) -> str:
+    # Converts: {"a": 1,} -> {"a": 1}
+    # and: [1,2,] -> [1,2]
+    return re.sub(r",(\s*[}\]])", r"\1", json_text)
+
+
+def safe_json_loads(text: str) -> dict:
+    """
+    Parse JSON with tolerant extraction and a tiny local "repair" (trailing commas).
+    Raises json.JSONDecodeError if still invalid.
+    """
+    json_text = extract_first_json_value(text)
+    json_text = json_text.strip()
+
+    try:
+        return json.loads(json_text)
+    except json.JSONDecodeError:
+        repaired = _strip_trailing_commas(json_text)
+        return json.loads(repaired)
 
 
 def get_response_text(response: Any) -> str:
     """
     Robust extraction of text from google-genai responses.
-    Prefers `response.text`, but falls back to candidates/content/parts.
+
+    Tries:
+    1) response.text
+    2) response.parts[*].text  (SDK exposes response.parts in many examples)
+    3) response.candidates[0].content.parts[*].text
+    4) dict-like fallbacks
     """
-    # Preferred
+    # 1) Preferred
     try:
         t = getattr(response, "text", None)
         if isinstance(t, str) and t.strip():
@@ -93,7 +113,22 @@ def get_response_text(response: Any) -> str:
     except Exception:
         pass
 
-    # Fallback: candidates -> content -> parts -> text
+    # 2) response.parts
+    try:
+        parts = getattr(response, "parts", None) or []
+        for p in parts:
+            pt = getattr(p, "text", None)
+            if isinstance(pt, str) and pt.strip():
+                return pt
+            # dict style
+            if isinstance(p, dict):
+                pt2 = p.get("text")
+                if isinstance(pt2, str) and pt2.strip():
+                    return pt2
+    except Exception:
+        pass
+
+    # 3) candidates -> content -> parts
     try:
         candidates = getattr(response, "candidates", None) or []
         if candidates:
@@ -104,16 +139,57 @@ def get_response_text(response: Any) -> str:
                 pt = getattr(p, "text", None)
                 if isinstance(pt, str) and pt.strip():
                     return pt
+                if isinstance(p, dict):
+                    pt2 = p.get("text")
+                    if isinstance(pt2, str) and pt2.strip():
+                        return pt2
     except Exception:
         pass
 
     return ""
 
 
-def safe_json_loads(text: str) -> dict:
+def response_debug_summary(response: Any) -> Dict[str, Any]:
     """
-    Parse JSON with tolerant extraction.
-    Raises json.JSONDecodeError if still invalid.
+    Safe, compact debug info (no huge dumps).
+    Helps explain "HTTP 200 but empty text".
     """
-    json_text = extract_balanced_json_object(text)
-    return json.loads(json_text)
+    out: Dict[str, Any] = {}
+
+    try:
+        out["has_text_prop"] = hasattr(response, "text")
+        t = getattr(response, "text", None)
+        out["text_len"] = len(t) if isinstance(t, str) else None
+    except Exception:
+        out["text_len"] = None
+
+    # candidates info
+    try:
+        candidates = getattr(response, "candidates", None) or []
+        out["candidates"] = len(candidates)
+        if candidates:
+            c0 = candidates[0]
+            out["finish_reason"] = getattr(c0, "finish_reason", None)
+
+            # safety ratings (structure varies)
+            out["safety_ratings"] = getattr(c0, "safety_ratings", None)
+
+            # url_context metadata (if present)
+            out["url_context_metadata"] = getattr(c0, "url_context_metadata", None)
+
+            # grounding metadata (google_search)
+            out["grounding_metadata"] = getattr(c0, "grounding_metadata", None)
+
+            # parts count
+            content = getattr(c0, "content", None)
+            parts = getattr(content, "parts", None) or []
+            out["parts"] = len(parts)
+    except Exception:
+        pass
+
+    return out
+
+
+def log_empty_response(prefix: str, response: Any) -> None:
+    summary = response_debug_summary(response)
+    logger.warning(f"{prefix} empty response text. summary={summary}")
