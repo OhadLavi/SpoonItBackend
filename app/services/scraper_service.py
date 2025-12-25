@@ -47,6 +47,8 @@ class ScraperService:
 
             # Run in executor to avoid blocking
             import asyncio
+            import json
+            import re
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
                 None,
@@ -55,7 +57,6 @@ class ScraperService:
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         tools=[{"url_context": {}}],
-                        response_mime_type="application/json",
                     ),
                 )
             )
@@ -63,9 +64,13 @@ class ScraperService:
             logger.info(f"Gemini response received for {url}")
             logger.debug(f"Gemini response text: {response.text[:500]}")  # First 500 chars
 
-            # Parse JSON response
-            import json
-            recipe_json = json.loads(response.text)
+            # Parse JSON response - remove markdown code blocks if present
+            response_text = response.text.strip()
+            response_text = re.sub(r"^```json\s*", "", response_text, flags=re.MULTILINE)
+            response_text = re.sub(r"^```\s*", "", response_text, flags=re.MULTILINE)
+            response_text = response_text.strip()
+            
+            recipe_json = json.loads(response_text)
             
             # Normalize recipe JSON
             normalized_recipe_json = self._normalize_recipe_json(recipe_json)
