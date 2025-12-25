@@ -1,11 +1,13 @@
-"""Gemini LLM service for recipe extraction and generation."""
+""""Gemini LLM service for recipe extraction and generation (structured JSON)."""
 
-import asyncio
 import logging
-from typing import Optional
+import re
+import json
+from typing import Optional, Any, Dict
 
 from google import genai
 from google.genai import types
+from pydantic import ValidationError
 
 from app.config import settings
 from app.models.recipe import Recipe
@@ -14,387 +16,265 @@ from app.utils.exceptions import GeminiError
 logger = logging.getLogger(__name__)
 
 
+def _extract_first_json_object(text: str) -> str:
+    t = (text or "").strip()
+    if not t:
+        return t
+    t = re.sub(r"^```(?:json)?\s*", "", t, flags=re.MULTILINE)
+    t = re.sub(r"\s*```\s*$", "", t, flags=re.MULTILINE).strip()
+    if t.startswith("{") and t.endswith("}"):
+        return t
+    i = t.find("{")
+    j = t.rfind("}")
+    if i != -1 and j != -1 and j > i:
+        return t[i : j + 1].strip()
+    return t
+
+
+def _get_response_text(response: Any) -> str:
+    try:
+        t = getattr(response, "text", None)
+        if isinstance(t, str) and t.strip():
+            return t
+    except Exception:
+        pass
+    try:
+        candidates = getattr(response, "candidates", None) or []
+        if candidates:
+            c0 = candidates[0]
+            content = getattr(c0, "content", None)
+            parts = getattr(content, "parts", None) or []
+            for p in parts:
+                pt = getattr(p, "text", None)
+                if isinstance(pt, str) and pt.strip():
+                    return pt
+    except Exception:
+        pass
+    return ""
+
+
 class GeminiService:
     """Service for interacting with Gemini API."""
 
     def __init__(self):
-        """Initialize Gemini service."""
-        self._client = None
+        self._client: Optional[genai.Client] = None
+        self._recipe_schema: Dict[str, Any] = Recipe.model_json_schema()
 
     @property
-    def client(self):
+    def client(self) -> genai.Client:
         """Get or create Gemini client (lazy initialization)."""
         if self._client is None:
             self._client = genai.Client(api_key=settings.gemini_api_key)
         return self._client
 
-    async def extract_recipe_from_text(
-        self, text: str, source_url: Optional[str] = None
-    ) -> Recipe:
-        """
-        Extract recipe from text content using Gemini.
-
-        Args:
-            text: Text content containing recipe
-            source_url: Optional source URL
-
-        Returns:
-            Extracted Recipe object
-
-        Raises:
-            GeminiError: If extraction fails
-        """
+    async def extract_recipe_from_text(self, text: str, source_url: Optional[str] = None) -> Recipe:
         prompt = self._build_extraction_prompt(text)
 
         try:
-            # Log text length for debugging
             logger.info(f"Extracting recipe from text (length: {len(text)} chars)")
-            
-            # Run in executor to avoid blocking
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self.client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                    ),
-                )
+
+            response = await self.client.aio.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_json_schema=self._recipe_schema,
+                    temperature=0,
+                ),
             )
 
-            # Log Gemini response for debugging
-            logger.info(f"Gemini response received (length: {len(response.text)} chars)")
-            logger.debug(f"Gemini response text: {response.text[:500]}")  # First 500 chars
+            response_text = _get_response_text(response)
+            if not response_text.strip():
+                raise GeminiError("Gemini returned empty response (no JSON).")
 
-            recipe_json = self._parse_response_to_json(response.text)
-            normalized_recipe_json = self._normalize_recipe_json(recipe_json)
-            
-            # Log parsed recipe for debugging
-            logger.info(f"Parsed recipe: title='{normalized_recipe_json.get('title')}', ingredients count={len(normalized_recipe_json.get('ingredients', []))}")
-            
-            recipe = Recipe(**normalized_recipe_json)
+            recipe_json = json.loads(_extract_first_json_object(response_text))
+            recipe_json = self._normalize_recipe_json(recipe_json, source_url=source_url)
 
-            # Set source if provided
-            if source_url:
-                recipe.source = source_url
-            
-            # Validate recipe has meaningful content
+            recipe = Recipe.model_validate(recipe_json)
+
             if not recipe.title or len(recipe.ingredients) == 0:
-                logger.error(f"Extracted recipe is empty or invalid: title='{recipe.title}', ingredients={len(recipe.ingredients)}")
-                raise GeminiError(
-                    "Failed to extract meaningful recipe content. The page may not contain a valid recipe."
-                )
+                raise GeminiError("Failed to extract meaningful recipe content from text.")
 
             return recipe
 
+        except (json.JSONDecodeError, ValidationError) as e:
+            logger.error(f"Gemini JSON parse/validation failed: {str(e)}", exc_info=True)
+            raise GeminiError(f"Invalid structured JSON from Gemini: {str(e)}") from e
         except Exception as e:
             logger.error(f"Gemini extraction failed: {str(e)}", exc_info=True)
             raise GeminiError(f"Failed to extract recipe: {str(e)}") from e
 
-    async def extract_recipe_from_image(
-        self, image_data: bytes, mime_type: str
-    ) -> Recipe:
-        """
-        Extract recipe from image using Gemini Vision.
-
-        Args:
-            image_data: Image file bytes
-            mime_type: MIME type of the image
-
-        Returns:
-            Extracted Recipe object
-
-        Raises:
-            GeminiError: If extraction fails
-        """
+    async def extract_recipe_from_image(self, image_data: bytes, mime_type: str) -> Recipe:
         prompt = self._build_image_extraction_prompt()
 
         try:
-            # Create image part
-            import PIL.Image
-            import io
+            image_part = types.Part.from_bytes(data=image_data, mime_type=mime_type)
 
-            image = PIL.Image.open(io.BytesIO(image_data))
-
-            # Run in executor to avoid blocking
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self.client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=[prompt, {"inline_data": {"mime_type": mime_type, "data": image_data}}],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                    ),
-                )
+            response = await self.client.aio.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[prompt, image_part],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_json_schema=self._recipe_schema,
+                    temperature=0,
+                ),
             )
 
-            recipe_json = self._parse_response_to_json(response.text)
-            normalized_recipe_json = self._normalize_recipe_json(recipe_json)
-            recipe = Recipe(**normalized_recipe_json)
+            response_text = _get_response_text(response)
+            if not response_text.strip():
+                raise GeminiError("Gemini returned empty response (no JSON).")
 
-            return recipe
+            recipe_json = json.loads(_extract_first_json_object(response_text))
+            recipe_json = self._normalize_recipe_json(recipe_json, source_url=None)
 
+            return Recipe.model_validate(recipe_json)
+
+        except (json.JSONDecodeError, ValidationError) as e:
+            logger.error(f"Gemini image JSON parse/validation failed: {str(e)}", exc_info=True)
+            raise GeminiError(f"Invalid structured JSON from Gemini (image): {str(e)}") from e
         except Exception as e:
             logger.error(f"Gemini image extraction failed: {str(e)}", exc_info=True)
             raise GeminiError(f"Failed to extract recipe from image: {str(e)}") from e
 
     async def generate_recipe_from_ingredients(self, ingredients: list[str]) -> Recipe:
-        """
-        Generate a recipe from a list of ingredients.
-
-        Args:
-            ingredients: List of ingredient strings
-
-        Returns:
-            Generated Recipe object
-
-        Raises:
-            GeminiError: If generation fails
-        """
         prompt = self._build_generation_prompt(ingredients)
 
         try:
-            # Run in executor to avoid blocking
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self.client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                    ),
-                )
+            response = await self.client.aio.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_json_schema=self._recipe_schema,
+                    temperature=0.7,  # generation can be creative
+                ),
             )
 
-            recipe_json = self._parse_response_to_json(response.text)
-            normalized_recipe_json = self._normalize_recipe_json(recipe_json)
-            recipe = Recipe(**normalized_recipe_json)
-            
-            return recipe
+            response_text = _get_response_text(response)
+            if not response_text.strip():
+                raise GeminiError("Gemini returned empty response (no JSON).")
 
+            recipe_json = json.loads(_extract_first_json_object(response_text))
+            recipe_json = self._normalize_recipe_json(recipe_json, source_url=None)
+
+            return Recipe.model_validate(recipe_json)
+
+        except (json.JSONDecodeError, ValidationError) as e:
+            logger.error(f"Gemini generation JSON parse/validation failed: {str(e)}", exc_info=True)
+            raise GeminiError(f"Invalid structured JSON from Gemini (generation): {str(e)}") from e
         except Exception as e:
             logger.error(f"Gemini recipe generation failed: {str(e)}", exc_info=True)
             raise GeminiError(f"Failed to generate recipe: {str(e)}") from e
 
     async def generate_recipe_from_text(self, prompt: str) -> Recipe:
-        """
-        Generate a recipe from a free-form text prompt.
-        
-        This method is designed for chat-based interactions where the prompt
-        is already fully formed and should not be wrapped with additional context.
-
-        Args:
-            prompt: Complete prompt text for recipe generation
-
-        Returns:
-            Generated Recipe object
-
-        Raises:
-            GeminiError: If generation fails
-        """
         try:
-            # Run in executor to avoid blocking
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self.client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                    ),
-                )
+            response = await self.client.aio.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_json_schema=self._recipe_schema,
+                    temperature=0.7,
+                ),
             )
 
-            recipe_json = self._parse_response_to_json(response.text)
-            normalized_recipe_json = self._normalize_recipe_json(recipe_json)
-            recipe = Recipe(**normalized_recipe_json)
-            
-            return recipe
+            response_text = _get_response_text(response)
+            if not response_text.strip():
+                raise GeminiError("Gemini returned empty response (no JSON).")
 
+            recipe_json = json.loads(_extract_first_json_object(response_text))
+            recipe_json = self._normalize_recipe_json(recipe_json, source_url=None)
+
+            return Recipe.model_validate(recipe_json)
+
+        except (json.JSONDecodeError, ValidationError) as e:
+            logger.error(f"Gemini generate-from-text JSON parse/validation failed: {str(e)}", exc_info=True)
+            raise GeminiError(f"Invalid structured JSON from Gemini (generate-from-text): {str(e)}") from e
         except Exception as e:
             logger.error(f"Gemini recipe generation from text failed: {str(e)}", exc_info=True)
             raise GeminiError(f"Failed to generate recipe: {str(e)}") from e
 
     def _build_extraction_prompt(self, text: str) -> str:
-        """Build prompt for recipe extraction from text."""
-        return f"""Extract the recipe information from the following text and return it as a JSON object matching this exact structure:
+        return f"""Extract recipe information from the following text.
 
-{{
-  "title": "Recipe title",
-  "description": "Recipe description or null",
-  "language": "Language code (e.g., 'he', 'en') or null",
-  "servings": "Number of servings or null",
-  "prepTimeMinutes": number or null,
-  "cookTimeMinutes": number or null,
-  "totalTimeMinutes": number or null,
-  "ingredientGroups": [
-    {{
-      "name": "Group name or null",
-      "ingredients": [
-        {{"raw": "exact ingredient text as it appears"}}
-      ]
-    }}
-  ],
-  "ingredients": ["flat list of all ingredient raw texts"],
-  "instructionGroups": [
-    {{
-      "name": "Instruction group name (e.g., 'הכנת הבצק', 'הגשה', 'Preparation') or null",
-      "instructions": ["step 1", "step 2"]
-    }}
-  ],
-  "instructions": ["flat list of all instructions in order"],
-  "notes": ["note 1", "note 2", ...] or [],
-  "imageUrl": "main image URL or null",
-  "images": ["image URL 1", ...] or [],
-  "nutrition": {{
-    "calories": number or null,
-    "protein_g": number or null,
-    "fat_g": number or null,
-    "carbs_g": number or null,
-    "per": "per what" or null
-  }}
-}}
+Rules:
+- Preserve EXACT ingredient raw text and amounts as written. Do NOT translate or normalize.
+- Do NOT invent ingredients or steps.
+- If missing info: use null for optional scalars, and [] for lists.
+- Fill both ingredientGroups and ingredients (flat list of raw).
+- Fill both instructionGroups and instructions (flat list in order).
+- Return JSON only (no markdown, no explanations).
 
-CRITICAL RULES:
-1. Preserve EXACT ingredient text, amounts, and product names. Do NOT translate, convert, or modify them.
-2. You can group ingredients, but keep the raw text exactly as written.
-3. Extract all ingredients into both ingredientGroups (grouped) and ingredients (flat list).
-4. If instructions are organized in groups (like "הכנת הבצק", "הגשה", "Preparation", "Serving"), extract them into instructionGroups AND as a flat list in instructions.
-5. Extract any notes, tips, or recommendations into the notes array.
-6. Return ONLY valid JSON, no markdown, no code blocks, no explanations.
-7. If information is missing, use null.
-
-Text to extract:
+Text:
 {text}
 """
 
     def _build_image_extraction_prompt(self) -> str:
-        """Build prompt for recipe extraction from image."""
-        return f"""Extract the recipe information from this image and return it as a JSON object matching this exact structure:
+        return """Extract recipe information from this image.
 
-{{
-  "title": "Recipe title",
-  "description": "Recipe description or null",
-  "language": "Language code (e.g., 'he', 'en') or null",
-  "servings": "Number of servings or null",
-  "prepTimeMinutes": number or null,
-  "cookTimeMinutes": number or null,
-  "totalTimeMinutes": number or null,
-  "ingredientGroups": [
-    {{
-      "name": "Group name or null",
-      "ingredients": [
-        {{"raw": "exact ingredient text as it appears"}}
-      ]
-    }}
-  ],
-  "ingredients": ["flat list of all ingredient raw texts"],
-  "instructionGroups": [
-    {{
-      "name": "Instruction group name (e.g., 'הכנת הבצק', 'הגשה', 'Preparation') or null",
-      "instructions": ["step 1", "step 2"]
-    }}
-  ],
-  "instructions": ["flat list of all instructions in order"],
-  "notes": ["note 1", "note 2", ...] or [],
-  "imageUrl": null,
-  "images": [],
-  "nutrition": {{
-    "calories": number or null,
-    "protein_g": number or null,
-    "fat_g": number or null,
-    "carbs_g": number or null,
-    "per": "per what" or null
-  }}
-}}
-
-CRITICAL RULES:
-1. Preserve EXACT ingredient text, amounts, and product names from the image. Do NOT translate, convert, or modify them.
-2. You can group ingredients into groups, but keep the raw text exactly as written.
-3. Extract all ingredients into both ingredientGroups (grouped) and ingredients (flat list).
-4. If instructions are organized in groups (like "הכנת הבצק", "הגשה"), extract them into instructionGroups AND as a flat list in instructions.
-5. Extract any notes, tips, or recommendations into the notes array.
-6. Return ONLY valid JSON, no markdown, no code blocks, no explanations.
-7. If information is missing, use null.
+Rules:
+- Preserve EXACT ingredient raw text and amounts as written. Do NOT translate or normalize.
+- Do NOT invent ingredients or steps.
+- If missing info: use null for optional scalars, and [] for lists.
+- Fill both ingredientGroups and ingredients (flat list of raw).
+- Fill both instructionGroups and instructions (flat list in order).
+- Return JSON only (no markdown, no explanations).
 """
 
-
     def _build_generation_prompt(self, ingredients: list[str]) -> str:
-        """Build prompt for recipe generation from ingredients."""
         ingredients_text = "\n".join(f"- {ing}" for ing in ingredients)
+        return f"""Generate a creative recipe using the following ingredients.
 
-        return f"""Generate a creative recipe using the following ingredients. Return it as a JSON object matching this exact structure:
-
-{{
-  "title": "Recipe title",
-  "description": "Brief recipe description",
-  "language": "en",
-  "servings": "Number of servings",
-  "prepTimeMinutes": number or null,
-  "cookTimeMinutes": number or null,
-  "totalTimeMinutes": number or null,
-  "ingredientGroups": [
-    {{
-      "name": "Group name or null",
-      "ingredients": [
-        {{"raw": "ingredient with amount"}}
-      ]
-    }}
-  ],
-  "ingredients": ["flat list of all ingredients with amounts"],
-  "instructionGroups": [
-    {{
-      "name": "Instruction group name (e.g., 'Preparation', 'Cooking', 'Serving') or null",
-      "instructions": ["step 1", "step 2"]
-    }}
-  ],
-  "instructions": ["flat list of all detailed instructions in order"],
-  "notes": ["helpful tip 1", ...] or [],
-  "imageUrl": null,
-  "images": [],
-  "nutrition": {{
-    "calories": number or null,
-    "protein_g": number or null,
-    "fat_g": number or null,
-    "carbs_g": number or null,
-    "per": "serving" or null
-  }}
-}}
+Rules:
+- Return JSON only (no markdown, no explanations).
+- Use the provided schema fields.
+- ingredients must be a flat list including amounts.
+- instructionGroups and instructions must be ordered.
 
 Available ingredients:
 {ingredients_text}
-
-Return ONLY valid JSON, no markdown, no code blocks, no explanations.
 """
 
-    def _parse_response_to_json(self, response_text: str) -> dict:
-        """Parse Gemini response text to JSON dict."""
-        import json
-        import re
+    def _normalize_recipe_json(self, recipe_json: Dict[str, Any], source_url: Optional[str]) -> Dict[str, Any]:
+        normalized: Dict[str, Any] = dict(recipe_json or {})
 
-        # Remove markdown code blocks if present
-        text = response_text.strip()
-        text = re.sub(r"^```json\s*", "", text, flags=re.MULTILINE)
-        text = re.sub(r"^```\s*", "", text, flags=re.MULTILINE)
-        text = text.strip()
+        # set source if provided
+        if source_url:
+            normalized["source"] = source_url
 
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Gemini response as JSON: {text[:500]}")
-            raise GeminiError(f"Invalid JSON response from Gemini: {str(e)}") from e
+        # ensure list fields exist
+        for k in ("ingredientGroups", "ingredients", "instructionGroups", "instructions", "notes", "images"):
+            if normalized.get(k) is None:
+                normalized[k] = []
 
-    def _normalize_recipe_json(self, recipe_json: dict) -> dict:
-        """Normalize Gemini recipe JSON to satisfy Pydantic model types."""
+        # servings -> str
+        if "servings" in normalized and normalized["servings"] is not None and not isinstance(normalized["servings"], str):
+            normalized["servings"] = str(normalized["servings"])
 
-        normalized = dict(recipe_json)
+        # imageUrl strictness (HttpUrl)
+        img = normalized.get("imageUrl")
+        if isinstance(img, str):
+            s = img.strip()
+            if not s or not s.startswith(("http://", "https://")):
+                normalized["imageUrl"] = None
 
-        servings = normalized.get("servings")
-        if servings is not None and not isinstance(servings, str):
-            normalized["servings"] = str(servings)
+        # images: remove empties
+        imgs = normalized.get("images")
+        if isinstance(imgs, list):
+            normalized["images"] = [x for x in imgs if isinstance(x, str) and x.strip()]
+
+        # tolerant ingredientGroups format
+        ig = normalized.get("ingredientGroups")
+        if isinstance(ig, list):
+            fixed_groups = []
+            for g in ig:
+                if not isinstance(g, dict):
+                    continue
+                ingr = g.get("ingredients")
+                if isinstance(ingr, list) and ingr and all(isinstance(x, str) for x in ingr):
+                    g = dict(g)
+                    g["ingredients"] = [{"raw": x} for x in ingr if x.strip()]
+                fixed_groups.append(g)
+            normalized["ingredientGroups"] = fixed_groups
 
         return normalized
