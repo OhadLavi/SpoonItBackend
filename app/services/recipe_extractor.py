@@ -1,4 +1,6 @@
-"""Unified recipe extraction service."""
+"""Unified recipe extraction service with robust fallbacks."""
+
+from __future__ import annotations
 
 import logging
 from typing import Optional
@@ -16,85 +18,48 @@ class RecipeExtractor:
     """Unified service for extracting recipes from various sources."""
 
     def __init__(self):
-        """Initialize recipe extractor with dependencies."""
         self.gemini_service = GeminiService()
         self.scraper_service = ScraperService()
         self.image_service = ImageService()
 
     async def extract_from_url(self, url: str) -> Recipe:
         """
-        Extract recipe from URL.
+        Extraction strategy:
+          A) Try url_context (1 call, structured JSON)
+          B) If fails -> Google Search + TEXT (call 1) -> JSON (call 2)
 
-        Args:
-            url: Recipe URL
-
-        Returns:
-            Extracted Recipe object
-
-        Raises:
-            ScrapingError: If scraping fails
+        This avoids the unsupported combo: Google Search + JSON in the same request.
         """
+        # A) url_context
         try:
-            # Extract recipe directly using Gemini with url_context
-            recipe = await self.scraper_service.extract_recipe_from_url(url)
+            logger.info(f"[extract_from_url] Trying url_context for: {url}")
+            return await self.scraper_service.extract_recipe_from_url(url)
+        except ScrapingError as e:
+            logger.warning(f"[extract_from_url] url_context failed, fallback to Google Search. Reason: {e}")
 
-            return recipe
-
-        except ScrapingError:
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error extracting recipe from URL: {str(e)}", exc_info=True)
-            raise ScrapingError(f"Failed to extract recipe: {str(e)}") from e
+        # B) google_search 2-step
+        try:
+            logger.info(f"[extract_from_url] Trying Google Search 2-step for: {url}")
+            return await self.gemini_service.extract_recipe_from_url_via_google_search(url)
+        except GeminiError as e:
+            logger.error(f"[extract_from_url] Google Search 2-step failed: {e}", exc_info=True)
+            raise ScrapingError(f"Failed to extract recipe from URL using fallbacks: {e}") from e
 
     async def extract_from_image(self, image_data: bytes, filename: str) -> Recipe:
-        """
-        Extract recipe from image.
-
-        Args:
-            image_data: Image file bytes
-            filename: Original filename
-
-        Returns:
-            Extracted Recipe object
-
-        Raises:
-            ImageProcessingError: If image processing fails
-            GeminiError: If extraction fails
-        """
         try:
-            # Validate image
             validated_data, mime_type = self.image_service.validate_image(image_data, filename)
-
-            # Extract recipe using Gemini Vision
-            recipe = await self.gemini_service.extract_recipe_from_image(validated_data, mime_type)
-
-            return recipe
-
+            return await self.gemini_service.extract_recipe_from_image(validated_data, mime_type)
         except ImageProcessingError:
             raise
         except GeminiError:
             raise
         except Exception as e:
             logger.error(f"Unexpected error extracting recipe from image: {str(e)}", exc_info=True)
-            raise ImageProcessingError(f"Failed to extract recipe: {str(e)}") from e
+            raise ImageProcessingError(f"Failed to extract recipe from image: {str(e)}") from e
 
     async def generate_from_ingredients(self, ingredients: list[str]) -> Recipe:
-        """
-        Generate recipe from ingredients list.
-
-        Args:
-            ingredients: List of ingredient strings
-
-        Returns:
-            Generated Recipe object
-
-        Raises:
-            GeminiError: If generation fails
-        """
         try:
-            recipe = await self.gemini_service.generate_recipe_from_ingredients(ingredients)
-            return recipe
-
+            return await self.gemini_service.generate_recipe_from_ingredients(ingredients)
         except GeminiError:
             raise
         except Exception as e:
@@ -102,28 +67,10 @@ class RecipeExtractor:
             raise GeminiError(f"Failed to generate recipe: {str(e)}") from e
 
     async def generate_from_text(self, prompt: str) -> Recipe:
-        """
-        Generate recipe from free-form text prompt.
-        
-        This method is designed for chat-based interactions where the prompt
-        is already fully formed.
-
-        Args:
-            prompt: Complete prompt text for recipe generation
-
-        Returns:
-            Generated Recipe object
-
-        Raises:
-            GeminiError: If generation fails
-        """
         try:
-            recipe = await self.gemini_service.generate_recipe_from_text(prompt)
-            return recipe
-
+            return await self.gemini_service.generate_recipe_from_text(prompt)
         except GeminiError:
             raise
         except Exception as e:
             logger.error(f"Unexpected error generating recipe from text: {str(e)}", exc_info=True)
             raise GeminiError(f"Failed to generate recipe: {str(e)}") from e
-

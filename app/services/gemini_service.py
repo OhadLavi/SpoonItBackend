@@ -1,9 +1,10 @@
-""""Gemini LLM service for recipe extraction and generation (structured JSON)."""
+""""Gemini LLM service for recipe extraction and generation (structured JSON + guarded search)."""
 
-import logging
-import re
+from __future__ import annotations
+
 import json
-from typing import Optional, Any, Dict
+import logging
+from typing import Any, Dict, Optional
 
 from google import genai
 from google.genai import types
@@ -12,45 +13,13 @@ from pydantic import ValidationError
 from app.config import settings
 from app.models.recipe import Recipe
 from app.utils.exceptions import GeminiError
+from app.services.gemini_utils import (
+    get_response_text,
+    has_google_search_tool,
+    safe_json_loads,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _extract_first_json_object(text: str) -> str:
-    t = (text or "").strip()
-    if not t:
-        return t
-    t = re.sub(r"^```(?:json)?\s*", "", t, flags=re.MULTILINE)
-    t = re.sub(r"\s*```\s*$", "", t, flags=re.MULTILINE).strip()
-    if t.startswith("{") and t.endswith("}"):
-        return t
-    i = t.find("{")
-    j = t.rfind("}")
-    if i != -1 and j != -1 and j > i:
-        return t[i : j + 1].strip()
-    return t
-
-
-def _get_response_text(response: Any) -> str:
-    try:
-        t = getattr(response, "text", None)
-        if isinstance(t, str) and t.strip():
-            return t
-    except Exception:
-        pass
-    try:
-        candidates = getattr(response, "candidates", None) or []
-        if candidates:
-            c0 = candidates[0]
-            content = getattr(c0, "content", None)
-            parts = getattr(content, "parts", None) or []
-            for p in parts:
-                pt = getattr(p, "text", None)
-                if isinstance(pt, str) and pt.strip():
-                    return pt
-    except Exception:
-        pass
-    return ""
 
 
 class GeminiService:
@@ -67,30 +36,159 @@ class GeminiService:
             self._client = genai.Client(api_key=settings.gemini_api_key)
         return self._client
 
+    # -------------------------
+    # Guarded config builder
+    # -------------------------
+
+    def _build_config(
+        self,
+        *,
+        tools: Optional[list[Any]] = None,
+        response_json_schema: Optional[Dict[str, Any]] = None,
+        response_mime_type: Optional[str] = None,
+        temperature: float = 0.0,
+        max_output_tokens: Optional[int] = None,
+    ) -> types.GenerateContentConfig:
+        """
+        Enforces the known limitation:
+        - Cannot use Google Search grounding AND structured JSON output in the same request.
+
+        Rule:
+          if google_search in tools:
+            - force text/plain
+            - forbid response_json_schema
+          else:
+            - if response_json_schema is provided -> force application/json
+        """
+        if tools and has_google_search_tool(tools):
+            if response_json_schema is not None:
+                raise GeminiError(
+                    "Unsupported config: cannot use Google Search and JSON schema together in one request. "
+                    "Use 2-step pipeline: (1) search->text, (2) json without search."
+                )
+            if response_mime_type and response_mime_type.lower() == "application/json":
+                raise GeminiError(
+                    "Unsupported config: cannot request application/json while using Google Search. "
+                    "Use text/plain for the search call, then a second JSON call without search."
+                )
+            # force plain text
+            response_mime_type = "text/plain"
+        else:
+            # If schema requested, force JSON response
+            if response_json_schema is not None:
+                response_mime_type = "application/json"
+
+        return types.GenerateContentConfig(
+            tools=tools,
+            response_mime_type=response_mime_type,
+            response_json_schema=response_json_schema,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+        )
+
+    # -------------------------
+    # 2-step URL pipeline (search -> text -> JSON)
+    # -------------------------
+
+    async def fetch_recipe_text_via_google_search(self, url: str) -> str:
+        """
+        Step 1:
+        Use Google Search grounding to access a URL and extract the recipe content as TEXT (not JSON).
+        This avoids the search+json limitation.
+        """
+        prompt = f"""
+Use Google Search to access and read this URL:
+{url}
+
+TASK:
+Extract ONLY the recipe content exactly as it appears on the page.
+
+STRICT RULES:
+- Preserve ingredient lines and measurements EXACTLY as written.
+- Do NOT normalize, translate, or convert units.
+- Do NOT invent missing ingredients/steps.
+- Output MUST be plain text, organized as:
+
+TITLE:
+<one line>
+
+INGREDIENTS:
+- <line 1 exactly>
+- <line 2 exactly>
+...
+
+INSTRUCTIONS:
+1. <step 1 exactly>
+2. <step 2 exactly>
+...
+
+NOTES:
+- <note 1 exactly>
+- <note 2 exactly>
+
+If a section does not exist, output it but leave it empty (e.g. NOTES: then nothing).
+Return plain text ONLY (no JSON, no markdown).
+""".strip()
+
+        tools = [types.Tool(google_search=types.GoogleSearch())]
+
+        try:
+            response = await self.client.aio.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=self._build_config(
+                    tools=tools,
+                    response_mime_type="text/plain",
+                    temperature=0.0,
+                    max_output_tokens=4096,
+                ),
+            )
+
+            text = get_response_text(response).strip()
+            if not text:
+                raise GeminiError("Google Search call returned empty text.")
+
+            return text
+
+        except Exception as e:
+            logger.error(f"Google Search fetch failed: {str(e)}", exc_info=True)
+            raise GeminiError(f"Failed to fetch recipe text via Google Search: {str(e)}") from e
+
+    async def extract_recipe_from_url_via_google_search(self, url: str) -> Recipe:
+        """
+        Step 1: google_search -> plain text
+        Step 2: JSON structured extraction (no search) -> Recipe
+        """
+        recipe_text = await self.fetch_recipe_text_via_google_search(url)
+        return await self.extract_recipe_from_text(recipe_text, source_url=url)
+
+    # -------------------------
+    # Structured JSON methods (NO SEARCH)
+    # -------------------------
+
     async def extract_recipe_from_text(self, text: str, source_url: Optional[str] = None) -> Recipe:
         prompt = self._build_extraction_prompt(text)
 
         try:
-            logger.info(f"Extracting recipe from text (length: {len(text)} chars)")
-
             response = await self.client.aio.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
+                config=self._build_config(
+                    tools=None,
                     response_json_schema=self._recipe_schema,
-                    temperature=0,
+                    temperature=0.0,
+                    max_output_tokens=4096,
                 ),
             )
 
-            response_text = _get_response_text(response)
+            response_text = get_response_text(response)
             if not response_text.strip():
                 raise GeminiError("Gemini returned empty response (no JSON).")
 
-            recipe_json = json.loads(_extract_first_json_object(response_text))
-            recipe_json = self._normalize_recipe_json(recipe_json, source_url=source_url)
+            data = safe_json_loads(response_text)
+            data = self._normalize_recipe_json(data, source_url=source_url)
 
-            recipe = Recipe.model_validate(recipe_json)
+            recipe = Recipe.model_validate(data)
 
             if not recipe.title or len(recipe.ingredients) == 0:
                 raise GeminiError("Failed to extract meaningful recipe content from text.")
@@ -113,21 +211,22 @@ class GeminiService:
             response = await self.client.aio.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=[prompt, image_part],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
+                config=self._build_config(
+                    tools=None,
                     response_json_schema=self._recipe_schema,
-                    temperature=0,
+                    temperature=0.0,
+                    max_output_tokens=4096,
                 ),
             )
 
-            response_text = _get_response_text(response)
+            response_text = get_response_text(response)
             if not response_text.strip():
                 raise GeminiError("Gemini returned empty response (no JSON).")
 
-            recipe_json = json.loads(_extract_first_json_object(response_text))
-            recipe_json = self._normalize_recipe_json(recipe_json, source_url=None)
+            data = safe_json_loads(response_text)
+            data = self._normalize_recipe_json(data, source_url=None)
 
-            return Recipe.model_validate(recipe_json)
+            return Recipe.model_validate(data)
 
         except (json.JSONDecodeError, ValidationError) as e:
             logger.error(f"Gemini image JSON parse/validation failed: {str(e)}", exc_info=True)
@@ -143,21 +242,22 @@ class GeminiService:
             response = await self.client.aio.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
+                config=self._build_config(
+                    tools=None,
                     response_json_schema=self._recipe_schema,
-                    temperature=0.7,  # generation can be creative
+                    temperature=0.7,
+                    max_output_tokens=4096,
                 ),
             )
 
-            response_text = _get_response_text(response)
+            response_text = get_response_text(response)
             if not response_text.strip():
                 raise GeminiError("Gemini returned empty response (no JSON).")
 
-            recipe_json = json.loads(_extract_first_json_object(response_text))
-            recipe_json = self._normalize_recipe_json(recipe_json, source_url=None)
+            data = safe_json_loads(response_text)
+            data = self._normalize_recipe_json(data, source_url=None)
 
-            return Recipe.model_validate(recipe_json)
+            return Recipe.model_validate(data)
 
         except (json.JSONDecodeError, ValidationError) as e:
             logger.error(f"Gemini generation JSON parse/validation failed: {str(e)}", exc_info=True)
@@ -171,21 +271,22 @@ class GeminiService:
             response = await self.client.aio.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
+                config=self._build_config(
+                    tools=None,
                     response_json_schema=self._recipe_schema,
                     temperature=0.7,
+                    max_output_tokens=4096,
                 ),
             )
 
-            response_text = _get_response_text(response)
+            response_text = get_response_text(response)
             if not response_text.strip():
                 raise GeminiError("Gemini returned empty response (no JSON).")
 
-            recipe_json = json.loads(_extract_first_json_object(response_text))
-            recipe_json = self._normalize_recipe_json(recipe_json, source_url=None)
+            data = safe_json_loads(response_text)
+            data = self._normalize_recipe_json(data, source_url=None)
 
-            return Recipe.model_validate(recipe_json)
+            return Recipe.model_validate(data)
 
         except (json.JSONDecodeError, ValidationError) as e:
             logger.error(f"Gemini generate-from-text JSON parse/validation failed: {str(e)}", exc_info=True)
@@ -194,16 +295,22 @@ class GeminiService:
             logger.error(f"Gemini recipe generation from text failed: {str(e)}", exc_info=True)
             raise GeminiError(f"Failed to generate recipe: {str(e)}") from e
 
+    # -------------------------
+    # Prompts
+    # -------------------------
+
     def _build_extraction_prompt(self, text: str) -> str:
         return f"""Extract recipe information from the following text.
 
-Rules:
+CRITICAL RULES:
 - Preserve EXACT ingredient raw text and amounts as written. Do NOT translate or normalize.
 - Do NOT invent ingredients or steps.
 - If missing info: use null for optional scalars, and [] for lists.
-- Fill both ingredientGroups and ingredients (flat list of raw).
+- Fill both ingredientGroups and ingredients (flat list of raw strings).
 - Fill both instructionGroups and instructions (flat list in order).
-- Return JSON only (no markdown, no explanations).
+- notes: tips/recommendations/notes if present.
+- imageUrl: full http/https URL if present, else null. images: list of URLs or [].
+- Return JSON ONLY, no markdown, no explanations.
 
 Text:
 {text}
@@ -212,13 +319,13 @@ Text:
     def _build_image_extraction_prompt(self) -> str:
         return """Extract recipe information from this image.
 
-Rules:
+CRITICAL RULES:
 - Preserve EXACT ingredient raw text and amounts as written. Do NOT translate or normalize.
 - Do NOT invent ingredients or steps.
 - If missing info: use null for optional scalars, and [] for lists.
-- Fill both ingredientGroups and ingredients (flat list of raw).
-- Fill both instructionGroups and instructions (flat list in order).
-- Return JSON only (no markdown, no explanations).
+- Fill both ingredientGroups and ingredients.
+- Fill both instructionGroups and instructions in order.
+- Return JSON ONLY, no markdown, no explanations.
 """
 
     def _build_generation_prompt(self, ingredients: list[str]) -> str:
@@ -235,10 +342,13 @@ Available ingredients:
 {ingredients_text}
 """
 
+    # -------------------------
+    # Normalization
+    # -------------------------
+
     def _normalize_recipe_json(self, recipe_json: Dict[str, Any], source_url: Optional[str]) -> Dict[str, Any]:
         normalized: Dict[str, Any] = dict(recipe_json or {})
 
-        # set source if provided
         if source_url:
             normalized["source"] = source_url
 
@@ -263,7 +373,7 @@ Available ingredients:
         if isinstance(imgs, list):
             normalized["images"] = [x for x in imgs if isinstance(x, str) and x.strip()]
 
-        # tolerant ingredientGroups format
+        # tolerate ingredientGroups ingredients being ["..."] instead of [{"raw": "..."}]
         ig = normalized.get("ingredientGroups")
         if isinstance(ig, list):
             fixed_groups = []
