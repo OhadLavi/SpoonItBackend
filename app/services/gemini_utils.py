@@ -18,11 +18,8 @@ def has_google_search_tool(tools: Optional[Iterable[Any]]) -> bool:
         return False
 
     for t in tools:
-        # dict form
         if isinstance(t, dict) and "google_search" in t:
             return True
-
-        # SDK Tool form (best-effort)
         try:
             if getattr(t, "google_search", None) is not None:
                 return True
@@ -32,30 +29,55 @@ def has_google_search_tool(tools: Optional[Iterable[Any]]) -> bool:
     return False
 
 
-def extract_first_json_object(text: str) -> str:
+def extract_balanced_json_object(text: str) -> str:
     """
-    Best-effort extraction of a single JSON object from a model response.
-    Helps in cases where model accidentally wraps JSON with prose or code fences.
+    Extract the first balanced JSON object {...} from a string.
+    Handles braces inside strings and escaped quotes.
+
+    This is more robust than slicing from first '{' to last '}'.
     """
-    t = (text or "").strip()
-    if not t:
-        return t
+    s = (text or "").strip()
+    if not s:
+        return s
 
-    # Remove markdown fences
-    t = re.sub(r"^```(?:json)?\s*", "", t, flags=re.IGNORECASE | re.MULTILINE)
-    t = re.sub(r"\s*```\s*$", "", t, flags=re.MULTILINE).strip()
+    # Remove markdown fences (common failure mode)
+    s = re.sub(r"^```(?:json)?\s*", "", s, flags=re.IGNORECASE | re.MULTILINE)
+    s = re.sub(r"\s*```\s*$", "", s, flags=re.MULTILINE).strip()
 
-    # If already looks like JSON object, return as-is
-    if t.startswith("{") and t.endswith("}"):
-        return t
+    start = s.find("{")
+    if start == -1:
+        return s
 
-    # Otherwise slice from first "{" to last "}"
-    i = t.find("{")
-    j = t.rfind("}")
-    if i != -1 and j != -1 and j > i:
-        return t[i : j + 1].strip()
+    in_string = False
+    escape = False
+    depth = 0
+    for i in range(start, len(s)):
+        ch = s[i]
 
-    return t
+        if escape:
+            escape = False
+            continue
+
+        if ch == "\\":
+            escape = True
+            continue
+
+        if ch == '"':
+            in_string = not in_string
+            continue
+
+        if in_string:
+            continue
+
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return s[start : i + 1].strip()
+
+    # If we didn't find a balanced end, return the tail (will likely fail json.loads)
+    return s[start:].strip()
 
 
 def get_response_text(response: Any) -> str:
@@ -93,5 +115,5 @@ def safe_json_loads(text: str) -> dict:
     Parse JSON with tolerant extraction.
     Raises json.JSONDecodeError if still invalid.
     """
-    json_text = extract_first_json_object(text)
+    json_text = extract_balanced_json_object(text)
     return json.loads(json_text)

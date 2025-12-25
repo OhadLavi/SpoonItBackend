@@ -41,9 +41,7 @@ class GeminiService:
         max_output_tokens: Optional[int] = None,
     ) -> types.GenerateContentConfig:
         """
-        Current Gemini constraint (as seen in your logs):
-          Tool use with response_mime_type='application/json' is unsupported.
-
+        IMPORTANT: Tool use with response_mime_type='application/json' is unsupported.
         Therefore:
           - If tools are provided -> must be text/plain and MUST NOT include response_json_schema.
           - If no tools and response_json_schema is provided -> force application/json.
@@ -73,7 +71,7 @@ class GeminiService:
         )
 
     # -------------------------
-    # 2-step URL pipeline (google_search -> text -> JSON)
+    # Google Search 2-step (text -> JSON)
     # -------------------------
 
     async def fetch_recipe_text_via_google_search(self, url: str) -> str:
@@ -136,6 +134,9 @@ Return plain text ONLY (no JSON, no markdown).
             text = get_response_text(response).strip()
             if not text:
                 raise GeminiError("Google Search call returned empty text.")
+
+            # Optional: debug snippet (keep it short)
+            logger.debug(f"[google_search text snippet] {text[:600]}")
             return text
 
         except Exception as e:
@@ -154,34 +155,16 @@ Return plain text ONLY (no JSON, no markdown).
         prompt = self._build_extraction_prompt(text)
 
         try:
-            response = await self.client.aio.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=self._build_config(
-                    tools=None,
-                    response_json_schema=self._recipe_schema,
-                    temperature=0.0,
-                    max_output_tokens=4096,
-                ),
-            )
-
-            response_text = get_response_text(response)
-            if not response_text.strip():
-                raise GeminiError("Gemini returned empty response (no JSON).")
-
-            data = safe_json_loads(response_text)
+            data = await self._generate_recipe_json_with_repair(prompt)
             data = self._normalize_recipe_json(data, source_url=source_url)
 
             recipe = Recipe.model_validate(data)
-
             if not recipe.title or len(recipe.ingredients) == 0:
                 raise GeminiError("Failed to extract meaningful recipe content from text.")
-
             return recipe
 
-        except (json.JSONDecodeError, ValidationError) as e:
-            logger.error(f"Gemini JSON parse/validation failed: {str(e)}", exc_info=True)
-            raise GeminiError(f"Invalid structured JSON from Gemini: {str(e)}") from e
+        except GeminiError:
+            raise
         except Exception as e:
             logger.error(f"Gemini extraction failed: {str(e)}", exc_info=True)
             raise GeminiError(f"Failed to extract recipe: {str(e)}") from e
@@ -191,30 +174,13 @@ Return plain text ONLY (no JSON, no markdown).
 
         try:
             image_part = types.Part.from_bytes(data=image_data, mime_type=mime_type)
+            data = await self._generate_recipe_json_with_repair([prompt, image_part])
 
-            response = await self.client.aio.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=[prompt, image_part],
-                config=self._build_config(
-                    tools=None,
-                    response_json_schema=self._recipe_schema,
-                    temperature=0.0,
-                    max_output_tokens=4096,
-                ),
-            )
-
-            response_text = get_response_text(response)
-            if not response_text.strip():
-                raise GeminiError("Gemini returned empty response (no JSON).")
-
-            data = safe_json_loads(response_text)
             data = self._normalize_recipe_json(data, source_url=None)
-
             return Recipe.model_validate(data)
 
-        except (json.JSONDecodeError, ValidationError) as e:
-            logger.error(f"Gemini image JSON parse/validation failed: {str(e)}", exc_info=True)
-            raise GeminiError(f"Invalid structured JSON from Gemini (image): {str(e)}") from e
+        except GeminiError:
+            raise
         except Exception as e:
             logger.error(f"Gemini image extraction failed: {str(e)}", exc_info=True)
             raise GeminiError(f"Failed to extract recipe from image: {str(e)}") from e
@@ -223,61 +189,115 @@ Return plain text ONLY (no JSON, no markdown).
         prompt = self._build_generation_prompt(ingredients)
 
         try:
-            response = await self.client.aio.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=self._build_config(
-                    tools=None,
-                    response_json_schema=self._recipe_schema,
-                    temperature=0.7,
-                    max_output_tokens=4096,
-                ),
-            )
-
-            response_text = get_response_text(response)
-            if not response_text.strip():
-                raise GeminiError("Gemini returned empty response (no JSON).")
-
-            data = safe_json_loads(response_text)
+            data = await self._generate_recipe_json_with_repair(prompt, temperature=0.7)
             data = self._normalize_recipe_json(data, source_url=None)
-
             return Recipe.model_validate(data)
 
-        except (json.JSONDecodeError, ValidationError) as e:
-            logger.error(f"Gemini generation JSON parse/validation failed: {str(e)}", exc_info=True)
-            raise GeminiError(f"Invalid structured JSON from Gemini (generation): {str(e)}") from e
+        except GeminiError:
+            raise
         except Exception as e:
             logger.error(f"Gemini recipe generation failed: {str(e)}", exc_info=True)
             raise GeminiError(f"Failed to generate recipe: {str(e)}") from e
 
     async def generate_recipe_from_text(self, prompt: str) -> Recipe:
         try:
+            data = await self._generate_recipe_json_with_repair(prompt, temperature=0.7)
+            data = self._normalize_recipe_json(data, source_url=None)
+            return Recipe.model_validate(data)
+
+        except GeminiError:
+            raise
+        except Exception as e:
+            logger.error(f"Gemini recipe generation from text failed: {str(e)}", exc_info=True)
+            raise GeminiError(f"Failed to generate recipe from text: {str(e)}") from e
+
+    # -------------------------
+    # Core JSON generation with repair
+    # -------------------------
+
+    async def _generate_recipe_json_with_repair(
+        self,
+        contents: Any,
+        temperature: float = 0.0,
+    ) -> Dict[str, Any]:
+        """
+        1) Try structured JSON with schema
+        2) If JSON is invalid -> call repair (schema-enforced) and return repaired JSON
+        """
+        # First try
+        response = await self.client.aio.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=contents,
+            config=self._build_config(
+                tools=None,
+                response_json_schema=self._recipe_schema,
+                temperature=temperature,
+                max_output_tokens=8192,
+            ),
+        )
+
+        raw = get_response_text(response)
+        if not raw.strip():
+            raise GeminiError("Gemini returned empty response (no JSON).")
+
+        try:
+            data = safe_json_loads(raw)
+            return data
+        except json.JSONDecodeError as e:
+            logger.warning(f"Structured JSON came back invalid, attempting repair. Reason: {e}")
+            logger.debug(f"[bad json snippet] {raw[:900]}")
+            return await self._repair_recipe_json(raw)
+
+    async def _repair_recipe_json(self, bad_text: str) -> Dict[str, Any]:
+        """
+        Ask Gemini to output a valid JSON object matching the Recipe schema.
+        This is an extra call ONLY on failure.
+        """
+        # Avoid huge prompts
+        clipped = bad_text.strip()
+        if len(clipped) > 20000:
+            clipped = clipped[:20000]
+
+        repair_prompt = f"""
+You are a strict JSON repair function.
+
+Given the following BROKEN JSON (it may be missing commas, have trailing text, code fences, etc.),
+output a VALID JSON object that matches the provided Recipe schema.
+
+RULES:
+- Output JSON ONLY. No markdown. No explanations.
+- Keep ingredient raw strings EXACTLY as they appear in the broken JSON/text. Do not translate or normalize.
+- If a field is missing, set it to null or [] according to the schema defaults/intent.
+
+BROKEN JSON:
+{clipped}
+""".strip()
+
+        try:
             response = await self.client.aio.models.generate_content(
                 model="gemini-2.5-flash",
-                contents=prompt,
+                contents=repair_prompt,
                 config=self._build_config(
                     tools=None,
                     response_json_schema=self._recipe_schema,
-                    temperature=0.7,
-                    max_output_tokens=4096,
+                    temperature=0.0,
+                    max_output_tokens=8192,
                 ),
             )
 
-            response_text = get_response_text(response)
-            if not response_text.strip():
-                raise GeminiError("Gemini returned empty response (no JSON).")
+            fixed_raw = get_response_text(response)
+            if not fixed_raw.strip():
+                raise GeminiError("Repair call returned empty JSON.")
 
-            data = safe_json_loads(response_text)
-            data = self._normalize_recipe_json(data, source_url=None)
-
-            return Recipe.model_validate(data)
+            data = safe_json_loads(fixed_raw)
+            return data
 
         except (json.JSONDecodeError, ValidationError) as e:
-            logger.error(f"Gemini generate-from-text JSON parse/validation failed: {str(e)}", exc_info=True)
-            raise GeminiError(f"Invalid structured JSON from Gemini (generate-from-text): {str(e)}") from e
+            logger.error(f"Repair JSON parse/validation failed: {str(e)}", exc_info=True)
+            raise GeminiError(f"JSON repair failed: {str(e)}") from e
         except Exception as e:
-            logger.error(f"Gemini recipe generation from text failed: {str(e)}", exc_info=True)
-            raise GeminiError(f"Failed to generate recipe: {str(e)}") from e
+            logger.error(f"Repair call failed: {str(e)}", exc_info=True)
+            raise GeminiError(f"JSON repair call failed: {str(e)}") from e
 
     # -------------------------
     # Prompts

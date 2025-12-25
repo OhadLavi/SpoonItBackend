@@ -29,39 +29,45 @@ class ScraperService:
 
     async def fetch_recipe_text_via_url_context(self, url: str) -> str:
         """
-        IMPORTANT:
-        Gemini tool-use (url_context) does NOT support response_mime_type='application/json'
-        and also can't be combined with response_json_schema.
-        לכן כאן אנחנו מחזירים TEXT בלבד, ומבצעים JSON בשיחה שנייה בלי tools.
+        Tool use + application/json is unsupported.
+        So url_context must be text/plain, then JSON is created in a second call without tools.
         """
         prompt = self._build_url_text_prompt(url)
 
-        try:
-            response = await self.client.aio.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    tools=[{"url_context": {}}],
-                    response_mime_type="text/plain",
-                    temperature=0.0,
-                    max_output_tokens=3072,
-                ),
-            )
+        last_text = ""
+        for attempt in (1, 2):
+            try:
+                response = await self.client.aio.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        tools=[{"url_context": {}}],
+                        response_mime_type="text/plain",
+                        temperature=0.0,
+                        max_output_tokens=3072,
+                    ),
+                )
 
-            text = get_response_text(response).strip()
-            if not text:
-                meta = None
-                try:
-                    meta = response.candidates[0].url_context_metadata  # type: ignore[attr-defined]
-                except Exception:
-                    meta = None
-                raise ScrapingError(f"url_context returned empty text. metadata={meta}")
+                text = get_response_text(response).strip()
+                last_text = text
 
-            return text
+                # Handle explicit sentinel
+                if text.strip() == "UNABLE_TO_ACCESS_PAGE":
+                    raise ScrapingError("url_context could not access the page (sentinel returned).")
 
-        except Exception as e:
-            logger.error(f"url_context fetch failed: {str(e)}", exc_info=True)
-            raise ScrapingError(f"Failed to fetch recipe text via url_context: {str(e)}") from e
+                if text:
+                    return text
+
+                logger.warning(f"url_context returned empty text (attempt {attempt}/2).")
+
+            except Exception as e:
+                if attempt == 2:
+                    logger.error(f"url_context fetch failed (final): {str(e)}", exc_info=True)
+                    raise ScrapingError(f"Failed to fetch recipe text via url_context: {str(e)}") from e
+                logger.warning(f"url_context attempt {attempt} failed: {e}")
+
+        # Shouldn't reach here
+        raise ScrapingError(f"url_context returned empty text after retries. last_text_len={len(last_text)}")
 
     def _build_url_text_prompt(self, url: str) -> str:
         return f"""
@@ -70,6 +76,9 @@ Use url_context to access and read this URL:
 
 TASK:
 Extract ONLY the recipe content exactly as it appears on the page.
+
+If you cannot access/read the page for any reason, output EXACTLY:
+UNABLE_TO_ACCESS_PAGE
 
 STRICT RULES:
 - Preserve ingredient lines and measurements EXACTLY as written.
