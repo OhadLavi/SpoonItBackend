@@ -1,7 +1,6 @@
 """FastAPI application entry point."""
 
 import logging
-from typing import Optional
 
 import httpx
 from fastapi import Body, Depends, FastAPI, File, HTTPException, Query, Request, status, UploadFile
