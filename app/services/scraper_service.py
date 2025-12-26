@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class ScraperService:
-    """Service for scraping recipe content from URLs using Gemini url_context tool."""
+    """Service for extracting recipes from URLs using Gemini url_context tool."""
 
     def __init__(self):
         """Initialize scraper service."""
@@ -53,7 +53,7 @@ class ScraperService:
             response = await loop.run_in_executor(
                 None,
                 lambda: self.client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-2.5-flash-light",
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         tools=[{"url_context": {}}],
@@ -64,9 +64,9 @@ class ScraperService:
 
             logger.info(f"Gemini response received for {url}")
 
-            # Direct text access (works with sync API)
-            if not hasattr(response, 'text') or response.text is None:
-                raise ScrapingError("Gemini response has no text content")
+            # Check response
+            if response is None or response.text is None:
+                raise ScrapingError("Gemini returned empty response")
             
             response_text = response.text.strip()
             
@@ -80,31 +80,26 @@ class ScraperService:
             response_text = re.sub(r"^```\s*", "", response_text, flags=re.MULTILINE)
             response_text = response_text.strip()
             
-            # Extract JSON from text (handle cases where there's extra text)
+            # Extract JSON from text
             json_text = self._extract_json_from_text(response_text)
             
             recipe_json = json.loads(json_text)
             
             # Normalize recipe JSON
-            normalized_recipe_json = self._normalize_recipe_json(recipe_json, source_url=url)
+            normalized_recipe_json = self._normalize_recipe_json(recipe_json)
             
-            # Log parsed recipe for debugging
             logger.info(f"Parsed recipe: title='{normalized_recipe_json.get('title')}', ingredients count={len(normalized_recipe_json.get('ingredients', []))}")
             
             recipe = Recipe(**normalized_recipe_json)
 
             # Validate recipe has meaningful content
             if not recipe.title or len(recipe.ingredients) == 0:
-                logger.error(f"Extracted recipe is empty or invalid: title='{recipe.title}', ingredients={len(recipe.ingredients)}")
-                raise ScrapingError(
-                    "Failed to extract meaningful recipe content. The page may not contain a valid recipe."
-                )
+                raise ScrapingError("Failed to extract meaningful recipe content. The page may not contain a valid recipe.")
 
             return recipe
 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON from Gemini response: {str(e)}")
-            logger.debug(f"Response text: {response_text[:1000] if 'response_text' in locals() else 'N/A'}")
             raise ScrapingError(f"Failed to parse recipe JSON: {str(e)}") from e
         except Exception as e:
             logger.error(f"Recipe extraction from URL failed: {str(e)}", exc_info=True)
@@ -112,88 +107,83 @@ class ScraperService:
 
     def _build_url_extraction_prompt(self, url: str) -> str:
         """Build prompt for recipe extraction from URL."""
-        return f"""השתמש ב-URL עצמו: {url}
+        return f"""
+השתמש ב-URL עצמו: {url}
 
 חלץ את המתכון *בדיוק כפי שמופיע בעמוד*.
+החזר אובייקט JSON תקין בלבד בתבנית Recipe.
 
 כללים נוקשים:
-- אל תנרמל ואל תשנה כמויות/מידות.
-- אל תוסיף מרכיבים שלא כתובים בעמוד.
-- שמור על הטקסט המדויק של כל מרכיב והוראה.
-- אם משהו לא מופיע בעמוד, השתמש ב-null.
-- חלץ גם הערות אם יש (הערות, טיפים, המלצות וכו').
-- אם יש קבוצות של הוראות (כמו "הכנת הבצק", "הגשה", "הכנת המילוי" וכו'), חלץ אותן ל-instructionGroups.
+- שמור על טקסט מדויק של המרכיבים כפי שמופיע בעמוד. אל תתרגם, אל תנרמל, אל תשנה יחידות/כמויות.
+- אל תמציא מרכיבים/שלבים שלא קיימים בעמוד.
+- אם מידע לא מופיע: null לשדות אופציונליים, [] לרשימות.
+- notes: כל טיפים/המלצות/הערות שמופיעים בעמוד.
+- images: מערך של תמונות של המתכון בפורמט png, jpg בלבד. כתובת מלאה (http/https) אם קיימות, אחרת [].
 
-החזר JSON בפורמט הבא בדיוק:
+חשוב מאוד - instructionGroups (חובה):
+- זהה בקפידה את כל הכותרות/כותרות משנה בעמוד שמחלקות את ההוראות (כמו "הכנת הבצק", "הכנת המילוי", "בישול", "הגשה" וכו').
+- כל כותרת שמופיעה לפני קבוצת הוראות חייבת להופיע בשדה "name" של ה-instructionGroup המתאים.
+- אם יש הוראות ללא כותרת מפורשת, אבל הן שייכות לכותרת הקודמת (למשל הוראות המשך של "הכנת הבצק"), אז תמזג אותן לתוך ה-instructionGroup הקודם עם הכותרת - אל תיצור instructionGroup חדש עם name: null.
+- כלל חשוב: לעולם אל תשאיר instructionGroup עם name: null. אם אין כותרת, תמזג את ההוראות לתוך הקבוצה הקודמת.
+- דוגמה: אם יש "הכנת הבצק" ואחר כך הוראות נוספות ללא כותרת שקשורות לבצק, הכל צריך להיות ב-instructionGroup אחד עם name: "הכנת הבצק".
 
+חשוב מאוד - nutrition (חובה למלא):
+- אתה חייב לחשב את הערכים התזונתיים. זה לא אופציונלי - אתה חייב למלא את כל השדות.
+- חשב את הערכים התזונתיים על בסיס כל המרכיבים והכמויות במתכון:
+  * סכום את הקלוריות מכל המרכיבים
+  * סכום את החלבון (גרם) מכל המרכיבים
+  * סכום את השומן (גרם) מכל המרכיבים
+  * סכום את הפחמימות (גרם) מכל המרכיבים
+- שדה "per" צריך להכיל את היחידה - בדרך כלל "מנה" או "מנה אחת" (לפי servings), או "100 גרם" אם רלוונטי.
+- אם יש ערכים תזונתיים מפורשים בעמוד, השתמש בהם. אם לא, חשב אותם בעצמך - זה חובה.
+- אל תשאיר null בערכים תזונתיים - תמיד מלא מספרים.
+
+החזר JSON בלבד. ללא markdown. ללא code blocks. ללא הסברים.
+
+תבנית:
 {{
-  "title": "שם המתכון",
-  "description": "תיאור המתכון או null",
-  "language": "קוד שפה (לדוגמה 'he', 'en') או null",
-  "servings": "מספר מנות או null",
-  "prepTimeMinutes": מספר או null,
-  "cookTimeMinutes": מספר או null,
-  "totalTimeMinutes": מספר או null,
-  "ingredientGroups": [
-    {{
-      "name": "שם הקבוצה או null",
-      "ingredients": [
-        {{"raw": "טקסט המרכיב בדיוק כפי שמופיע"}}
-      ]
-    }}
-  ],
-  "ingredients": ["רשימה שטוחה של כל המרכיבים"],
-  "instructionGroups": [
-    {{
-      "name": "שם קבוצת ההוראות (כמו 'הכנת הבצק', 'הגשה') או null",
-      "instructions": ["שלב 1", "שלב 2"]
-    }}
-  ],
-  "instructions": ["רשימה שטוחה של כל ההוראות לפי סדר"],
-  "notes": ["הערה 1", "הערה 2"] או [],
-  "imageUrl": "URL של התמונה הראשית או null",
-  "images": ["URL תמונה 1", "URL תמונה 2"] או [],
+  "title": null,
+  "language": null,
+  "servings": null,
+  "prepTimeMinutes": null,
+  "cookTimeMinutes": null,
+  "totalTimeMinutes": null,
+  "ingredientGroups": [{{"name": null, "ingredients": [{{"raw": ""}}]}}],
+  "ingredients": [""],
+  "instructionGroups": [{{"name": "כותרת הסעיף", "instructions": [""]}}],
+  "instructions": [""],
+  "notes": [],
+  "images": [],
   "nutrition": {{
-    "calories": מספר או null,
-    "protein_g": מספר או null,
-    "fat_g": מספר או null,
-    "carbs_g": מספר או null,
-    "per": "ל-מה" או null
+    "calories": 0,
+    "protein_g": 0,
+    "fat_g": 0,
+    "carbs_g": 0,
+    "per": "מנה"
   }}
 }}
 
-CRITICAL: החזר רק JSON תקין, ללא markdown, ללא code blocks, ללא הסברים."""
+זכור: nutrition חייב להיות עם ערכים מספריים (לא null). חשב אותם על בסיס המרכיבים.
+""".strip()
 
     def _extract_json_from_text(self, text: str) -> str:
-        """
-        Extract JSON object from text, handling cases where there's extra text.
-        
-        Args:
-            text: Text that may contain JSON
-            
-        Returns:
-            Extracted JSON string
-        """
+        """Extract JSON object from text."""
         text = text.strip()
         
-        # If it already looks like JSON (starts with { and ends with })
         if text.startswith("{") and text.endswith("}"):
             return text
         
-        # Find first { and last }
         first_brace = text.find("{")
         last_brace = text.rfind("}")
         
         if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
             return text[first_brace:last_brace + 1]
         
-        # If no JSON found, return original (will fail with better error)
         return text
 
-    def _normalize_recipe_json(self, recipe_json: Dict[str, Any], source_url: str) -> Dict[str, Any]:
+    def _normalize_recipe_json(self, recipe_json: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize recipe JSON to satisfy Pydantic model types."""
         normalized: Dict[str, Any] = dict(recipe_json or {})
-        normalized["source"] = source_url
 
         # Ensure list fields exist
         for k in ("ingredientGroups", "ingredients", "instructionGroups", "instructions", "notes", "images"):
@@ -203,18 +193,6 @@ CRITICAL: החזר רק JSON תקין, ללא markdown, ללא code blocks, לל
         # servings -> str
         if "servings" in normalized and normalized["servings"] is not None and not isinstance(normalized["servings"], str):
             normalized["servings"] = str(normalized["servings"])
-
-        # id/createdAt/updatedAt for extracted recipes
-        normalized.setdefault("id", None)
-        normalized.setdefault("createdAt", None)
-        normalized.setdefault("updatedAt", None)
-
-        # imageUrl strictness
-        img = normalized.get("imageUrl")
-        if isinstance(img, str):
-            s = img.strip()
-            if not s or not s.startswith(("http://", "https://")):
-                normalized["imageUrl"] = None
 
         # images: remove empties
         imgs = normalized.get("images")
