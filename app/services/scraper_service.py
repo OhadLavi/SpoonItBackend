@@ -88,12 +88,14 @@ class ScraperService:
             # Normalize recipe JSON
             normalized_recipe_json = self._normalize_recipe_json(recipe_json)
             
-            logger.info(f"Parsed recipe: title='{normalized_recipe_json.get('title')}', ingredients count={len(normalized_recipe_json.get('ingredients', []))}")
+            # Count total ingredients from groups
+            total_ingredients = sum(len(group.get('ingredients', [])) for group in normalized_recipe_json.get('ingredientGroups', []))
+            logger.info(f"Parsed recipe: title='{normalized_recipe_json.get('title')}', ingredientGroups count={len(normalized_recipe_json.get('ingredientGroups', []))}, total ingredients={total_ingredients}")
             
             recipe = Recipe(**normalized_recipe_json)
 
-            # Validate recipe has meaningful content
-            if not recipe.title or len(recipe.ingredients) == 0:
+            # Validate recipe has meaningful content - check ingredientGroups
+            if not recipe.title or total_ingredients == 0:
                 raise ScrapingError("Failed to extract meaningful recipe content. The page may not contain a valid recipe.")
 
             return recipe
@@ -149,9 +151,7 @@ class ScraperService:
   "cookTimeMinutes": null,
   "totalTimeMinutes": null,
   "ingredientGroups": [{{"name": null, "ingredients": [{{"raw": ""}}]}}],
-  "ingredients": [""],
-  "instructionGroups": [{{"name": "כותרת הסעיף", "instructions": [""]}}],
-  "instructions": [""],
+  "instructionGroups": [{{"name": "כותרת הסעיף או null אם אין", "instructions": [""]}}],
   "notes": [],
   "images": [],
   "nutrition": {{
@@ -185,10 +185,14 @@ class ScraperService:
         """Normalize recipe JSON to satisfy Pydantic model types."""
         normalized: Dict[str, Any] = dict(recipe_json or {})
 
-        # Ensure list fields exist
-        for k in ("ingredientGroups", "ingredients", "instructionGroups", "instructions", "notes", "images"):
+        # Ensure list fields exist (only groups, no flat lists)
+        for k in ("ingredientGroups", "instructionGroups", "notes", "images"):
             if normalized.get(k) is None:
                 normalized[k] = []
+        
+        # Ensure flat lists are empty (not used in new schema, but model requires them)
+        normalized.setdefault("ingredients", [])
+        normalized.setdefault("instructions", [])
 
         # servings -> str
         if "servings" in normalized and normalized["servings"] is not None and not isinstance(normalized["servings"], str):

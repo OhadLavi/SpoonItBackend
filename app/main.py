@@ -189,14 +189,26 @@ async def extract_recipe_legacy(
         # Extract recipe using new service
         recipe = await recipe_extractor.extract_from_url(validated_url)
         
+        # Flatten ingredientGroups and instructionGroups for legacy compatibility
+        flat_ingredients = []
+        if recipe.ingredientGroups:
+            for group in recipe.ingredientGroups:
+                for ing in group.ingredients:
+                    flat_ingredients.append(ing.raw)
+        
+        flat_instructions = []
+        if recipe.instructionGroups:
+            for group in recipe.instructionGroups:
+                flat_instructions.extend(group.instructions)
+        
         # Convert new Recipe format to old format for backward compatibility
         # Old format: prepTime, cookTime (int), servings (int), notes (str), tags (list)
         # New format: prepTimeMinutes, cookTimeMinutes (int), servings (str), notes (list)
         result = {
             "title": recipe.title or "",
             "description": recipe.description or "",
-            "ingredients": recipe.ingredients or [],
-            "instructions": recipe.instructions or [],
+            "ingredients": flat_ingredients,
+            "instructions": flat_instructions,
             "prepTime": recipe.prepTimeMinutes or 0,
             "cookTime": recipe.cookTimeMinutes or 0,
             "servings": int(recipe.servings) if recipe.servings and recipe.servings.isdigit() else 1,
@@ -205,7 +217,7 @@ async def extract_recipe_legacy(
             "source": recipe.source or validated_url,
             "imageUrl": str(recipe.imageUrl) if recipe.imageUrl else "",
             "images": recipe.images or [],
-            "ingredientGroups": [group.dict() for group in recipe.ingredientGroups] if recipe.ingredientGroups else [],
+            "ingredientGroups": [group.model_dump() for group in recipe.ingredientGroups] if recipe.ingredientGroups else [],
         }
         
         return result
@@ -267,12 +279,24 @@ async def extract_recipe_from_image_legacy(
         # Extract recipe using new service
         recipe = await recipe_extractor.extract_from_image(image_data, filename)
         
+        # Flatten ingredientGroups and instructionGroups for legacy compatibility
+        flat_ingredients = []
+        if recipe.ingredientGroups:
+            for group in recipe.ingredientGroups:
+                for ing in group.ingredients:
+                    flat_ingredients.append(ing.raw)
+        
+        flat_instructions = []
+        if recipe.instructionGroups:
+            for group in recipe.instructionGroups:
+                flat_instructions.extend(group.instructions)
+        
         # Convert new Recipe format to old format for backward compatibility
         result = {
             "title": recipe.title or "",
             "description": recipe.description or "",
-            "ingredients": recipe.ingredients or [],
-            "instructions": recipe.instructions or [],
+            "ingredients": flat_ingredients,
+            "instructions": flat_instructions,
             "prepTime": recipe.prepTimeMinutes or 0,
             "cookTime": recipe.cookTimeMinutes or 0,
             "servings": int(recipe.servings) if recipe.servings and recipe.servings.isdigit() else 1,
@@ -281,7 +305,7 @@ async def extract_recipe_from_image_legacy(
             "source": recipe.source or "",
             "imageUrl": str(recipe.imageUrl) if recipe.imageUrl else "",
             "images": recipe.images or [],
-            "ingredientGroups": [group.dict() for group in recipe.ingredientGroups] if recipe.ingredientGroups else [],
+            "ingredientGroups": [group.model_dump() for group in recipe.ingredientGroups] if recipe.ingredientGroups else [],
         }
         
         return result

@@ -220,9 +220,7 @@ nutrition (חובה למלא):
   "cookTimeMinutes": null,
   "totalTimeMinutes": null,
   "ingredientGroups": [{"name": null, "ingredients": [{"raw": ""}]}],
-  "ingredients": [""],
-  "instructionGroups": [{"name": "כותרת הסעיף", "instructions": [""]}],
-  "instructions": [""],
+  "instructionGroups": [{"name": "כותרת הסעיף או null אם אין", "instructions": [""]}],
   "notes": [],
   "images": [],
   "nutrition": {
@@ -265,9 +263,7 @@ nutrition (חובה למלא):
   "cookTimeMinutes": null,
   "totalTimeMinutes": null,
   "ingredientGroups": [{{"name": null, "ingredients": [{{"raw": ""}}]}}],
-  "ingredients": [""],
   "instructionGroups": [{{"name": "הכנה", "instructions": [""]}}],
-  "instructions": [""],
   "notes": [],
   "images": [],
   "nutrition": {{
@@ -309,9 +305,7 @@ nutrition (חובה למלא):
   "cookTimeMinutes": null,
   "totalTimeMinutes": null,
   "ingredientGroups": [{{"name": null, "ingredients": [{{"raw": ""}}]}}],
-  "ingredients": [""],
   "instructionGroups": [{{"name": "הכנה", "instructions": [""]}}],
-  "instructions": [""],
   "notes": [],
   "images": [],
   "nutrition": {{
@@ -348,10 +342,14 @@ nutrition (חובה למלא):
         """Normalize recipe JSON to satisfy Pydantic model types."""
         normalized: Dict[str, Any] = dict(recipe_json or {})
 
-        # Ensure list fields exist
-        for k in ("ingredientGroups", "ingredients", "instructionGroups", "instructions", "notes", "images"):
+        # Ensure list fields exist (only groups, no flat lists)
+        for k in ("ingredientGroups", "instructionGroups", "notes", "images"):
             if normalized.get(k) is None:
                 normalized[k] = []
+        
+        # Ensure flat lists are empty (not used in new schema, but model requires them)
+        normalized.setdefault("ingredients", [])
+        normalized.setdefault("instructions", [])
 
         # servings -> str
         if "servings" in normalized and normalized["servings"] is not None and not isinstance(normalized["servings"], str):
