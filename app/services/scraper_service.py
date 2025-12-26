@@ -73,7 +73,7 @@ class ScraperService:
             if not response_text:
                 raise ScrapingError("Gemini returned empty response")
             
-            logger.debug(f"Gemini response text (first 500 chars): {response_text[:500]}")
+            logger.info(f"Gemini full response text:\n{response_text}")
 
             # Parse JSON response - remove markdown code blocks if present
             response_text = re.sub(r"^```json\s*", "", response_text, flags=re.MULTILINE)
@@ -90,7 +90,7 @@ class ScraperService:
             
             # Count total ingredients from groups
             total_ingredients = sum(len(group.get('ingredients', [])) for group in normalized_recipe_json.get('ingredientGroups', []))
-            logger.info(f"Parsed recipe: title='{normalized_recipe_json.get('title')}', ingredientGroups count={len(normalized_recipe_json.get('ingredientGroups', []))}, total ingredients={total_ingredients}")
+            logger.info(f"Parsed recipe: title='{normalized_recipe_json.get('title')}', ingredientGroups count={len(normalized_recipe_json.get('ingredientGroups', []))}, total ingredients={total_ingredients}, instructionGroups count={len(normalized_recipe_json.get('instructionGroups', []))}")
             
             recipe = Recipe(**normalized_recipe_json)
 

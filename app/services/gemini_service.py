@@ -74,7 +74,7 @@ class GeminiService:
                 raise GeminiError("Gemini returned empty response for image extraction")
 
             response_text = response.text.strip()
-            logger.debug(f"Gemini image response (first 500 chars): {response_text[:500]}")
+            logger.info(f"Gemini image extraction full response:\n{response_text}")
 
             # Parse JSON
             json_text = self._extract_json_from_text(response_text)
@@ -124,7 +124,7 @@ class GeminiService:
                 raise GeminiError("Gemini returned empty response for recipe generation")
 
             response_text = response.text.strip()
-            logger.debug(f"Gemini generation response (first 500 chars): {response_text[:500]}")
+            logger.info(f"Gemini recipe generation full response:\n{response_text}")
 
             # Parse JSON
             json_text = self._extract_json_from_text(response_text)
@@ -174,7 +174,7 @@ class GeminiService:
                 raise GeminiError("Gemini returned empty response for text generation")
 
             response_text = response.text.strip()
-            logger.debug(f"Gemini text generation response (first 500 chars): {response_text[:500]}")
+            logger.info(f"Gemini text generation full response:\n{response_text}")
 
             # Parse JSON
             json_text = self._extract_json_from_text(response_text)
