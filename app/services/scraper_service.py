@@ -88,8 +88,20 @@ class ScraperService:
             raise ScrapingError("Gemini url_context returned empty response")
         
         logger.info(f"Gemini url_context full response text:\n{response_text}")
+        
+        # Try to extract image URLs from response metadata if available
+        image_urls_from_metadata = []
+        try:
+            if hasattr(response, 'candidates') and response.candidates:
+                candidate = response.candidates[0]
+                if hasattr(candidate, 'url_context_metadata') and candidate.url_context_metadata:
+                    metadata = candidate.url_context_metadata
+                    logger.info(f"URL context metadata: {metadata}")
+                    # Note: url_context_metadata might contain image info, but structure varies
+        except Exception as e:
+            logger.debug(f"Could not extract image URLs from metadata: {str(e)}")
 
-        return self._parse_and_validate_response(response_text, url)
+        return self._parse_and_validate_response(response_text, url, image_urls_from_metadata)
 
     async def _extract_with_google_search(self, url: str, prompt: str) -> Recipe:
         """Extract recipe using Google Search tool as fallback."""
@@ -119,9 +131,9 @@ class ScraperService:
         
         logger.info(f"Gemini Google Search full response text:\n{response_text}")
 
-        return self._parse_and_validate_response(response_text, url)
+        return self._parse_and_validate_response(response_text, url, [])
 
-    def _parse_and_validate_response(self, response_text: str, url: str) -> Recipe:
+    def _parse_and_validate_response(self, response_text: str, url: str, additional_images: list = None) -> Recipe:
         """Parse and validate Gemini response into Recipe object."""
         # Parse JSON response - remove markdown code blocks if present
         response_text = re.sub(r"^```json\s*", "", response_text, flags=re.MULTILINE)
@@ -133,12 +145,26 @@ class ScraperService:
         
         recipe_json = json.loads(json_text)
         
+        # Log raw images before normalization
+        raw_images = recipe_json.get('images')
+        logger.info(f"Raw images from Gemini (before normalization): {raw_images} (type: {type(raw_images)})")
+        
         # Normalize recipe JSON
-        normalized_recipe_json = self._normalize_recipe_json(recipe_json)
+        normalized_recipe_json = self._normalize_recipe_json(recipe_json, source_url=url)
+        
+        # If no images were extracted but we have additional images from metadata, add them
+        if additional_images and len(normalized_recipe_json.get('images', [])) == 0:
+            normalized_recipe_json['images'] = additional_images
+            logger.info(f"Added {len(additional_images)} images from metadata")
         
         # Count total ingredients from groups
         total_ingredients = sum(len(group.get('ingredients', [])) for group in normalized_recipe_json.get('ingredientGroups', []))
-        logger.info(f"Parsed recipe: title='{normalized_recipe_json.get('title')}', ingredientGroups count={len(normalized_recipe_json.get('ingredientGroups', []))}, total ingredients={total_ingredients}, instructionGroups count={len(normalized_recipe_json.get('instructionGroups', []))}")
+        images_count = len(normalized_recipe_json.get('images', []))
+        logger.info(f"Parsed recipe: title='{normalized_recipe_json.get('title')}', ingredientGroups count={len(normalized_recipe_json.get('ingredientGroups', []))}, total ingredients={total_ingredients}, instructionGroups count={len(normalized_recipe_json.get('instructionGroups', []))}, images count={images_count}")
+        if images_count > 0:
+            logger.info(f"Extracted images: {normalized_recipe_json.get('images', [])}")
+        else:
+            logger.warning(f"No images extracted. Raw images field from Gemini: {recipe_json.get('images')}")
         
         recipe = Recipe(**normalized_recipe_json)
 
@@ -161,7 +187,13 @@ class ScraperService:
 - אל תמציא מרכיבים/שלבים שלא קיימים בעמוד.
 - אם מידע לא מופיע: null לשדות אופציונליים, [] לרשימות.
 - notes: כל טיפים/המלצות/הערות שמופיעים בעמוד.
-- images: מערך של תמונות של המתכון בפורמט png, jpg בלבד. כתובת מלאה (http/https) אם קיימות, אחרת [].
+- images: **חובה** - חלץ את כל כתובות התמונות של המתכון מהעמוד. 
+  * חפש תמונות ב-HTML: תגיות <img> עם src או data-src, background-image ב-CSS, או כל מקור תמונה אחר בעמוד.
+  * החזר מערך של כתובות URL מלאות (http/https) של תמונות המתכון בלבד.
+  * אם כתובת התמונה היא יחסית (מתחילה ב-/), המר אותה לכתובת מלאה על בסיס ה-URL של העמוד.
+  * אם אין תמונות, החזר [] (לא null).
+  * חשוב: החזר רק תמונות של המתכון עצמו (מזון, בישול, הגשה), לא לוגואים, אייקונים או תמונות אחרות.
+  * דוגמה: אם יש תמונה בכתובת "/images/recipe.jpg" וה-URL הוא "https://example.com/recipe", החזר "https://example.com/images/recipe.jpg".
 
 חשוב מאוד - instructionGroups (חובה):
 - זהה בקפידה את כל הכותרות/כותרות משנה בעמוד שמחלקות את ההוראות (כמו "הכנת הבצק", "הכנת המילוי", "בישול", "הגשה" וכו').
@@ -222,7 +254,7 @@ class ScraperService:
         
         return text
 
-    def _normalize_recipe_json(self, recipe_json: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_recipe_json(self, recipe_json: Dict[str, Any], source_url: str = None) -> Dict[str, Any]:
         """Normalize recipe JSON to satisfy Pydantic model types."""
         normalized: Dict[str, Any] = dict(recipe_json or {})
 
@@ -238,10 +270,40 @@ class ScraperService:
         if "servings" in normalized and normalized["servings"] is not None and not isinstance(normalized["servings"], str):
             normalized["servings"] = str(normalized["servings"])
 
-        # images: remove empties
+        # images: remove empties and validate URLs
         imgs = normalized.get("images")
-        if isinstance(imgs, list):
-            normalized["images"] = [x for x in imgs if isinstance(x, str) and x.strip()]
+        if imgs is None:
+            normalized["images"] = []
+        elif isinstance(imgs, list):
+            # Filter out empty strings and ensure all are valid URLs
+            valid_images = []
+            for img in imgs:
+                if isinstance(img, str) and img.strip():
+                    img_url = img.strip()
+                    # Ensure it's a valid URL (starts with http:// or https://)
+                    if img_url.startswith(('http://', 'https://')):
+                        valid_images.append(img_url)
+                    elif img_url.startswith('//'):
+                        # Handle protocol-relative URLs
+                        valid_images.append(f'https:{img_url}')
+                    elif img_url.startswith('/'):
+                        # Handle relative URLs - construct absolute URL from source URL
+                        if source_url:
+                            try:
+                                from urllib.parse import urljoin, urlparse
+                                base_url = f"{urlparse(source_url).scheme}://{urlparse(source_url).netloc}"
+                                absolute_url = urljoin(base_url, img_url)
+                                valid_images.append(absolute_url)
+                                logger.info(f"Converted relative URL {img_url} to absolute URL {absolute_url}")
+                            except Exception as e:
+                                logger.warning(f"Failed to convert relative image URL {img_url}: {str(e)}")
+                        else:
+                            logger.warning(f"Skipping relative image URL (no source URL): {img_url}")
+            normalized["images"] = valid_images
+        else:
+            # If images is not a list, set to empty list
+            logger.warning(f"Images field is not a list: {type(imgs)}, setting to empty list")
+            normalized["images"] = []
 
         # tolerate ingredientGroups.ingredients as ["..."] instead of [{"raw": "..."}]
         ig = normalized.get("ingredientGroups")
