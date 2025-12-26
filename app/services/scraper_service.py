@@ -145,9 +145,11 @@ class ScraperService:
         
         recipe_json = json.loads(json_text)
         
-        # Log raw images before normalization
+        # Log raw data before normalization
         raw_images = recipe_json.get('images')
-        logger.info(f"Raw images from Gemini (before normalization): {raw_images} (type: {type(raw_images)})")
+        raw_prep_time = recipe_json.get('prepTimeMinutes')
+        raw_cook_time = recipe_json.get('cookTimeMinutes')
+        logger.info(f"Raw data from Gemini (before normalization): images={raw_images} (type: {type(raw_images)}), prepTimeMinutes={raw_prep_time} (type: {type(raw_prep_time)}), cookTimeMinutes={raw_cook_time} (type: {type(raw_cook_time)})")
         
         # Normalize recipe JSON
         normalized_recipe_json = self._normalize_recipe_json(recipe_json, source_url=url)
@@ -160,7 +162,9 @@ class ScraperService:
         # Count total ingredients from groups
         total_ingredients = sum(len(group.get('ingredients', [])) for group in normalized_recipe_json.get('ingredientGroups', []))
         images_count = len(normalized_recipe_json.get('images', []))
-        logger.info(f"Parsed recipe: title='{normalized_recipe_json.get('title')}', ingredientGroups count={len(normalized_recipe_json.get('ingredientGroups', []))}, total ingredients={total_ingredients}, instructionGroups count={len(normalized_recipe_json.get('instructionGroups', []))}, images count={images_count}")
+        prep_time = normalized_recipe_json.get('prepTimeMinutes')
+        cook_time = normalized_recipe_json.get('cookTimeMinutes')
+        logger.info(f"Parsed recipe: title='{normalized_recipe_json.get('title')}', ingredientGroups count={len(normalized_recipe_json.get('ingredientGroups', []))}, total ingredients={total_ingredients}, instructionGroups count={len(normalized_recipe_json.get('instructionGroups', []))}, images count={images_count}, prepTimeMinutes={prep_time}, cookTimeMinutes={cook_time}")
         if images_count > 0:
             logger.info(f"Extracted images: {normalized_recipe_json.get('images', [])}")
         else:
@@ -187,6 +191,23 @@ class ScraperService:
 - אל תמציא מרכיבים/שלבים שלא קיימים בעמוד.
 - אם מידע לא מופיע: null לשדות אופציונליים, [] לרשימות.
 - notes: כל טיפים/המלצות/הערות שמופיעים בעמוד.
+
+חשוב מאוד - זמני הכנה ובישול (prepTimeMinutes, cookTimeMinutes):
+- **חובה** - חלץ את זמני ההכנה והבישול מהעמוד.
+- חפש מידע על זמנים בטקסט: "זמן הכנה", "זמן בישול", "זמן אפייה", "דקות", "שעות", "דק'", "שעה" וכו'.
+- המר את כל הזמנים לדקות (minutes):
+  * אם כתוב "X דקות" או "X דק" -> X
+  * אם כתוב "X שעות" או "X שעה" -> X * 60
+  * אם כתוב "חצי שעה" -> 30
+  * אם כתוב "רבע שעה" -> 15
+  * אם כתוב "X שעות ו-Y דקות" -> (X * 60) + Y
+- prepTimeMinutes: זמן ההכנה (preparation time) בדקות. אם לא מופיע, null.
+- cookTimeMinutes: זמן הבישול/אפייה (cooking/baking time) בדקות. אם לא מופיע, null.
+- totalTimeMinutes: סכום של prepTimeMinutes + cookTimeMinutes. אם שניהם null, null.
+- דוגמאות:
+  * "60 דק" -> prepTimeMinutes: 60
+  * "כחצי שעה" -> cookTimeMinutes: 30
+  * "45 דקות הכנה, שעה בישול" -> prepTimeMinutes: 45, cookTimeMinutes: 60
 - images: **חובה** - חלץ את כל כתובות התמונות של המתכון מהעמוד. 
   * חפש תמונות ב-HTML: תגיות <img> עם src או data-src, background-image ב-CSS, או כל מקור תמונה אחר בעמוד.
   * החזר מערך של כתובות URL מלאות (http/https) של תמונות המתכון בלבד.
@@ -269,6 +290,40 @@ class ScraperService:
         # servings -> str
         if "servings" in normalized and normalized["servings"] is not None and not isinstance(normalized["servings"], str):
             normalized["servings"] = str(normalized["servings"])
+
+        # Normalize time fields to integers or null
+        for time_field in ("prepTimeMinutes", "cookTimeMinutes", "totalTimeMinutes"):
+            if time_field in normalized:
+                time_value = normalized[time_field]
+                if time_value is None:
+                    continue
+                elif isinstance(time_value, (int, float)):
+                    # Convert to int, round if float
+                    normalized[time_field] = int(round(time_value))
+                elif isinstance(time_value, str):
+                    # Try to parse string to int
+                    try:
+                        # Remove any non-numeric characters except digits and decimal point
+                        cleaned = ''.join(c for c in time_value if c.isdigit() or c == '.')
+                        if cleaned:
+                            normalized[time_field] = int(round(float(cleaned)))
+                        else:
+                            normalized[time_field] = None
+                    except (ValueError, TypeError):
+                        normalized[time_field] = None
+                else:
+                    normalized[time_field] = None
+        
+        # Calculate totalTimeMinutes if not provided but prep and cook times are
+        if normalized.get("totalTimeMinutes") is None:
+            prep = normalized.get("prepTimeMinutes")
+            cook = normalized.get("cookTimeMinutes")
+            if prep is not None and cook is not None:
+                normalized["totalTimeMinutes"] = prep + cook
+            elif prep is not None:
+                normalized["totalTimeMinutes"] = prep
+            elif cook is not None:
+                normalized["totalTimeMinutes"] = cook
 
         # images: remove empties and validate URLs
         imgs = normalized.get("images")
