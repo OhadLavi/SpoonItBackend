@@ -1,199 +1,197 @@
-"""Web extraction service using Gemini url_context (tool) with JSON-as-text output."""
+"""Web scraping service using Gemini with url_context."""
 
-from __future__ import annotations
-
+import asyncio
+import json
 import logging
-from typing import Any, Dict, Optional
+import re
+from typing import Any, Dict
 
 from google import genai
 from google.genai import types
-from pydantic import ValidationError
 
 from app.config import settings
 from app.models.recipe import Recipe
 from app.utils.exceptions import ScrapingError
-from app.services.gemini_utils import (
-    get_response_text,
-    log_empty_response,
-    safe_json_loads,
-)
 
 logger = logging.getLogger(__name__)
 
 
 class ScraperService:
-    """
-    IMPORTANT:
-    Gemini 2.5 Flash does NOT support tool-use with response_mime_type=application/json.
-    So we ask for text/plain and force the model to output JSON as text.
-    """
+    """Service for scraping recipe content from URLs using Gemini url_context tool."""
 
     def __init__(self):
-        self._client: Optional[genai.Client] = None
-        self._recipe_schema: Dict[str, Any] = Recipe.model_json_schema()
+        """Initialize scraper service."""
+        self._client = None
 
     @property
-    def client(self) -> genai.Client:
+    def client(self):
+        """Get or create Gemini client (lazy initialization)."""
         if self._client is None:
             self._client = genai.Client(api_key=settings.gemini_api_key)
         return self._client
 
     async def extract_recipe_from_url(self, url: str) -> Recipe:
         """
-        Single-call attempt:
-          url_context tool + text/plain + JSON-as-text
+        Extract recipe directly from URL using Gemini with url_context.
 
-        If JSON parsing/validation fails, we do a repair call WITHOUT tools using structured output schema.
+        Args:
+            url: Recipe URL to extract
+
+        Returns:
+            Extracted Recipe object
+
+        Raises:
+            ScrapingError: If extraction fails
         """
-        prompt = self._build_url_context_json_prompt(url)
+        prompt = self._build_url_extraction_prompt(url)
 
-        # retries help with flakiness/tool retrieval issues
-        last_text = ""
-        for attempt in range(1, 3):
-            try:
-                response = await self.client.aio.models.generate_content(
+        try:
+            logger.info(f"Extracting recipe from URL: {url}")
+
+            # Use synchronous API wrapped in executor (async API doesn't work with url_context)
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.client.models.generate_content(
                     model="gemini-2.5-flash",
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         tools=[{"url_context": {}}],
                         response_mime_type="text/plain",
-                        temperature=0.0,
-                        max_output_tokens=4096,
                     ),
                 )
+            )
 
-                text = get_response_text(response).strip()
-                last_text = text
+            logger.info(f"Gemini response received for {url}")
 
-                if not text:
-                    log_empty_response(f"url_context returned empty text (attempt {attempt}/2).", response)
-                    continue
+            # Direct text access (works with sync API)
+            if not hasattr(response, 'text') or response.text is None:
+                raise ScrapingError("Gemini response has no text content")
+            
+            response_text = response.text.strip()
+            
+            if not response_text:
+                raise ScrapingError("Gemini returned empty response")
+            
+            logger.debug(f"Gemini response text (first 500 chars): {response_text[:500]}")
 
-                data = safe_json_loads(text)
-                data = self._normalize_recipe_json(data, source_url=url)
-                recipe = Recipe.model_validate(data)
+            # Parse JSON response - remove markdown code blocks if present
+            response_text = re.sub(r"^```json\s*", "", response_text, flags=re.MULTILINE)
+            response_text = re.sub(r"^```\s*", "", response_text, flags=re.MULTILINE)
+            response_text = response_text.strip()
+            
+            # Extract JSON from text (handle cases where there's extra text)
+            json_text = self._extract_json_from_text(response_text)
+            
+            recipe_json = json.loads(json_text)
+            
+            # Normalize recipe JSON
+            normalized_recipe_json = self._normalize_recipe_json(recipe_json, source_url=url)
+            
+            # Log parsed recipe for debugging
+            logger.info(f"Parsed recipe: title='{normalized_recipe_json.get('title')}', ingredients count={len(normalized_recipe_json.get('ingredients', []))}")
+            
+            recipe = Recipe(**normalized_recipe_json)
 
-                if not recipe.title or len(recipe.ingredients) == 0:
-                    raise ScrapingError("Extracted recipe is empty/invalid (missing title or ingredients).")
-
-                return recipe
-
-            except (ValueError, ValidationError) as e:
-                logger.warning(
-                    f"url_context JSON parse/validation failed (attempt {attempt}/2): {str(e)}",
-                    exc_info=True,
+            # Validate recipe has meaningful content
+            if not recipe.title or len(recipe.ingredients) == 0:
+                logger.error(f"Extracted recipe is empty or invalid: title='{recipe.title}', ingredients={len(recipe.ingredients)}")
+                raise ScrapingError(
+                    "Failed to extract meaningful recipe content. The page may not contain a valid recipe."
                 )
-                # try structured repair once (no tools)
-                try:
-                    repaired = await self._repair_to_schema(last_text, source_url=url)
-                    return repaired
-                except Exception:
-                    # continue retry loop for tool call
-                    continue
-            except Exception as e:
-                logger.warning(
-                    f"url_context attempt {attempt}/2 failed: {str(e)}",
-                    exc_info=True,
-                )
-                continue
 
-        raise ScrapingError(f"url_context returned empty text after retries. last_text_len={len(last_text)}")
+            return recipe
 
-    def _build_url_context_json_prompt(self, url: str) -> str:
-        # Keep it explicit and aligned with your Pydantic model fields
-        return f"""
-יש לך גישה לתוכן העמוד באמצעות url_context עבור ה-URL הבא:
-{url}
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON from Gemini response: {str(e)}")
+            logger.debug(f"Response text: {response_text[:1000] if 'response_text' in locals() else 'N/A'}")
+            raise ScrapingError(f"Failed to parse recipe JSON: {str(e)}") from e
+        except Exception as e:
+            logger.error(f"Recipe extraction from URL failed: {str(e)}", exc_info=True)
+            raise ScrapingError(f"Failed to extract recipe from URL: {str(e)}") from e
 
-מטרה: להחזיר אובייקט JSON תקין בלבד, בתבנית המדויקת של Recipe (כמו במודל Pydantic).
+    def _build_url_extraction_prompt(self, url: str) -> str:
+        """Build prompt for recipe extraction from URL."""
+        return f"""השתמש ב-URL עצמו: {url}
+
+חלץ את המתכון *בדיוק כפי שמופיע בעמוד*.
 
 כללים נוקשים:
-- שמור על טקסט מדויק של המרכיבים כפי שמופיע בעמוד (ingredientGroups.ingredients[].raw + ingredients[]). אל תתרגם, אל תנרמל, אל תשנה יחידות/כמויות.
-- אל תמציא מרכיבים/שלבים שלא קיימים בעמוד.
-- אם מידע לא מופיע: null לשדות אופציונליים, [] לרשימות.
-- מלא גם ingredientGroups וגם ingredients.
-- מלא גם instructionGroups וגם instructions (לפי הסדר).
-- notes: כל טיפים/המלצות/הערות שמופיעים בעמוד.
-- imageUrl: כתובת מלאה (http/https) אם קיימת, אחרת null. images: רשימת URLים לתמונות אם קיימת, אחרת [].
-- id/createdAt/updatedAt: null עבור מתכון שחולץ.
-- source: שים את ה-URL במחרוזת.
+- אל תנרמל ואל תשנה כמויות/מידות.
+- אל תוסיף מרכיבים שלא כתובים בעמוד.
+- שמור על הטקסט המדויק של כל מרכיב והוראה.
+- אם משהו לא מופיע בעמוד, השתמש ב-null.
+- חלץ גם הערות אם יש (הערות, טיפים, המלצות וכו').
+- אם יש קבוצות של הוראות (כמו "הכנת הבצק", "הגשה", "הכנת המילוי" וכו'), חלץ אותן ל-instructionGroups.
 
-החזר JSON בלבד. ללא markdown. ללא code blocks. ללא הסברים.
+החזר JSON בפורמט הבא בדיוק:
 
-תבנית JSON (דוגמה לשדות, לא תוכן):
 {{
-  "id": null,
-  "title": null,
-  "description": null,
-  "source": "{url}",
-  "language": null,
-  "servings": null,
-  "prepTimeMinutes": null,
-  "cookTimeMinutes": null,
-  "totalTimeMinutes": null,
-  "ingredientGroups": [{{"name": null, "ingredients": [{{"raw": ""}}]}}],
-  "ingredients": [""],
-  "instructionGroups": [{{"name": null, "instructions": [""]}}],
-  "instructions": [""],
-  "notes": [],
-  "imageUrl": null,
-  "images": [],
+  "title": "שם המתכון",
+  "description": "תיאור המתכון או null",
+  "language": "קוד שפה (לדוגמה 'he', 'en') או null",
+  "servings": "מספר מנות או null",
+  "prepTimeMinutes": מספר או null,
+  "cookTimeMinutes": מספר או null,
+  "totalTimeMinutes": מספר או null,
+  "ingredientGroups": [
+    {{
+      "name": "שם הקבוצה או null",
+      "ingredients": [
+        {{"raw": "טקסט המרכיב בדיוק כפי שמופיע"}}
+      ]
+    }}
+  ],
+  "ingredients": ["רשימה שטוחה של כל המרכיבים"],
+  "instructionGroups": [
+    {{
+      "name": "שם קבוצת ההוראות (כמו 'הכנת הבצק', 'הגשה') או null",
+      "instructions": ["שלב 1", "שלב 2"]
+    }}
+  ],
+  "instructions": ["רשימה שטוחה של כל ההוראות לפי סדר"],
+  "notes": ["הערה 1", "הערה 2"] או [],
+  "imageUrl": "URL של התמונה הראשית או null",
+  "images": ["URL תמונה 1", "URL תמונה 2"] או [],
   "nutrition": {{
-    "calories": null,
-    "protein_g": null,
-    "fat_g": null,
-    "carbs_g": null,
-    "per": null
-  }},
-  "createdAt": null,
-  "updatedAt": null
+    "calories": מספר או null,
+    "protein_g": מספר או null,
+    "fat_g": מספר או null,
+    "carbs_g": מספר או null,
+    "per": "ל-מה" או null
+  }}
 }}
-""".strip()
 
-    async def _repair_to_schema(self, broken_json_text: str, source_url: str) -> Recipe:
+CRITICAL: החזר רק JSON תקין, ללא markdown, ללא code blocks, ללא הסברים."""
+
+    def _extract_json_from_text(self, text: str) -> str:
         """
-        Second call (no tools) using structured output schema to repair invalid JSON-as-text.
+        Extract JSON object from text, handling cases where there's extra text.
+        
+        Args:
+            text: Text that may contain JSON
+            
+        Returns:
+            Extracted JSON string
         """
-        prompt = f"""
-You will be given a JSON-like text that is supposed to match this Recipe schema.
-Fix it and output ONLY valid JSON that matches the schema exactly.
-
-Rules:
-- Do not add ingredients/steps that are not present in the given text.
-- Preserve raw ingredient lines as-is.
-- If missing: null for optional scalars, [] for lists.
-- Ensure "source" is "{source_url}"
-- id/createdAt/updatedAt must be null.
-
-Broken JSON-like text:
-<<<
-{broken_json_text}
->>>
-""".strip()
-
-        response = await self.client.aio.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_json_schema=self._recipe_schema,
-                temperature=0.0,
-                max_output_tokens=4096,
-            ),
-        )
-
-        # Prefer parsed if available
-        parsed = getattr(response, "parsed", None)
-        if isinstance(parsed, dict):
-            data = parsed
-        else:
-            text = get_response_text(response).strip()
-            data = safe_json_loads(text)
-
-        data = self._normalize_recipe_json(data, source_url=source_url)
-        return Recipe.model_validate(data)
+        text = text.strip()
+        
+        # If it already looks like JSON (starts with { and ends with })
+        if text.startswith("{") and text.endswith("}"):
+            return text
+        
+        # Find first { and last }
+        first_brace = text.find("{")
+        last_brace = text.rfind("}")
+        
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            return text[first_brace:last_brace + 1]
+        
+        # If no JSON found, return original (will fail with better error)
+        return text
 
     def _normalize_recipe_json(self, recipe_json: Dict[str, Any], source_url: str) -> Dict[str, Any]:
+        """Normalize recipe JSON to satisfy Pydantic model types."""
         normalized: Dict[str, Any] = dict(recipe_json or {})
         normalized["source"] = source_url
 
