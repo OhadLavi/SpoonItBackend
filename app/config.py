@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     cors_origins: str = "*"  # Comma-separated origins or "*" for all
 
     # Gemini Settings
-    gemini_model: str = "gemini-2.5-flash-light"
+    gemini_model: str = "gemini-2.5-flash-lite"
     gemini_temperature: float = 0.3
     gemini_max_tokens: int = 4096
 

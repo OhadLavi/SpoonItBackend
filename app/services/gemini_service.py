@@ -59,7 +59,7 @@ class GeminiService:
             response = await loop.run_in_executor(
                 None,
                 lambda: self.client.models.generate_content(
-                    model="gemini-2.5-flash-light",
+                    model="gemini-2.5-flash-lite",
                     contents=[
                         prompt,
                         {"inline_data": {"mime_type": mime_type, "data": image_base64}}
@@ -112,7 +112,7 @@ class GeminiService:
             response = await loop.run_in_executor(
                 None,
                 lambda: self.client.models.generate_content(
-                    model="gemini-2.5-flash-light",
+                    model="gemini-2.5-flash-lite",
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         response_mime_type="text/plain",
@@ -162,7 +162,7 @@ class GeminiService:
             response = await loop.run_in_executor(
                 None,
                 lambda: self.client.models.generate_content(
-                    model="gemini-2.5-flash-light",
+                    model="gemini-2.5-flash-lite",
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         response_mime_type="text/plain",

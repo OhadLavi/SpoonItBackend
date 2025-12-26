@@ -125,7 +125,7 @@ Once the server is running, interactive API documentation is available at:
     ```json
     {
       "response": "AI response text",
-      "model": "gemini-2.5-flash-light",
+      "model": "gemini-2.5-flash-lite",
       "is_recipe": true,
       "recipe": { ... }
     }
@@ -153,7 +153,7 @@ All configuration is done via environment variables (see `env.example`):
 - `LOG_LEVEL`: Logging level (default: INFO)
 - `RATE_LIMIT_PER_HOUR`: Rate limit per IP (default: 100)
 - `CORS_ORIGINS`: Allowed CORS origins (default: *)
-- `GEMINI_MODEL`: Gemini model to use (default: gemini-2.5-flash-light)
+- `GEMINI_MODEL`: Gemini model to use (default: gemini-2.5-flash-lite)
 - `GEMINI_TEMPERATURE`: Model temperature (default: 0.3)
 - `GEMINI_MAX_TOKENS`: Max response tokens (default: 4096)
 
