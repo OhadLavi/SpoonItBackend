@@ -55,7 +55,6 @@ class Recipe(BaseModel):
     instructionGroups: List[InstructionGroup] = Field(
         default_factory=list, description="Grouped instructions (e.g., 'הכנת הבצק', 'הגשה')"
     )
-    instructions: List[str] = Field(default_factory=list, description="Flat list of all cooking instructions")
     notes: List[str] = Field(default_factory=list, description="Additional notes")
     imageUrl: Optional[HttpUrl] = Field(None, description="Main recipe image URL")
     images: List[str] = Field(default_factory=list, description="All recipe image URLs")
@@ -91,7 +90,12 @@ class Recipe(BaseModel):
                     },
                 ],
                 "ingredients": ["30 בישקוטים", "1 כוס קפה חזק"],
-                "instructions": ["פורסים ניילון נצמד על משטח.", "טובלים בישקוטים בקפה ומסדרים שלוש שורות."],
+                "instructionGroups": [
+                    {
+                        "name": "הכנה",
+                        "instructions": ["פורסים ניילון נצמד על משטח.", "טובלים בישקוטים בקפה ומסדרים שלוש שורות."]
+                    }
+                ],
                 "notes": ["מומלץ להכין את הרולדה יום מראש כדי שתתייצב היטב."],
                 "imageUrl": "https://example.com/main-image.jpg",
                 "images": ["https://example.com/main-image.jpg"],

@@ -347,9 +347,8 @@ nutrition (חובה למלא):
             if normalized.get(k) is None:
                 normalized[k] = []
         
-        # Ensure flat lists are empty (not used in new schema, but model requires them)
+        # Ensure flat ingredients list is empty (not used in new schema, but model requires it for backward compatibility)
         normalized.setdefault("ingredients", [])
-        normalized.setdefault("instructions", [])
 
         # servings -> str
         if "servings" in normalized and normalized["servings"] is not None and not isinstance(normalized["servings"], str):
