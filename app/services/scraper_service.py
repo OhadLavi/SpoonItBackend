@@ -33,6 +33,7 @@ class ScraperService:
     async def extract_recipe_from_url(self, url: str) -> Recipe:
         """
         Extract recipe directly from URL using Gemini with url_context.
+        Falls back to Google Search if url_context fails.
 
         Args:
             url: Recipe URL to extract
@@ -45,67 +46,107 @@ class ScraperService:
         """
         prompt = self._build_url_extraction_prompt(url)
 
+        # Try url_context first
         try:
-            logger.info(f"Extracting recipe from URL: {url}")
+            logger.info(f"Extracting recipe from URL using url_context: {url}")
+            return await self._extract_with_url_context(url, prompt)
+        except Exception as url_error:
+            logger.warning(f"url_context extraction failed: {str(url_error)}, falling back to Google Search")
+            # Fallback to Google Search
+            try:
+                logger.info(f"Trying Google Search for URL: {url}")
+                return await self._extract_with_google_search(url, prompt)
+            except Exception as search_error:
+                logger.error(f"Both url_context and Google Search failed. url_context error: {str(url_error)}, Google Search error: {str(search_error)}")
+                raise ScrapingError(f"Failed to extract recipe from URL: url_context failed ({str(url_error)}), Google Search failed ({str(search_error)})") from search_error
 
-            # Use synchronous API wrapped in executor (async API doesn't work with url_context)
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self.client.models.generate_content(
-                    model="gemini-2.5-flash-lite",
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        tools=[{"url_context": {}}],
-                        response_mime_type="text/plain",
-                    ),
-                )
+    async def _extract_with_url_context(self, url: str, prompt: str) -> Recipe:
+        """Extract recipe using url_context tool."""
+        # Use synchronous API wrapped in executor (async API doesn't work with url_context)
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.client.models.generate_content(
+                model="gemini-2.5-flash-lite",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    tools=[{"url_context": {}}],
+                    response_mime_type="text/plain",
+                ),
             )
+        )
 
-            logger.info(f"Gemini response received for {url}")
+        logger.info(f"Gemini url_context response received for {url}")
 
-            # Check response
-            if response is None or response.text is None:
-                raise ScrapingError("Gemini returned empty response")
-            
-            response_text = response.text.strip()
-            
-            if not response_text:
-                raise ScrapingError("Gemini returned empty response")
-            
-            logger.info(f"Gemini full response text:\n{response_text}")
+        # Check response
+        if response is None or response.text is None:
+            raise ScrapingError("Gemini url_context returned empty response")
+        
+        response_text = response.text.strip()
+        
+        if not response_text:
+            raise ScrapingError("Gemini url_context returned empty response")
+        
+        logger.info(f"Gemini url_context full response text:\n{response_text}")
 
-            # Parse JSON response - remove markdown code blocks if present
-            response_text = re.sub(r"^```json\s*", "", response_text, flags=re.MULTILINE)
-            response_text = re.sub(r"^```\s*", "", response_text, flags=re.MULTILINE)
-            response_text = response_text.strip()
-            
-            # Extract JSON from text
-            json_text = self._extract_json_from_text(response_text)
-            
-            recipe_json = json.loads(json_text)
-            
-            # Normalize recipe JSON
-            normalized_recipe_json = self._normalize_recipe_json(recipe_json)
-            
-            # Count total ingredients from groups
-            total_ingredients = sum(len(group.get('ingredients', [])) for group in normalized_recipe_json.get('ingredientGroups', []))
-            logger.info(f"Parsed recipe: title='{normalized_recipe_json.get('title')}', ingredientGroups count={len(normalized_recipe_json.get('ingredientGroups', []))}, total ingredients={total_ingredients}, instructionGroups count={len(normalized_recipe_json.get('instructionGroups', []))}")
-            
-            recipe = Recipe(**normalized_recipe_json)
+        return self._parse_and_validate_response(response_text, url)
 
-            # Validate recipe has meaningful content - check ingredientGroups
-            if not recipe.title or total_ingredients == 0:
-                raise ScrapingError("Failed to extract meaningful recipe content. The page may not contain a valid recipe.")
+    async def _extract_with_google_search(self, url: str, prompt: str) -> Recipe:
+        """Extract recipe using Google Search tool as fallback."""
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.client.models.generate_content(
+                model="gemini-2.5-flash-lite",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                    response_mime_type="text/plain",
+                ),
+            )
+        )
 
-            return recipe
+        logger.info(f"Gemini Google Search response received for {url}")
 
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON from Gemini response: {str(e)}")
-            raise ScrapingError(f"Failed to parse recipe JSON: {str(e)}") from e
-        except Exception as e:
-            logger.error(f"Recipe extraction from URL failed: {str(e)}", exc_info=True)
-            raise ScrapingError(f"Failed to extract recipe from URL: {str(e)}") from e
+        # Check response
+        if response is None or response.text is None:
+            raise ScrapingError("Gemini Google Search returned empty response")
+        
+        response_text = response.text.strip()
+        
+        if not response_text:
+            raise ScrapingError("Gemini Google Search returned empty response")
+        
+        logger.info(f"Gemini Google Search full response text:\n{response_text}")
+
+        return self._parse_and_validate_response(response_text, url)
+
+    def _parse_and_validate_response(self, response_text: str, url: str) -> Recipe:
+        """Parse and validate Gemini response into Recipe object."""
+        # Parse JSON response - remove markdown code blocks if present
+        response_text = re.sub(r"^```json\s*", "", response_text, flags=re.MULTILINE)
+        response_text = re.sub(r"^```\s*", "", response_text, flags=re.MULTILINE)
+        response_text = response_text.strip()
+        
+        # Extract JSON from text
+        json_text = self._extract_json_from_text(response_text)
+        
+        recipe_json = json.loads(json_text)
+        
+        # Normalize recipe JSON
+        normalized_recipe_json = self._normalize_recipe_json(recipe_json)
+        
+        # Count total ingredients from groups
+        total_ingredients = sum(len(group.get('ingredients', [])) for group in normalized_recipe_json.get('ingredientGroups', []))
+        logger.info(f"Parsed recipe: title='{normalized_recipe_json.get('title')}', ingredientGroups count={len(normalized_recipe_json.get('ingredientGroups', []))}, total ingredients={total_ingredients}, instructionGroups count={len(normalized_recipe_json.get('instructionGroups', []))}")
+        
+        recipe = Recipe(**normalized_recipe_json)
+
+        # Validate recipe has meaningful content - check ingredientGroups
+        if not recipe.title or total_ingredients == 0:
+            raise ScrapingError("Failed to extract meaningful recipe content. The page may not contain a valid recipe.")
+
+        return recipe
 
     def _build_url_extraction_prompt(self, url: str) -> str:
         """Build prompt for recipe extraction from URL."""
