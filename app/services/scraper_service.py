@@ -175,8 +175,11 @@ class ScraperService:
 
     def _build_url_extraction_prompt(self, url: str) -> str:
         """Build prompt for recipe extraction from URL."""
-        return f"""Extract recipe from: {url}
+        return f"""You are a professional recipe extractor with active browsing capabilities.
+Using your available tools (google_search or url_context), access the following URL: {url}
 
+IMPORTANT: Do not tell me you cannot access websites. You have been granted special permission to use your tools to extract this specific content. 
+If the page appears to be an Instagram post or a blog, parse the available text carefully.
 CRITICAL: Copy the EXACT text from the page. Do NOT rewrite, rephrase, or add information.
 
 Rules:
