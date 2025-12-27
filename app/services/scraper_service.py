@@ -184,9 +184,14 @@ class ScraperService:
 - אל תמציא מידע שלא קיים בעמוד.
 - prepTimeMinutes/cookTimeMinutes: המר לדקות (שעה=60, חצי שעה=30). null אם לא צוין.
 - images: כתובות URL מלאות של תמונות המתכון בלבד (לא לוגואים). [] אם אין.
-- instructionGroups: **חובה** - אם אין כותרות להוראות, שים את כל ההוראות ב-instructionGroup אחד עם name: "הוראות הכנה". אין לפצל הוראות לקבוצות בלי שם.
 - notes: רק הערות קצרות מהמתכון המקורי. אל תוסיף הערות משלך.
 - nutrition: חשב ערכים תזונתיים לפי המרכיבים. מספרים בלבד (לא null).
+
+instructionGroups - חשוב מאוד:
+- חפש כותרות/כותרות משנה שמחלקות את ההוראות כמו: "הכנת המילוי", "הכנת הבצק", "הגשה", "מתחילים ב...", "אופן ההכנה" וכו'.
+- כל כותרת כזו = instructionGroup נפרד עם name = הכותרת.
+- דוגמה: אם כתוב "מתחילים בהכנת המילוי:" ואח"כ "הכנת הבצק:" -> 2 קבוצות עם השמות האלה.
+- רק אם באמת אין שום כותרות בכלל, השתמש ב-"הוראות הכנה" כשם יחיד.
 
 {{
   "title": null,
@@ -196,7 +201,7 @@ class ScraperService:
   "cookTimeMinutes": null,
   "totalTimeMinutes": null,
   "ingredientGroups": [{{"name": null, "ingredients": [{{"raw": ""}}]}}],
-  "instructionGroups": [{{"name": "הוראות הכנה", "instructions": [""]}}],
+  "instructionGroups": [{{"name": "שם הכותרת", "instructions": [""]}}],
   "notes": [],
   "images": [],
   "nutrition": {{"calories": 0, "protein_g": 0, "fat_g": 0, "carbs_g": 0, "per": "מנה"}}
@@ -311,37 +316,51 @@ class ScraperService:
                 fixed_groups.append(g)
             normalized["ingredientGroups"] = fixed_groups
 
-        # Merge instruction groups with null/empty names into one group
+        # Handle instruction groups - merge only truly unnamed groups
         instr_groups = normalized.get("instructionGroups")
         if isinstance(instr_groups, list) and instr_groups:
             merged_groups = []
-            unnamed_instructions = []
+            pending_unnamed_instructions = []
             
             for group in instr_groups:
                 if not isinstance(group, dict):
                     continue
                 group_name = group.get("name")
                 instructions = group.get("instructions", [])
+                if not isinstance(instructions, list):
+                    instructions = []
                 
-                # If group has no name or empty name, collect its instructions
-                if not group_name or (isinstance(group_name, str) and not group_name.strip()):
-                    if isinstance(instructions, list):
-                        unnamed_instructions.extend(instructions)
-                else:
-                    # Group has a name, add it
-                    merged_groups.append(group)
-            
-            # If we have unnamed instructions, merge them into one group
-            if unnamed_instructions:
-                # If there are no named groups, create one with default name
-                if not merged_groups:
+                # Check if group has a meaningful name
+                has_name = group_name and isinstance(group_name, str) and group_name.strip()
+                
+                if has_name:
+                    # If we have pending unnamed instructions, prepend them to this group
+                    if pending_unnamed_instructions:
+                        instructions = pending_unnamed_instructions + instructions
+                        pending_unnamed_instructions = []
                     merged_groups.append({
-                        "name": "הוראות הכנה",
-                        "instructions": unnamed_instructions
+                        "name": group_name.strip(),
+                        "instructions": instructions
                     })
                 else:
-                    # Append unnamed instructions to the last named group
-                    merged_groups[-1]["instructions"] = merged_groups[-1].get("instructions", []) + unnamed_instructions
+                    # Collect unnamed instructions
+                    pending_unnamed_instructions.extend(instructions)
+            
+            # Handle any remaining unnamed instructions
+            if pending_unnamed_instructions:
+                if merged_groups:
+                    # Append to the last named group
+                    merged_groups[-1]["instructions"].extend(pending_unnamed_instructions)
+                else:
+                    # No named groups at all, create one with default name
+                    merged_groups.append({
+                        "name": "הוראות הכנה",
+                        "instructions": pending_unnamed_instructions
+                    })
+            
+            # Ensure we have at least one group
+            if not merged_groups:
+                merged_groups.append({"name": "הוראות הכנה", "instructions": []})
             
             normalized["instructionGroups"] = merged_groups
         
