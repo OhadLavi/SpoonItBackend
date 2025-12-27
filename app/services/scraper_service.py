@@ -175,32 +175,29 @@ class ScraperService:
 
     def _build_url_extraction_prompt(self, url: str) -> str:
         """Build prompt for recipe extraction from URL."""
-        return f"""חלץ מתכון מ-{url}
+        return f"""Extract recipe from: {url}
 
-**חשוב מאוד: העתק טקסט מילה במילה מהעמוד. אל תשכתב, אל תשנה, אל תוסיף מידע.**
+CRITICAL: Copy the EXACT text from the page. Do NOT rewrite, rephrase, or add information.
 
-מרכיבים:
-- העתק **כל** מרכיב בדיוק כמו שכתוב בעמוד
-- אל תדלג על אף מרכיב
-- שמור כמויות ויחידות בדיוק כמו שכתובות
+Rules:
+1. Ingredients: Copy EVERY ingredient EXACTLY as written on the page
+   - Include ALL ingredients, don't skip any
+   - Keep quantities and units EXACTLY as shown
+   - Example: If page says "חצי מגש בצל מטוגן של דורות" -> copy "חצי מגש בצל מטוגן של דורות"
 
-הוראות:
-- העתק **כל** הוראה בדיוק כמו שכתובה
-- אל תכתוב מחדש, אל תפרט, אל תסביר
-- שמור כותרות בדיוק כמו שמופיעות: "הכנת המילוי", "הכנת הבצק", "הגשה" וכו'
-- אם אין כותרות - שים הכל תחת "הוראות הכנה"
+2. Instructions: Copy EVERY instruction EXACTLY as written
+   - Don't rewrite or elaborate
+   - Don't add details not in original
+   - Keep section headers EXACTLY as they appear: "מתחילים בהכנת המילוי:", "הכנת הבצק:", "הגשה:"
+   - If no headers exist, use single group: "הוראות הכנה"
 
-זמנים:
-- prepTimeMinutes/cookTimeMinutes: בדקות. null אם לא כתוב
-- שעה=60, חצי שעה=30
+3. Times: Extract if mentioned (convert to minutes). null if not stated.
 
-הערות:
-- רק הערות שכתובות בעמוד
-- אל תוסיף הסברים משלך
+4. Notes: Only notes from the original page. Don't add your own.
 
-nutrition: חשב ערכים תזונתיים. מספרים בלבד.
+5. nutrition: Calculate based on ingredients. Numbers only.
 
-החזר JSON בלבד:
+Return ONLY JSON:
 {{
   "title": "",
   "language": "he",
