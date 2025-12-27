@@ -87,7 +87,7 @@ class ScraperService:
         if not response_text:
             raise ScrapingError("Gemini url_context returned empty response")
         
-        logger.debug(f"Gemini url_context full response text:\n{response_text}")
+        logger.info(f"Gemini url_context full response text:\n{response_text}")
         
         # Try to extract image URLs from response metadata if available
         image_urls_from_metadata = []
@@ -129,7 +129,7 @@ class ScraperService:
         if not response_text:
             raise ScrapingError("Gemini Google Search returned empty response")
         
-        logger.debug(f"Gemini Google Search full response text:\n{response_text}")
+        logger.info(f"Gemini Google Search full response text:\n{response_text}")
 
         return self._parse_and_validate_response(response_text, url, [])
 
