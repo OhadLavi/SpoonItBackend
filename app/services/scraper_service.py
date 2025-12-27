@@ -87,7 +87,7 @@ class ScraperService:
         if not response_text:
             raise ScrapingError("Gemini url_context returned empty response")
         
-        logger.info(f"Gemini url_context full response text:\n{response_text}")
+        logger.debug(f"Gemini url_context full response text:\n{response_text}")
         
         # Try to extract image URLs from response metadata if available
         image_urls_from_metadata = []
@@ -129,7 +129,7 @@ class ScraperService:
         if not response_text:
             raise ScrapingError("Gemini Google Search returned empty response")
         
-        logger.info(f"Gemini Google Search full response text:\n{response_text}")
+        logger.debug(f"Gemini Google Search full response text:\n{response_text}")
 
         return self._parse_and_validate_response(response_text, url, [])
 
@@ -145,11 +145,8 @@ class ScraperService:
         
         recipe_json = json.loads(json_text)
         
-        # Log raw data before normalization
-        raw_images = recipe_json.get('images')
-        raw_prep_time = recipe_json.get('prepTimeMinutes')
-        raw_cook_time = recipe_json.get('cookTimeMinutes')
-        logger.info(f"Raw data from Gemini (before normalization): images={raw_images} (type: {type(raw_images)}), prepTimeMinutes={raw_prep_time} (type: {type(raw_prep_time)}), cookTimeMinutes={raw_cook_time} (type: {type(raw_cook_time)})")
+        # Log raw data before normalization (debug level)
+        logger.debug(f"Raw data from Gemini: images={recipe_json.get('images')}, prepTimeMinutes={recipe_json.get('prepTimeMinutes')}, cookTimeMinutes={recipe_json.get('cookTimeMinutes')}")
         
         # Normalize recipe JSON
         normalized_recipe_json = self._normalize_recipe_json(recipe_json, source_url=url)
@@ -165,10 +162,8 @@ class ScraperService:
         prep_time = normalized_recipe_json.get('prepTimeMinutes')
         cook_time = normalized_recipe_json.get('cookTimeMinutes')
         logger.info(f"Parsed recipe: title='{normalized_recipe_json.get('title')}', ingredientGroups count={len(normalized_recipe_json.get('ingredientGroups', []))}, total ingredients={total_ingredients}, instructionGroups count={len(normalized_recipe_json.get('instructionGroups', []))}, images count={images_count}, prepTimeMinutes={prep_time}, cookTimeMinutes={cook_time}")
-        if images_count > 0:
-            logger.info(f"Extracted images: {normalized_recipe_json.get('images', [])}")
-        else:
-            logger.warning(f"No images extracted. Raw images field from Gemini: {recipe_json.get('images')}")
+        if images_count == 0:
+            logger.debug(f"No images extracted")
         
         recipe = Recipe(**normalized_recipe_json)
 
@@ -180,63 +175,19 @@ class ScraperService:
 
     def _build_url_extraction_prompt(self, url: str) -> str:
         """Build prompt for recipe extraction from URL."""
-        return f"""
-השתמש ב-URL עצמו: {url}
+        return f"""חלץ מתכון מ-URL: {url}
 
-חלץ את המתכון *בדיוק כפי שמופיע בעמוד*.
-החזר אובייקט JSON תקין בלבד בתבנית Recipe.
+החזר JSON בלבד. ללא הסברים.
 
-כללים נוקשים:
-- שמור על טקסט מדויק של המרכיבים כפי שמופיע בעמוד. אל תתרגם, אל תנרמל, אל תשנה יחידות/כמויות.
-- אל תמציא מרכיבים/שלבים שלא קיימים בעמוד.
-- אם מידע לא מופיע: null לשדות אופציונליים, [] לרשימות.
-- notes: כל טיפים/המלצות/הערות שמופיעים בעמוד.
+כללים:
+- טקסט מדויק של מרכיבים. אל תשנה יחידות/כמויות.
+- אל תמציא מידע שלא קיים בעמוד.
+- prepTimeMinutes/cookTimeMinutes: המר לדקות (שעה=60, חצי שעה=30). null אם לא צוין.
+- images: כתובות URL מלאות של תמונות המתכון בלבד (לא לוגואים). [] אם אין.
+- instructionGroups: **חובה** - אם אין כותרות להוראות, שים את כל ההוראות ב-instructionGroup אחד עם name: "הוראות הכנה". אין לפצל הוראות לקבוצות בלי שם.
+- notes: רק הערות קצרות מהמתכון המקורי. אל תוסיף הערות משלך.
+- nutrition: חשב ערכים תזונתיים לפי המרכיבים. מספרים בלבד (לא null).
 
-חשוב מאוד - זמני הכנה ובישול (prepTimeMinutes, cookTimeMinutes):
-- **חובה** - חלץ את זמני ההכנה והבישול מהעמוד.
-- חפש מידע על זמנים בטקסט: "זמן הכנה", "זמן בישול", "זמן אפייה", "דקות", "שעות", "דק'", "שעה" וכו'.
-- המר את כל הזמנים לדקות (minutes):
-  * אם כתוב "X דקות" או "X דק" -> X
-  * אם כתוב "X שעות" או "X שעה" -> X * 60
-  * אם כתוב "חצי שעה" -> 30
-  * אם כתוב "רבע שעה" -> 15
-  * אם כתוב "X שעות ו-Y דקות" -> (X * 60) + Y
-- prepTimeMinutes: זמן ההכנה (preparation time) בדקות. אם לא מופיע, null.
-- cookTimeMinutes: זמן הבישול/אפייה (cooking/baking time) בדקות. אם לא מופיע, null.
-- totalTimeMinutes: סכום של prepTimeMinutes + cookTimeMinutes. אם שניהם null, null.
-- דוגמאות:
-  * "60 דק" -> prepTimeMinutes: 60
-  * "כחצי שעה" -> cookTimeMinutes: 30
-  * "45 דקות הכנה, שעה בישול" -> prepTimeMinutes: 45, cookTimeMinutes: 60
-- images: **חובה** - חלץ את כל כתובות התמונות של המתכון מהעמוד. 
-  * חפש תמונות ב-HTML: תגיות <img> עם src או data-src, background-image ב-CSS, או כל מקור תמונה אחר בעמוד.
-  * החזר מערך של כתובות URL מלאות (http/https) של תמונות המתכון בלבד.
-  * אם כתובת התמונה היא יחסית (מתחילה ב-/), המר אותה לכתובת מלאה על בסיס ה-URL של העמוד.
-  * אם אין תמונות, החזר [] (לא null).
-  * חשוב: החזר רק תמונות של המתכון עצמו (מזון, בישול, הגשה), לא לוגואים, אייקונים או תמונות אחרות.
-  * דוגמה: אם יש תמונה בכתובת "/images/recipe.jpg" וה-URL הוא "https://example.com/recipe", החזר "https://example.com/images/recipe.jpg".
-
-חשוב מאוד - instructionGroups (חובה):
-- זהה בקפידה את כל הכותרות/כותרות משנה בעמוד שמחלקות את ההוראות (כמו "הכנת הבצק", "הכנת המילוי", "בישול", "הגשה" וכו').
-- כל כותרת שמופיעה לפני קבוצת הוראות חייבת להופיע בשדה "name" של ה-instructionGroup המתאים.
-- אם יש הוראות ללא כותרת מפורשת, אבל הן שייכות לכותרת הקודמת (למשל הוראות המשך של "הכנת הבצק"), אז תמזג אותן לתוך ה-instructionGroup הקודם עם הכותרת - אל תיצור instructionGroup חדש עם name: null.
-- כלל חשוב: לעולם אל תשאיר instructionGroup עם name: null. אם אין כותרת, תמזג את ההוראות לתוך הקבוצה הקודמת.
-- דוגמה: אם יש "הכנת הבצק" ואחר כך הוראות נוספות ללא כותרת שקשורות לבצק, הכל צריך להיות ב-instructionGroup אחד עם name: "הכנת הבצק".
-
-חשוב מאוד - nutrition (חובה למלא):
-- אתה חייב לחשב את הערכים התזונתיים. זה לא אופציונלי - אתה חייב למלא את כל השדות.
-- חשב את הערכים התזונתיים על בסיס כל המרכיבים והכמויות במתכון:
-  * סכום את הקלוריות מכל המרכיבים
-  * סכום את החלבון (גרם) מכל המרכיבים
-  * סכום את השומן (גרם) מכל המרכיבים
-  * סכום את הפחמימות (גרם) מכל המרכיבים
-- שדה "per" צריך להכיל את היחידה - בדרך כלל "מנה" או "מנה אחת" (לפי servings), או "100 גרם" אם רלוונטי.
-- אם יש ערכים תזונתיים מפורשים בעמוד, השתמש בהם. אם לא, חשב אותם בעצמך - זה חובה.
-- אל תשאיר null בערכים תזונתיים - תמיד מלא מספרים.
-
-החזר JSON בלבד. ללא markdown. ללא code blocks. ללא הסברים.
-
-תבנית:
 {{
   "title": null,
   "language": null,
@@ -245,20 +196,11 @@ class ScraperService:
   "cookTimeMinutes": null,
   "totalTimeMinutes": null,
   "ingredientGroups": [{{"name": null, "ingredients": [{{"raw": ""}}]}}],
-  "instructionGroups": [{{"name": "כותרת הסעיף או null אם אין", "instructions": [""]}}],
+  "instructionGroups": [{{"name": "הוראות הכנה", "instructions": [""]}}],
   "notes": [],
   "images": [],
-  "nutrition": {{
-    "calories": 0,
-    "protein_g": 0,
-    "fat_g": 0,
-    "carbs_g": 0,
-    "per": "מנה"
-  }}
-}}
-
-זכור: nutrition חייב להיות עם ערכים מספריים (לא null). חשב אותם על בסיס המרכיבים.
-""".strip()
+  "nutrition": {{"calories": 0, "protein_g": 0, "fat_g": 0, "carbs_g": 0, "per": "מנה"}}
+}}""".strip()
 
     def _extract_json_from_text(self, text: str) -> str:
         """Extract JSON object from text."""
@@ -349,15 +291,10 @@ class ScraperService:
                                 base_url = f"{urlparse(source_url).scheme}://{urlparse(source_url).netloc}"
                                 absolute_url = urljoin(base_url, img_url)
                                 valid_images.append(absolute_url)
-                                logger.info(f"Converted relative URL {img_url} to absolute URL {absolute_url}")
-                            except Exception as e:
-                                logger.warning(f"Failed to convert relative image URL {img_url}: {str(e)}")
-                        else:
-                            logger.warning(f"Skipping relative image URL (no source URL): {img_url}")
+                            except Exception:
+                                pass  # Skip failed URL conversions
             normalized["images"] = valid_images
         else:
-            # If images is not a list, set to empty list
-            logger.warning(f"Images field is not a list: {type(imgs)}, setting to empty list")
             normalized["images"] = []
 
         # tolerate ingredientGroups.ingredients as ["..."] instead of [{"raw": "..."}]
@@ -373,5 +310,62 @@ class ScraperService:
                     g["ingredients"] = [{"raw": x} for x in ingr if x.strip()]
                 fixed_groups.append(g)
             normalized["ingredientGroups"] = fixed_groups
+
+        # Merge instruction groups with null/empty names into one group
+        instr_groups = normalized.get("instructionGroups")
+        if isinstance(instr_groups, list) and instr_groups:
+            merged_groups = []
+            unnamed_instructions = []
+            
+            for group in instr_groups:
+                if not isinstance(group, dict):
+                    continue
+                group_name = group.get("name")
+                instructions = group.get("instructions", [])
+                
+                # If group has no name or empty name, collect its instructions
+                if not group_name or (isinstance(group_name, str) and not group_name.strip()):
+                    if isinstance(instructions, list):
+                        unnamed_instructions.extend(instructions)
+                else:
+                    # Group has a name, add it
+                    merged_groups.append(group)
+            
+            # If we have unnamed instructions, merge them into one group
+            if unnamed_instructions:
+                # If there are no named groups, create one with default name
+                if not merged_groups:
+                    merged_groups.append({
+                        "name": "הוראות הכנה",
+                        "instructions": unnamed_instructions
+                    })
+                else:
+                    # Append unnamed instructions to the last named group
+                    merged_groups[-1]["instructions"] = merged_groups[-1].get("instructions", []) + unnamed_instructions
+            
+            normalized["instructionGroups"] = merged_groups
+        
+        # Clean up notes - remove AI-generated explanatory notes
+        notes = normalized.get("notes")
+        if isinstance(notes, list):
+            cleaned_notes = []
+            skip_patterns = [
+                "המתכון המקורי צוין",
+                "נעשה שימוש",
+                "זמני הכנה ובישול לא צוינו",
+                "לא נמצא בטקסט",
+                "לא מופיע בעמוד",
+            ]
+            for note in notes:
+                if isinstance(note, str) and note.strip():
+                    # Skip AI-generated explanatory notes
+                    skip = False
+                    for pattern in skip_patterns:
+                        if pattern in note:
+                            skip = True
+                            break
+                    if not skip:
+                        cleaned_notes.append(note.strip())
+            normalized["notes"] = cleaned_notes
 
         return normalized
