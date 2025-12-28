@@ -280,7 +280,8 @@ class ScraperService:
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     tools=[{"url_context": {}}],
-                    response_mime_type="text/plain",
+                    response_mime_type="application/json",
+
                     temperature=0.0,
                 ),
             ),
@@ -300,7 +301,8 @@ class ScraperService:
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     tools=[types.Tool(google_search=types.GoogleSearch())],
-                    response_mime_type="text/plain",
+                    response_mime_type="application/json",
+
                     temperature=0.0,
                 ),
             ),
@@ -342,7 +344,8 @@ class ScraperService:
                 model=GEMINI_MODEL,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    response_mime_type="text/plain",
+                    response_mime_type="application/json",
+
                     temperature=0.0,
                 ),
             ),
@@ -402,12 +405,32 @@ class ScraperService:
     # Parsing
     # -------------------------
     def _parse_recipe_response(self, response: Any, url: str) -> Recipe:
-        if not response or not response.text or not response.text.strip():
-            logger.error(f"Gemini returned empty response for {url}")
+        if not response:
+            logger.error(f"Gemini returned None response for {url}")
+            raise ScrapingError("Gemini returned None response")
+
+        # Log finish reason if available
+        try:
+            candidate = response.candidates[0]
+            if hasattr(candidate, 'finish_reason'):
+                logger.info(f"Gemini finish reason for {url}: {candidate.finish_reason}")
+                
+            # If text is empty/missing, log detailed candidate info
+            if not response.text:
+                logger.error(f"Gemini returned empty text for {url}. Candidate: {candidate}")
+                # Check for safety ratings
+                if hasattr(candidate, 'safety_ratings'):
+                    logger.error(f"Safety ratings: {candidate.safety_ratings}")
+        except Exception as e:
+            logger.warning(f"Could not log detailed candidate info: {e}")
+
+        if not response.text or not response.text.strip():
+            logger.error(f"Gemini returned empty response text for {url}")
             raise ScrapingError("Gemini returned empty response")
         
         # Log raw response for debugging
         logger.info(f"Gemini Raw Text: {response.text}")
+
 
 
         json_text = extract_first_json_object(response.text)
