@@ -546,36 +546,83 @@ class ScraperService:
     # Prompts
     # -------------------------
     def _build_url_context_prompt(self, url: str) -> str:
+        schema = self._get_recipe_json_schema()
         return f"""
 השתמש ב-URL עצמו: {url}
 חלץ את המתכון בדיוק כפי שמופיע בעמוד.
-החזר JSON בלבד בתבנית Recipe.
+
+מבנה ה-JSON הנדרש (Schema):
+{schema}
+
+החזר JSON בלבד התואם בדיוק למבנה הנ"ל.
 
 חשוב מאוד:
-- instructionGroups: **חובה** - חלץ את כל ההוראות. חפש כותרות כמו "אופן ההכנה:", "הוראות הכנה", "איך להכין", "הכנה" וכו'. אם אין כותרות, שים הכל תחת "הוראות הכנה". חלק הוראות ארוכות למשפטים קצרים.
-- servings: מחרוזת (string), לא מספר. דוגמה: "4 מנות" או "2"
-- ingredientGroups: [{{"name": null, "ingredients": [{{"raw": "טקסט מלא של המרכיב"}}]}}]
-- ingredients: רשימה שטוחה של מחרוזות ["מרכיב 1", "מרכיב 2"]
-- nutrition: מספרים בלבד (לא "לא צוין"). אם לא ידוע: null או 0
+- title: חלץ את כותרת המתכון המדויקת.
+- instructionGroups: **חובה** - חלץ את כל ההוראות במלואן. חפש כותרות כמו "אופן ההכנה:", "הוראות הכנה", "איך להכין", "הכנה" וכו'. אם אין כותרות, שים הכל תחת "הוראות הכנה". חלק הוראות ארוכות למשפטים קצרים. אל תסכם ואל תקצר!
+- servings: מחרוזת (string). חפש במפורש כמות/יבול (למשל: "15 עוגיות" או "4 מנות"). אל תשאיר ריק אם מופיע בעמוד.
+- ingredients/ingredientGroups: חלץ את **כל** המרכיבים המופיעים בדף.
 
 אל תתרגם, אל תנרמל, אל תמציא.
 """
 
     def _build_google_search_prompt(self, url: str) -> str:
+        schema = self._get_recipe_json_schema()
         return f"""
 משימה: מצא וחלץ את המתכון המלא מה-URL הזה: {url}
-השתמש בכלי החיפוש (google_search) כדי למצוא את תוכן הדף, המרכיבים ואופן ההכנה.
-אם הדף הספציפי לא נגיש, נסה למצוא את אותו מתכון באתר או גרסה מטמון (cache).
+השתמש בכלי החיפוש (google_search) כדי למצוא את הפרטים הבאים בדף המקורי:
+1. כותרת המתכון (Title) - חובה!
+2. תיאור המתכון (Description).
+3. כמות מנות / יבול (Servings/Yield) - חפש ביטויים כמו "15 עוגיות", "4 מנות" וכו'. חובה!
+4. רשימת מרכיבים מלאה (Ingredients) - כל המרכיבים, ללא השמטות.
+5. הוראות הכנה מלאות (Instructions) - אל תקצר! הבא את כל השלבים.
 
-החזר JSON בלבד בתבנית Recipe.
+מבנה ה-JSON הנדרש (Schema):
+{schema}
+
+החזר JSON בלבד התואם בדיוק למבנה הנ"ל.
 
 חשוב מאוד:
-- instructionGroups: **חובה** - חלץ את כל ההוראות.
+- title: אל תשכח!
+- instructionGroups: **חובה** - חלץ את **כל** ההוראות שכתובות בדף. אל תסכם!
+- servings: אל תשכח! (למשל: "15-17 עוגיות")
 - ingredientGroups: חובה.
 - nutrition: אם קיים.
 
 אנא וודא שההוראות מלאות ולא קטועות.
 """
+
+    def _get_recipe_json_schema(self) -> str:
+        return """
+{
+  "title": "string (Required)",
+  "description": "string",
+  "servings": "string (Required, e.g. '15 cookies' or '4 servings')",
+  "prepTimeMinutes": "integer",
+  "cookTimeMinutes": "integer",
+  "totalTimeMinutes": "integer",
+  "ingredients": ["string (flat list of all ingredients)"],
+  "ingredientGroups": [
+    {
+      "name": "string (e.g. 'For the dough')",
+      "ingredients": [{"raw": "string (full text)"}]
+    }
+  ],
+  "instructionGroups": [
+    {
+      "name": "string (e.g. 'Preparation')",
+      "instructions": ["string (each step as a separate string)"]
+    }
+  ],
+  "nutrition": {
+    "calories": "number",
+    "protein_g": "number",
+    "fat_g": "number",
+    "carbs_g": "number"
+  }
+}
+"""
+
+
 
 
     def _build_text_prompt(self, url: str, text: str) -> str:
