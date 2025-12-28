@@ -315,6 +315,12 @@ class ScraperService:
 
         json_text = extract_first_json_object(response.text)
         data = json.loads(json_text)
+        
+        # Log raw response for debugging
+        logger.info(f"Gemini raw response for {url}: instructionGroups count={len(data.get('instructionGroups', []))}")
+        if data.get('instructionGroups'):
+            for i, group in enumerate(data.get('instructionGroups', [])):
+                logger.info(f"  Group {i}: name='{group.get('name')}', instructions count={len(group.get('instructions', []))}")
 
         # Normalize data to match Recipe model
         data = self._normalize_recipe_data(data)
@@ -412,6 +418,18 @@ class ScraperService:
             normalized["ingredientGroups"] = []
         if "instructionGroups" not in normalized:
             normalized["instructionGroups"] = []
+        elif isinstance(normalized["instructionGroups"], list):
+            # Ensure instructionGroups is not empty - if empty, create default
+            if not normalized["instructionGroups"]:
+                normalized["instructionGroups"] = [{"name": "הוראות הכנה", "instructions": []}]
+            # Ensure each group has instructions list
+            for group in normalized["instructionGroups"]:
+                if isinstance(group, dict):
+                    if "instructions" not in group or not isinstance(group["instructions"], list):
+                        group["instructions"] = []
+                    # Ensure name exists
+                    if "name" not in group or not group["name"]:
+                        group["name"] = "הוראות הכנה"
         if "notes" not in normalized:
             normalized["notes"] = []
         if "images" not in normalized:
@@ -428,7 +446,8 @@ class ScraperService:
 חלץ את המתכון בדיוק כפי שמופיע בעמוד.
 החזר JSON בלבד בתבנית Recipe.
 
-חשוב - פורמט:
+חשוב מאוד:
+- instructionGroups: **חובה** - חלץ את כל ההוראות. חפש כותרות כמו "אופן ההכנה:", "הוראות הכנה", "איך להכין", "הכנה" וכו'. אם אין כותרות, שים הכל תחת "הוראות הכנה". חלק הוראות ארוכות למשפטים קצרים.
 - servings: מחרוזת (string), לא מספר. דוגמה: "4 מנות" או "2"
 - ingredientGroups: [{{"name": null, "ingredients": [{{"raw": "טקסט מלא של המרכיב"}}]}}]
 - ingredients: רשימה שטוחה של מחרוזות ["מרכיב 1", "מרכיב 2"]
@@ -446,7 +465,8 @@ URL מקור: {url}
 
 חלץ מתכון והחזר JSON בלבד בתבנית Recipe.
 
-חשוב - פורמט:
+חשוב מאוד:
+- instructionGroups: **חובה** - חלץ את כל ההוראות. חפש כותרות כמו "אופן ההכנה:", "הוראות הכנה", "איך להכין", "הכנה" וכו'. אם ההוראות כתובות בפסקה אחת, חלק אותן למשפטים נפרדים. כל משפט = הוראה אחת. אם אין כותרות, שים הכל תחת "הוראות הכנה". דוגמה: אם כתוב "חותכים את החלומי... אופים במצב גריל... בקערה גדולה..." -> 3 הוראות נפרדות.
 - servings: מחרוזת (string), לא מספר. דוגמה: "4 מנות" או "2"
 - ingredientGroups: [{{"name": null, "ingredients": [{{"raw": "טקסט מלא של המרכיב"}}]}}]
 - ingredients: רשימה שטוחה של מחרוזות ["מרכיב 1", "מרכיב 2"]
