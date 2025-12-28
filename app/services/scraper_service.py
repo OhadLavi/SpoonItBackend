@@ -412,27 +412,75 @@ class ScraperService:
             logger.error(f"Gemini returned None response for {url}")
             raise ScrapingError("Gemini returned None response")
 
-        # Log finish reason if available
+        # Initialize response_text
+        response_text = None
+        
+        # Log finish reason if available and try to get text
         try:
-            candidate = response.candidates[0]
-            if hasattr(candidate, 'finish_reason'):
-                logger.info(f"Gemini finish reason for {url}: {candidate.finish_reason}")
+            candidate = response.candidates[0] if response.candidates else None
+            if candidate:
+                if hasattr(candidate, 'finish_reason'):
+                    logger.info(f"Gemini finish reason for {url}: {candidate.finish_reason}")
                 
-            # If text is empty/missing, log detailed candidate info
-            if not response.text:
-                logger.error(f"Gemini returned empty text for {url}. Candidate: {candidate}")
-                # Check for safety ratings
-                if hasattr(candidate, 'safety_ratings'):
-                    logger.error(f"Safety ratings: {candidate.safety_ratings}")
+                # Try to get text from different locations
+                response_text = getattr(response, 'text', None)
+                
+                # If response.text is empty, try candidate.content.parts
+                if not response_text and hasattr(candidate, 'content') and candidate.content:
+                    if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                        # Try to get text from parts
+                        text_parts = []
+                        for part in candidate.content.parts:
+                            if hasattr(part, 'text') and part.text:
+                                text_parts.append(part.text)
+                        if text_parts:
+                            response_text = '\n'.join(text_parts)
+                            logger.info(f"Gemini text found in candidate.content.parts for {url}")
+                
+                # Log the actual response text (even if empty)
+                if response_text:
+                    logger.info(f"=== GEMINI RESPONSE TEXT FOR {url} ===")
+                    logger.info(response_text)
+                    logger.info(f"=== END GEMINI RESPONSE TEXT ===")
+                else:
+                    # If text is empty/missing, log detailed candidate info
+                    logger.error(f"Gemini returned empty text for {url}")
+                    logger.error(f"Candidate: {candidate}")
+                    # Log full candidate structure
+                    logger.error(f"Full candidate structure: {repr(candidate)}")
+                    if hasattr(candidate, 'content'):
+                        logger.error(f"Candidate content: {repr(candidate.content)}")
+                        if hasattr(candidate.content, 'parts'):
+                            logger.error(f"Candidate content parts: {repr(candidate.content.parts)}")
+                            # Try to log each part individually
+                            for i, part in enumerate(candidate.content.parts):
+                                logger.error(f"  Part {i}: {repr(part)}")
+                    # Check for safety ratings
+                    if hasattr(candidate, 'safety_ratings'):
+                        logger.error(f"Safety ratings: {candidate.safety_ratings}")
         except Exception as e:
             logger.warning(f"Could not log detailed candidate info: {e}")
+            import traceback
+            logger.warning(f"Traceback: {traceback.format_exc()}")
 
-        if not response.text or not response.text.strip():
+        # Also log raw response object for debugging
+        try:
+            logger.info(f"=== GEMINI RAW RESPONSE OBJECT FOR {url} ===")
+            logger.info(f"Response type: {type(response)}")
+            logger.info(f"Response.text: {getattr(response, 'text', 'N/A')}")
+            logger.info(f"Response.candidates count: {len(response.candidates) if hasattr(response, 'candidates') else 'N/A'}")
+            logger.info(f"=== END GEMINI RAW RESPONSE OBJECT ===")
+        except Exception as e:
+            logger.warning(f"Could not log raw response object: {e}")
+
+        # Use the text we found (either from response.text or from parts)
+        if not response_text or not response_text.strip():
             logger.error(f"Gemini returned empty response text for {url}")
             raise ScrapingError("Gemini returned empty response")
         
-        # Log raw response for debugging
-        logger.info(f"Gemini Raw Text: {response.text}")
+        # Store the text back in response.text for compatibility with rest of code
+        if not getattr(response, 'text', None):
+            response.text = response_text
 
 
 
