@@ -250,9 +250,18 @@ class ScraperService:
             logger.info(f"[url_context] Trying url_context: {url}")
             return await self._extract_with_url_context(url)
         except Exception as e:
+            logger.warning(f"url_context failed: {e}, trying google_search")
+            try:
+                recipe = await self._extract_with_google_search(url)
+                # Verify we actually got instructions
+                if not recipe.instructionGroups or not recipe.instructionGroups[0].instructions:
+                    logger.warning("google_search returned empty instructions, trying Playwright fallback")
+                    raise ScrapingError("Empty instructions from google_search")
+                return recipe
+            except Exception as e2:
+                logger.warning(f"google_search failed (or returned empty): {e2}, trying Playwright text extraction")
+                return await self._extract_with_playwright(url)
 
-            logger.warning(f"url_context failed: {e}, trying Playwright text extraction")
-            return await self._extract_with_fallback(url)
 
 
     # -------------------------
@@ -277,7 +286,27 @@ class ScraperService:
 
         return self._parse_recipe_response(response, url)
 
-    async def _extract_with_fallback(self, url: str) -> Recipe:
+    async def _extract_with_google_search(self, url: str) -> Recipe:
+        prompt = self._build_url_context_prompt(url)
+        loop = asyncio.get_event_loop()
+
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                    response_mime_type="text/plain",
+                    temperature=0.0,
+                ),
+            ),
+        )
+
+        return self._parse_recipe_response(response, url)
+
+    async def _extract_with_playwright(self, url: str) -> Recipe:
+
         """
         Fallback method using Playwright to extract page text rather than the `google_search` tool
         (which often returns only snippets).
@@ -336,8 +365,13 @@ class ScraperService:
             # Actually, if social extract fails here, it essentially failed Playwright.
             # We can try one last ditch effort or just raise. 
             # Given we are already in _extract_social, let's just fail or try the fallback method which wraps the same logic.
+            # If Playwright fails (browser crash, etc.), fallback to generalized extraction (which is also Playwright based, but cleaner recursion)
+            # Actually, if social extract fails here, it essentially failed Playwright.
+            # We can try one last ditch effort or just raise. 
+            # Given we are already in _extract_social, let's just fail or try the fallback method which wraps the same logic.
             logger.warning(f"Playwright social extraction failed: {e}, attempting generic fallback")
-            return await self._extract_with_fallback(url)
+            return await self._extract_with_playwright(url)
+
 
         
         text = social.as_prompt_text()
