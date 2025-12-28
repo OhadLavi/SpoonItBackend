@@ -124,7 +124,7 @@ async def extract_social_text_headless(url: str, timeout_ms: int = 8000) -> Soci
             )
 
             page = await context.new_page()
-            page.set_default_timeout(5000)  # Reduced timeout
+            page.set_default_timeout(timeout_ms)
             
             # Block images, fonts, media to save memory
             async def route_handler(route):
@@ -250,8 +250,10 @@ class ScraperService:
             logger.info(f"[url_context] Trying url_context: {url}")
             return await self._extract_with_url_context(url)
         except Exception as e:
-            logger.warning(f"url_context failed: {e}, trying google_search")
-            return await self._extract_with_google_search(url)
+
+            logger.warning(f"url_context failed: {e}, trying Playwright text extraction")
+            return await self._extract_with_fallback(url)
+
 
     # -------------------------
     # Regular URLs
@@ -275,17 +277,39 @@ class ScraperService:
 
         return self._parse_recipe_response(response, url)
 
-    async def _extract_with_google_search(self, url: str) -> Recipe:
-        prompt = self._build_url_context_prompt(url)
-        loop = asyncio.get_event_loop()
+    async def _extract_with_fallback(self, url: str) -> Recipe:
+        """
+        Fallback method using Playwright to extract page text rather than the `google_search` tool
+        (which often returns only snippets).
+        Uses a generalized version of the `extract_social_text_headless` logic (now suitable for any site).
+        """
+        try:
+            # Reusing extract_social_text_headless as it does a generic body extraction
+            # We bump timeout slightly for general sites which might be heavier
+            content_data = await asyncio.wait_for(
+                extract_social_text_headless(url, timeout_ms=15000),
+                timeout=20.0
+            )
+        except Exception as e:
+            logger.error(f"Fallback Playwright extraction failed: {e}")
+            raise ScrapingError(f"Both url_context and fallback extraction failed for {url}") from e
 
+        # Convert extraction to text for the prompt
+        # We can reuse _build_text_prompt which takes raw text and asks for JSON
+        text = content_data.as_prompt_text()
+        if len(text.strip()) < 50:
+             # If we got almost nothing, it's likely blocked or empty
+             raise ScrapingError("Fallback extraction returned insufficient text.")
+
+        prompt = self._build_text_prompt(url, text)
+
+        loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None,
             lambda: self.client.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    tools=[types.Tool(google_search=types.GoogleSearch())],
                     response_mime_type="text/plain",
                     temperature=0.0,
                 ),
@@ -293,6 +317,7 @@ class ScraperService:
         )
 
         return self._parse_recipe_response(response, url)
+
 
     # -------------------------
     # Social URLs
@@ -307,9 +332,13 @@ class ScraperService:
         except asyncio.TimeoutError:
             raise ScrapingError("Social media extraction timed out after 15 seconds")
         except Exception as e:
-            # If Playwright fails (browser crash, etc.), fallback to Google Search
-            logger.warning(f"Playwright extraction failed: {e}, trying Google Search fallback")
-            return await self._extract_with_google_search(url)
+            # If Playwright fails (browser crash, etc.), fallback to generalized extraction (which is also Playwright based, but cleaner recursion)
+            # Actually, if social extract fails here, it essentially failed Playwright.
+            # We can try one last ditch effort or just raise. 
+            # Given we are already in _extract_social, let's just fail or try the fallback method which wraps the same logic.
+            logger.warning(f"Playwright social extraction failed: {e}, attempting generic fallback")
+            return await self._extract_with_fallback(url)
+
         
         text = social.as_prompt_text()
 
@@ -484,7 +513,8 @@ class ScraperService:
 
     def _build_text_prompt(self, url: str, text: str) -> str:
         return f"""
-יש לנו טקסט שחולץ מפוסט חברתי.
+יש לנו טקסט שחולץ מאתר (או רשת חברתית).
+
 URL מקור: {url}
 
 {text}
