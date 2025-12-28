@@ -28,6 +28,24 @@ RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 # Copy installed Python packages from builder
 COPY --from=builder /root/.local /home/appuser/.local
 
+# Install playwright browser dependencies (needed for headless browser support)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libdbus-1-3 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy application code
 COPY --chown=appuser:appuser . .
 
@@ -36,6 +54,10 @@ ENV PATH="/home/appuser/.local/bin:${PATH}"
 
 # Run as non-root
 USER appuser
+
+# Install playwright browsers (must be done as appuser)
+RUN playwright install chromium
+RUN playwright install-deps chromium || true
 
 # Expose port for Cloud Run
 EXPOSE 8080
