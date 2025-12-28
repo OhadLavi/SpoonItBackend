@@ -217,7 +217,7 @@ class ScraperService:
         if self._client is None:
             self._client = genai.Client(api_key=settings.gemini_api_key)
         return self._client
-
+    
     async def extract_recipe_from_url(self, url: str) -> Recipe:
         if is_social_url(url):
             logger.info(f"[social] Using headless browser for: {url}")
@@ -316,8 +316,108 @@ class ScraperService:
         json_text = extract_first_json_object(response.text)
         data = json.loads(json_text)
 
+        # Normalize data to match Recipe model
+        data = self._normalize_recipe_data(data)
+        
         data["source"] = url
         return Recipe(**data)
+    
+    def _normalize_recipe_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize recipe data from Gemini to match Recipe model."""
+        normalized = dict(data)
+        
+        # servings: convert int to string
+        if "servings" in normalized and normalized["servings"] is not None:
+            if isinstance(normalized["servings"], (int, float)):
+                normalized["servings"] = str(int(normalized["servings"]))
+            elif not isinstance(normalized["servings"], str):
+                normalized["servings"] = str(normalized["servings"])
+        
+        # ingredients: ensure it's a list of strings (for backward compatibility)
+        if "ingredients" in normalized:
+            if isinstance(normalized["ingredients"], list):
+                # Convert objects to strings if needed
+                flat_ingredients = []
+                for ing in normalized["ingredients"]:
+                    if isinstance(ing, str):
+                        flat_ingredients.append(ing)
+                    elif isinstance(ing, dict):
+                        # Convert object format to string
+                        parts = []
+                        if "quantity" in ing and ing["quantity"]:
+                            parts.append(str(ing["quantity"]))
+                        if "unit" in ing and ing["unit"]:
+                            parts.append(ing["unit"])
+                        if "name" in ing and ing["name"]:
+                            parts.append(ing["name"])
+                        flat_ingredients.append(" ".join(parts) if parts else str(ing))
+                    else:
+                        flat_ingredients.append(str(ing))
+                normalized["ingredients"] = flat_ingredients
+            else:
+                normalized["ingredients"] = []
+        else:
+            normalized["ingredients"] = []
+        
+        # ingredientGroups: ensure ingredients are in correct format [{"raw": "..."}]
+        if "ingredientGroups" in normalized and isinstance(normalized["ingredientGroups"], list):
+            for group in normalized["ingredientGroups"]:
+                if isinstance(group, dict) and "ingredients" in group:
+                    if isinstance(group["ingredients"], list):
+                        normalized_ingredients = []
+                        for ing in group["ingredients"]:
+                            if isinstance(ing, str):
+                                normalized_ingredients.append({"raw": ing})
+                            elif isinstance(ing, dict):
+                                if "raw" in ing:
+                                    normalized_ingredients.append(ing)
+                                else:
+                                    # Convert object format to raw string
+                                    parts = []
+                                    if "quantity" in ing and ing["quantity"]:
+                                        parts.append(str(ing["quantity"]))
+                                    if "unit" in ing and ing["unit"]:
+                                        parts.append(ing["unit"])
+                                    if "name" in ing and ing["name"]:
+                                        parts.append(ing["name"])
+                                    normalized_ingredients.append({"raw": " ".join(parts) if parts else str(ing)})
+                            else:
+                                normalized_ingredients.append({"raw": str(ing)})
+                        group["ingredients"] = normalized_ingredients
+        elif "ingredientGroups" not in normalized:
+            normalized["ingredientGroups"] = []
+        
+        # nutrition: convert string values to numbers or None
+        if "nutrition" in normalized and isinstance(normalized["nutrition"], dict):
+            nutrition = normalized["nutrition"]
+            for field in ["calories", "protein_g", "fat_g", "carbs_g"]:
+                if field in nutrition:
+                    value = nutrition[field]
+                    if isinstance(value, str):
+                        # Try to parse number, or set to None
+                        try:
+                            # Remove non-numeric characters except digits and decimal point
+                            cleaned = ''.join(c for c in value if c.isdigit() or c == '.')
+                            if cleaned:
+                                nutrition[field] = float(cleaned)
+                            else:
+                                nutrition[field] = None
+                        except (ValueError, TypeError):
+                            nutrition[field] = None
+                    elif not isinstance(value, (int, float)) and value is not None:
+                        nutrition[field] = None
+        
+        # Ensure required fields exist
+        if "ingredientGroups" not in normalized:
+            normalized["ingredientGroups"] = []
+        if "instructionGroups" not in normalized:
+            normalized["instructionGroups"] = []
+        if "notes" not in normalized:
+            normalized["notes"] = []
+        if "images" not in normalized:
+            normalized["images"] = []
+        
+        return normalized
 
     # -------------------------
     # Prompts
@@ -327,6 +427,13 @@ class ScraperService:
 השתמש ב-URL עצמו: {url}
 חלץ את המתכון בדיוק כפי שמופיע בעמוד.
 החזר JSON בלבד בתבנית Recipe.
+
+חשוב - פורמט:
+- servings: מחרוזת (string), לא מספר. דוגמה: "4 מנות" או "2"
+- ingredientGroups: [{{"name": null, "ingredients": [{{"raw": "טקסט מלא של המרכיב"}}]}}]
+- ingredients: רשימה שטוחה של מחרוזות ["מרכיב 1", "מרכיב 2"]
+- nutrition: מספרים בלבד (לא "לא צוין"). אם לא ידוע: null או 0
+
 אל תתרגם, אל תנרמל, אל תמציא.
 """
 
@@ -338,5 +445,12 @@ URL מקור: {url}
 {text}
 
 חלץ מתכון והחזר JSON בלבד בתבנית Recipe.
+
+חשוב - פורמט:
+- servings: מחרוזת (string), לא מספר. דוגמה: "4 מנות" או "2"
+- ingredientGroups: [{{"name": null, "ingredients": [{{"raw": "טקסט מלא של המרכיב"}}]}}]
+- ingredients: רשימה שטוחה של מחרוזות ["מרכיב 1", "מרכיב 2"]
+- nutrition: מספרים בלבד (לא "לא צוין"). אם לא ידוע: null או 0
+
 אל תמציא, אל תשנה, nutrition חובה.
 """
