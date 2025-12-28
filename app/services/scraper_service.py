@@ -557,10 +557,21 @@ class ScraperService:
 החזר JSON בלבד התואם בדיוק למבנה הנ"ל.
 
 חשוב מאוד:
-- title: חלץ את כותרת המתכון המדויקת.
-- instructionGroups: **חובה** - חלץ את כל ההוראות במלואן. חפש כותרות כמו "אופן ההכנה:", "הוראות הכנה", "איך להכין", "הכנה" וכו'. אם אין כותרות, שים הכל תחת "הוראות הכנה". חלק הוראות ארוכות למשפטים קצרים. אל תסכם ואל תקצר!
-- servings: מחרוזת (string). חפש במפורש כמות/יבול (למשל: "15 עוגיות" או "4 מנות"). אל תשאיר ריק אם מופיע בעמוד.
-- ingredients/ingredientGroups: חלץ את **כל** המרכיבים המופיעים בדף.
+1. **Instruction Groups (חובה):**
+   - חלץ את **כל** ההוראות במלואן. אל תעצור באמצע!
+   - חפש כותרות כמו "אופן ההכנה", "הוראות".
+   - וודא שההוראות מגיעות לסיום הגיוני (למשל: "מגישים", "בתיאבון").
+   - חלק הוראות ארוכות למשפטים נפרדים.
+
+2. **Servings (כמות מנות):**
+   - חפש במפורש כמות/יבול בסגנון: "10 עוגיות", "4 מנות", "המרכיבים ל-10".
+   - **זהירות:** אל תתבלבל עם קוטר תבנית (למשל "תבנית 24"). אם כתוב "המרכיבים ל 10", הכמות היא "10" (או "10 יחידות"). רק אם אין כמות אחרת, ציין את גודל התבנית.
+
+3. **Notes (הערות/טיפים):**
+   - חפש חלקים כמו "טיפים", "הערות", "הידעת?", "דגשים" וחלץ אותם לרשימת `notes`. זה חשוב!
+
+4. **Ingredients:**
+   - חלץ את **כל** המרכיבים המופיעים בדף.
 
 אל תתרגם, אל תנרמל, אל תמציא.
 """
@@ -570,11 +581,17 @@ class ScraperService:
         return f"""
 משימה: מצא וחלץ את המתכון המלא מה-URL הזה: {url}
 השתמש בכלי החיפוש (google_search) כדי למצוא את הפרטים הבאים בדף המקורי:
-1. כותרת המתכון (Title) - חובה!
-2. תיאור המתכון (Description).
-3. כמות מנות / יבול (Servings/Yield) - חפש ביטויים כמו "15 עוגיות", "4 מנות" וכו'. חובה!
-4. רשימת מרכיבים מלאה (Ingredients) - כל המרכיבים, ללא השמטות.
-5. הוראות הכנה מלאות (Instructions) - אל תקצר! הבא את כל השלבים.
+
+1. **Title (כותרת):** חובה.
+2. **Servings (מנות/יבול):**
+   - חפש כמות מופקת (למשל "15 עוגיות", "כמות ל-10 סועדים").
+   - העדף כמות פריטים על פני גודל תבנית. אם כתוב "10 יחידות" וגם "תבנית 24", בחר "10 יחידות".
+3. **Ingredients (מרכיבים):** כל המרכיבים, ללא השמטות.
+4. **Instructions (הוראות):**
+   - הבא את כל הטקסט המלא של ההוראות.
+   - אל תקצר ואל תסכם! חובה להביא את כל השלבים עד הסוף.
+   - וודא שהגעת לסוף המתכון.
+5. **Notes (הערות):** חפש טיפים והערות בסוף או בהתחלה וכלול אותם.
 
 מבנה ה-JSON הנדרש (Schema):
 {schema}
@@ -583,20 +600,20 @@ class ScraperService:
 
 חשוב מאוד:
 - title: אל תשכח!
-- instructionGroups: **חובה** - חלץ את **כל** ההוראות שכתובות בדף. אל תסכם!
-- servings: אל תשכח! (למשל: "15-17 עוגיות")
-- ingredientGroups: חובה.
-- nutrition: אם קיים.
+- instructionGroups: חלץ את **כל** ההוראות במלואן. אל תחסיר אף שלב.
+- servings: דייק בכמות (למשל: "15-17 עוגיות").
+- notes: כלול טיפים והערות.
 
 אנא וודא שההוראות מלאות ולא קטועות.
 """
+
 
     def _get_recipe_json_schema(self) -> str:
         return """
 {
   "title": "string (Required)",
-  "description": "string",
-  "servings": "string (Required, e.g. '15 cookies' or '4 servings')",
+  "description": "string (Optional)",
+  "servings": "string (Required, e.g. '15 cookies'. Prefer quantity over size)",
   "prepTimeMinutes": "integer",
   "cookTimeMinutes": "integer",
   "totalTimeMinutes": "integer",
@@ -610,9 +627,10 @@ class ScraperService:
   "instructionGroups": [
     {
       "name": "string (e.g. 'Preparation')",
-      "instructions": ["string (each step as a separate string)"]
+      "instructions": ["string (each step as a separate string). Must be complete."]
     }
   ],
+  "notes": ["string (Tips, Did you know, etc.)"],
   "nutrition": {
     "calories": "number",
     "protein_g": "number",
@@ -621,6 +639,8 @@ class ScraperService:
   }
 }
 """
+
+
 
 
 
