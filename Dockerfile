@@ -67,4 +67,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD python3 -c "import sys, httpx; sys.exit(0 if httpx.get('http://localhost:8080/health', timeout=3).status_code == 200 else 1)"
 
 # Start app with gunicorn (single-line CMD, JSON array)
-CMD ["gunicorn", "app.main:app", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8080", "--timeout", "120", "--graceful-timeout", "30", "--access-logfile", "-", "--error-logfile", "-"]
+CMD ["gunicorn", "app.main:app", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8080", "--timeout", "300", "--graceful-timeout", "60", "--access-logfile", "-", "--error-logfile", "-"]

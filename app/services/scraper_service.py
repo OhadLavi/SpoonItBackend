@@ -78,7 +78,7 @@ class SocialExtract:
         return clean_text("\n\n".join(parts))
 
 
-async def extract_social_text_headless(url: str, timeout_ms: int = 15000) -> SocialExtract:
+async def extract_social_text_headless(url: str, timeout_ms: int = 8000) -> SocialExtract:
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
@@ -120,7 +120,7 @@ async def extract_social_text_headless(url: str, timeout_ms: int = 15000) -> Soc
         )
 
         page = await context.new_page()
-        page.set_default_timeout(10000)  # Reduced timeout
+        page.set_default_timeout(5000)  # Reduced timeout
         
         # Block images, fonts, media to save memory
         async def route_handler(route):
@@ -131,14 +131,18 @@ async def extract_social_text_headless(url: str, timeout_ms: int = 15000) -> Soc
         
         await page.route("**/*", route_handler)
 
+        # Use asyncio timeout to prevent hanging
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=8000)
-        except PWTimeoutError:
+            await asyncio.wait_for(
+                page.goto(url, wait_until="domcontentloaded", timeout=5000),
+                timeout=6.0
+            )
+        except (PWTimeoutError, asyncio.TimeoutError):
             pass
 
         # Skip networkidle wait - too memory intensive, just wait a short time
         try:
-            await asyncio.sleep(1)  # Brief wait instead of networkidle
+            await asyncio.sleep(0.5)  # Brief wait instead of networkidle
         except Exception:
             pass
 
@@ -272,7 +276,15 @@ class ScraperService:
     # Social URLs
     # -------------------------
     async def _extract_social(self, url: str) -> Recipe:
-        social = await extract_social_text_headless(url)
+        # Wrap in timeout to prevent hanging
+        try:
+            social = await asyncio.wait_for(
+                extract_social_text_headless(url),
+                timeout=15.0  # Max 15 seconds for entire extraction
+            )
+        except asyncio.TimeoutError:
+            raise ScrapingError("Social media extraction timed out after 15 seconds")
+        
         text = social.as_prompt_text()
 
         if len(text.strip()) < 30:
