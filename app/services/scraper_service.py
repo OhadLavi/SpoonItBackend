@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 from google import genai
 from google.genai import types
-from playwright.sync_api import sync_playwright, TimeoutError as PWTimeoutError
+from playwright.async_api import async_playwright, TimeoutError as PWTimeoutError
 
 from app.config import settings
 from app.models.recipe import Recipe
@@ -78,14 +78,14 @@ class SocialExtract:
         return clean_text("\n\n".join(parts))
 
 
-def extract_social_text_headless(url: str, timeout_ms: int = 15000) -> SocialExtract:
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
+async def extract_social_text_headless(url: str, timeout_ms: int = 15000) -> SocialExtract:
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
             headless=True,
             args=["--no-sandbox", "--disable-dev-shm-usage"],
         )
 
-        context = browser.new_context(
+        context = await browser.new_context(
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -95,34 +95,35 @@ def extract_social_text_headless(url: str, timeout_ms: int = 15000) -> SocialExt
             viewport={"width": 1280, "height": 720},
         )
 
-        page = context.new_page()
+        page = await context.new_page()
         page.set_default_timeout(timeout_ms)
 
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
         except PWTimeoutError:
             pass
 
         try:
-            page.wait_for_load_state("networkidle", timeout=5000)
+            await page.wait_for_load_state("networkidle", timeout=5000)
         except Exception:
             pass
 
-        def get_meta(prop: str = "", name: str = "") -> str:
+        async def get_meta(prop: str = "", name: str = "") -> str:
             try:
                 sel = f'meta[property="{prop}"]' if prop else f'meta[name="{name}"]'
                 loc = page.locator(sel)
-                if loc.count() > 0:
-                    return (loc.first.get_attribute("content") or "").strip()
+                count = await loc.count()
+                if count > 0:
+                    return (await loc.first.get_attribute("content") or "").strip()
             except Exception:
                 pass
             return ""
 
-        title = get_meta(prop="og:title") or page.title()
-        description = get_meta(prop="og:description") or get_meta(name="description")
+        title = await get_meta(prop="og:title") or await page.title()
+        description = await get_meta(prop="og:description") or await get_meta(name="description")
 
         try:
-            visible_text = page.locator("body").inner_text(timeout=3000)
+            visible_text = await page.locator("body").inner_text(timeout=3000)
         except Exception:
             visible_text = ""
 
@@ -145,8 +146,9 @@ def extract_social_text_headless(url: str, timeout_ms: int = 15000) -> SocialExt
         for sel in selectors:
             try:
                 loc = page.locator(sel)
-                if loc.count() > 0:
-                    t = (loc.first.inner_text(timeout=1500) or "").strip()
+                count = await loc.count()
+                if count > 0:
+                    t = (await loc.first.inner_text(timeout=1500) or "").strip()
                     if t:
                         caption_candidates.append(t)
             except Exception:
@@ -154,8 +156,8 @@ def extract_social_text_headless(url: str, timeout_ms: int = 15000) -> SocialExt
 
         caption = caption_candidates[0] if caption_candidates else ""
 
-        context.close()
-        browser.close()
+        await context.close()
+        await browser.close()
 
         return SocialExtract(
             title=title or "",
@@ -236,7 +238,7 @@ class ScraperService:
     # Social URLs
     # -------------------------
     async def _extract_social(self, url: str) -> Recipe:
-        social = extract_social_text_headless(url)
+        social = await extract_social_text_headless(url)
         text = social.as_prompt_text()
 
         if len(text.strip()) < 30:
