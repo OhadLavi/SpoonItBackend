@@ -425,7 +425,17 @@ class ScraperService:
     
     def _normalize_recipe_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize recipe data from Gemini to match Recipe model."""
+        # Handle wrapped responses (e.g. {"Recipe": {...}} or {"recipe": {...}})
+        if len(data) == 1 and isinstance(list(data.values())[0], dict):
+             key = list(data.keys())[0].lower()
+             inner = list(data.values())[0]
+             # If strictly one key, and inner has recipe-like fields, unwrap it
+             if "recipe" in key or "instructiongroups" in inner or "ingredients" in inner:
+                 logger.info(f"Unwrapping nested JSON response from key: {list(data.keys())[0]}")
+                 data = inner
+
         normalized = dict(data)
+
         
         # servings: convert int to string
         if "servings" in normalized and normalized["servings"] is not None:
