@@ -287,8 +287,9 @@ class ScraperService:
         return self._parse_recipe_response(response, url)
 
     async def _extract_with_google_search(self, url: str) -> Recipe:
-        prompt = self._build_url_context_prompt(url)
+        prompt = self._build_google_search_prompt(url)
         loop = asyncio.get_event_loop()
+
 
         response = await loop.run_in_executor(
             None,
@@ -400,7 +401,12 @@ class ScraperService:
     # -------------------------
     def _parse_recipe_response(self, response: Any, url: str) -> Recipe:
         if not response or not response.text or not response.text.strip():
+            logger.error(f"Gemini returned empty response for {url}")
             raise ScrapingError("Gemini returned empty response")
+        
+        # Log raw response for debugging (first 1000 chars)
+        logger.info(f"Gemini Raw Text (first 1000): {response.text[:1000]}")
+
 
         json_text = extract_first_json_object(response.text)
         data = json.loads(json_text)
@@ -544,6 +550,23 @@ class ScraperService:
 
 אל תתרגם, אל תנרמל, אל תמציא.
 """
+
+    def _build_google_search_prompt(self, url: str) -> str:
+        return f"""
+משימה: מצא וחלץ את המתכון המלא מה-URL הזה: {url}
+השתמש בכלי החיפוש (google_search) כדי למצוא את תוכן הדף, המרכיבים ואופן ההכנה.
+אם הדף הספציפי לא נגיש, נסה למצוא את אותו מתכון באתר או גרסה מטמון (cache).
+
+החזר JSON בלבד בתבנית Recipe.
+
+חשוב מאוד:
+- instructionGroups: **חובה** - חלץ את כל ההוראות.
+- ingredientGroups: חובה.
+- nutrition: אם קיים.
+
+אנא וודא שההוראות מלאות ולא קטועות.
+"""
+
 
     def _build_text_prompt(self, url: str, text: str) -> str:
         return f"""
