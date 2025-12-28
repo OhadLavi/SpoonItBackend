@@ -280,7 +280,8 @@ class ScraperService:
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     tools=[{"url_context": {}}],
-                    response_mime_type="application/json",
+                    response_mime_type="text/plain",
+
 
                     temperature=0.0,
                 ),
@@ -301,7 +302,9 @@ class ScraperService:
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     tools=[types.Tool(google_search=types.GoogleSearch())],
-                    response_mime_type="application/json",
+                    response_mime_type="text/plain",
+
+
 
                     temperature=0.0,
                 ),
