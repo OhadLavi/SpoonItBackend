@@ -404,8 +404,8 @@ class ScraperService:
             logger.error(f"Gemini returned empty response for {url}")
             raise ScrapingError("Gemini returned empty response")
         
-        # Log raw response for debugging (first 1000 chars)
-        logger.info(f"Gemini Raw Text (first 1000): {response.text[:1000]}")
+        # Log raw response for debugging
+        logger.info(f"Gemini Raw Text: {response.text}")
 
 
         json_text = extract_first_json_object(response.text)
