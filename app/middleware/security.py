@@ -10,13 +10,29 @@ from app.config import settings
 
 def setup_cors(app: ASGIApp) -> None:
     """Setup CORS middleware."""
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins_list,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # Get allowed origins
+    origins = settings.cors_origins_list
+    
+    # If wildcard is used, we can't use credentials (CORS security restriction)
+    # So we'll allow all origins without credentials, or use explicit list with credentials
+    if origins == ["*"]:
+        # Wildcard: no credentials allowed
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=False,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    else:
+        # Explicit origins: credentials allowed
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
 
 def setup_compression(app: ASGIApp) -> None:

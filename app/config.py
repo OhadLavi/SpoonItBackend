@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     rate_limit_per_hour: int = 100
 
     # CORS
-    cors_origins: str = "*"  # Comma-separated origins or "*" for all
+    cors_origins: str = "*"  # Comma-separated origins or "*" for all (e.g., "http://localhost:3000,http://localhost:52300")
 
     # Gemini Settings
     gemini_model: str = "gemini-2.5-flash-lite"
