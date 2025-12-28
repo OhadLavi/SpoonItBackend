@@ -82,7 +82,29 @@ async def extract_social_text_headless(url: str, timeout_ms: int = 15000) -> Soc
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-software-rasterizer",
+                "--disable-extensions",
+                "--disable-background-networking",
+                "--disable-background-timer-throttling",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-breakpad",
+                "--disable-component-extensions-with-background-pages",
+                "--disable-features=TranslateUI",
+                "--disable-ipc-flooding-protection",
+                "--disable-renderer-backgrounding",
+                "--disable-sync",
+                "--metrics-recording-only",
+                "--mute-audio",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--no-pings",
+                "--no-zygote",
+                "--single-process",  # Reduces memory by running in single process
+            ],
         )
 
         context = await browser.new_context(
@@ -92,19 +114,31 @@ async def extract_social_text_headless(url: str, timeout_ms: int = 15000) -> Soc
                 "Chrome/123.0.0.0 Safari/537.36"
             ),
             locale="he-IL",
-            viewport={"width": 1280, "height": 720},
+            viewport={"width": 800, "height": 600},  # Smaller viewport
+            java_script_enabled=True,
+            ignore_https_errors=True,
         )
 
         page = await context.new_page()
-        page.set_default_timeout(timeout_ms)
+        page.set_default_timeout(10000)  # Reduced timeout
+        
+        # Block images, fonts, media to save memory
+        async def route_handler(route):
+            if route.request.resource_type in ["image", "font", "media", "stylesheet"]:
+                await route.abort()
+            else:
+                await route.continue_()
+        
+        await page.route("**/*", route_handler)
 
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            await page.goto(url, wait_until="domcontentloaded", timeout=8000)
         except PWTimeoutError:
             pass
 
+        # Skip networkidle wait - too memory intensive, just wait a short time
         try:
-            await page.wait_for_load_state("networkidle", timeout=5000)
+            await asyncio.sleep(1)  # Brief wait instead of networkidle
         except Exception:
             pass
 
