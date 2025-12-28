@@ -39,8 +39,8 @@ class Recipe(BaseModel):
 
     id: Optional[str] = Field(None, description="Recipe ID (null for extracted recipes)")
     title: Optional[str] = Field(None, description="Recipe title")
-    description: Optional[str] = Field(None, description="Recipe description")
     source: Optional[str] = Field(None, description="Source URL or identifier")
+
     language: Optional[str] = Field(None, description="Language code (e.g., 'he', 'en')")
     servings: Optional[str] = Field(None, description="Number of servings")
     prepTimeMinutes: Optional[int] = Field(None, description="Preparation time in minutes")
@@ -69,8 +69,8 @@ class Recipe(BaseModel):
             "example": {
                 "id": None,
                 "title": "רולדת טירמיסו יפיפייה",
-                "description": "רולדת טירמיסו/רולדה אחת. מתכון רולדה בסגנון טירמיסו עם קרם מסקרפונה.",
                 "source": "https://kerenagam.co.il/רולדת-טירמיסו-יפיפייה/",
+
                 "language": "he",
                 "servings": "רולדה אחת",
                 "prepTimeMinutes": None,

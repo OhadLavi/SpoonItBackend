@@ -61,16 +61,15 @@ def clean_text(s: str) -> str:
 @dataclass
 class SocialExtract:
     title: str
-    description: str
     caption: str
     visible_text: str
+
 
     def as_prompt_text(self) -> str:
         parts = []
         if self.title:
             parts.append(f"TITLE META:\n{self.title}")
-        if self.description:
-            parts.append(f"DESCRIPTION META:\n{self.description}")
+
         if self.caption:
             parts.append(f"CAPTION:\n{self.caption}")
         if self.visible_text:
@@ -162,7 +161,10 @@ async def extract_social_text_headless(url: str, timeout_ms: int = 8000) -> Soci
                 return ""
 
             title = await get_meta(prop="og:title") or await page.title()
-            description = await get_meta(prop="og:description") or await get_meta(name="description")
+            
+            # description removed as per request
+            description = ""
+
 
             # Get visible text (simplified to avoid crashes)
             try:
@@ -212,19 +214,19 @@ async def extract_social_text_headless(url: str, timeout_ms: int = 8000) -> Soci
 
             return SocialExtract(
                 title=title or "",
-                description=description or "",
                 caption=caption or "",
                 visible_text=visible_text or "",
             )
+
     except Exception as e:
         # If browser crashes, return minimal data and let fallback handle it
         logger.warning(f"Playwright browser crashed: {e}, returning minimal extract")
         return SocialExtract(
             title="",
-            description="",
             caption="",
             visible_text="",
         )
+
 
 
 # =========================================================
@@ -548,72 +550,79 @@ class ScraperService:
     def _build_url_context_prompt(self, url: str) -> str:
         schema = self._get_recipe_json_schema()
         return f"""
-השתמש ב-URL עצמו: {url}
-חלץ את המתכון בדיוק כפי שמופיע בעמוד.
+Use the URL itself: {url}
+Extract the recipe strictly as it appears on the page.
 
-מבנה ה-JSON הנדרש (Schema):
+Required JSON Structure (Schema):
 {schema}
 
-החזר JSON בלבד התואם בדיוק למבנה הנ"ל.
+Return JSON ONLY matching exactly the above structure.
 
-חשוב מאוד:
-1. **Instruction Groups (חובה):**
-   - חלץ את **כל** ההוראות במלואן. אל תעצור באמצע!
-   - חפש כותרות כמו "אופן ההכנה", "הוראות".
-   - וודא שההוראות מגיעות לסיום הגיוני (למשל: "מגישים", "בתיאבון").
-   - חלק הוראות ארוכות למשפטים נפרדים.
+Critical Instructions:
+1. **Instruction Groups (MANDATORY):**
+   - Extract **ALL** instructions fully. Do not stop in the middle!
+   - Look for headers like "Preparation", "Instructions", "אופן הכנה".
+   - Verify that the instructions reach a logical conclusion (e.g., "Serve", "בתיאבון").
+   - Split long instructions into separate sentences.
 
-2. **Servings (כמות מנות):**
-   - חפש במפורש כמות/יבול בסגנון: "10 עוגיות", "4 מנות", "המרכיבים ל-10".
-   - **זהירות:** אל תתבלבל עם קוטר תבנית (למשל "תבנית 24"). אם כתוב "המרכיבים ל 10", הכמות היא "10" (או "10 יחידות"). רק אם אין כמות אחרת, ציין את גודל התבנית.
+2. **Servings (Yield/Quantity):**
+   - Explicitly look for a quantity/yield statement.
+   - Examples to look for: "10 cookies", "4 servings", "המרכיבים ל-10".
+   - **CAUTION:** Do NOT confuse with pan size (e.g., "Size 24"). If it says "Ingredients for 10" (המרכיבים ל 10), the quantity is "10" (or "10 items"). Only if no other quantity exists, mention the pan size.
 
-3. **Notes (הערות/טיפים):**
-   - חפש חלקים כמו "טיפים", "הערות", "הידעת?", "דגשים" וחלץ אותם לרשימת `notes`. זה חשוב!
+3. **Notes:**
+   - Look for sections like "Tips", "Notes", "Did you know?", "Points to note" (טיפים, הערות, הידעת) and extract them into the `notes` list.
 
 4. **Ingredients:**
-   - חלץ את **כל** המרכיבים המופיעים בדף.
+   - Extract **ALL** ingredients appearing on the page.
 
-אל תתרגם, אל תנרמל, אל תמציא.
+Do not translate (unless it's to English if requested, but keep original text mostly), do not normalize, do not invent.
 """
+
 
     def _build_google_search_prompt(self, url: str) -> str:
         schema = self._get_recipe_json_schema()
         return f"""
-משימה: מצא וחלץ את המתכון המלא מה-URL הזה: {url}
-השתמש בכלי החיפוש (google_search) כדי למצוא את הפרטים הבאים בדף המקורי:
+Task: Find and extract the full recipe from this URL: {url}
+Use the search tool (google_search) to find the following details:
 
-1. **Title (כותרת):** חובה.
-2. **Servings (מנות/יבול):**
-   - חפש כמות מופקת (למשל "15 עוגיות", "כמות ל-10 סועדים").
-   - העדף כמות פריטים על פני גודל תבנית. אם כתוב "10 יחידות" וגם "תבנית 24", בחר "10 יחידות".
-3. **Ingredients (מרכיבים):** כל המרכיבים, ללא השמטות.
-4. **Instructions (הוראות):**
-   - הבא את כל הטקסט המלא של ההוראות.
-   - אל תקצר ואל תסכם! חובה להביא את כל השלבים עד הסוף.
-   - וודא שהגעת לסוף המתכון.
-5. **Notes (הערות):** חפש טיפים והערות בסוף או בהתחלה וכלול אותם.
+1. **Title:** Required.
+2. **Servings (Yield/Quantity):**
+   - Look for produced quantity (e.g., "15 cookies", "4 servings", "15 עוגיות").
+   - Prefer item quantity over pan size.
+3. **Ingredients:** All ingredients, no omissions.
+4. **Instructions:**
+   - Bring the full text of all instructions.
+   - **MANDATORY:** Find the full, non-truncated text. If the text in the search result is truncated ("..."), try to find another source or the continuation on the page.
+   - Do not summarize! Bring all steps until the end.
+   - Verify you reached the end of the recipe (e.g., "Serve", "Bon Appetit", "בתיאבון").
+5. **Notes:**
+   - Search for tips, notes, and highlights (usually at the end of the recipe), e.g., "Tips", "Notes", "טיפים".
 
-מבנה ה-JSON הנדרש (Schema):
+Required JSON Structure (Schema):
 {schema}
 
-החזר JSON בלבד התואם בדיוק למבנה הנ"ל.
+Return JSON ONLY.
 
-חשוב מאוד:
-- title: אל תשכח!
-- instructionGroups: חלץ את **כל** ההוראות במלואן. אל תחסיר אף שלב.
-- servings: דייק בכמות (למשל: "15-17 עוגיות").
-- notes: כלול טיפים והערות.
+Critical Instructions:
+- title: Do not forget!
+- instructionGroups: Find the **FULL** text! Do not settle for truncated text.
+- servings: be precise (e.g., "15-17 cookies").
+- notes: Find tips at the end of the recipe.
 
-אנא וודא שההוראות מלאות ולא קטועות.
+Ensure instructions are complete and not truncated.
 """
+
+
+
 
 
     def _get_recipe_json_schema(self) -> str:
         return """
 {
   "title": "string (Required)",
-  "description": "string (Optional)",
   "servings": "string (Required, e.g. '15 cookies'. Prefer quantity over size)",
+
   "prepTimeMinutes": "integer",
   "cookTimeMinutes": "integer",
   "totalTimeMinutes": "integer",
@@ -647,20 +656,21 @@ class ScraperService:
 
     def _build_text_prompt(self, url: str, text: str) -> str:
         return f"""
-יש לנו טקסט שחולץ מאתר (או רשת חברתית).
+We have text extracted from a website (or social network).
 
-URL מקור: {url}
+Source URL: {url}
 
 {text}
 
-חלץ מתכון והחזר JSON בלבד בתבנית Recipe.
+Extract a recipe and return JSON ONLY in the Recipe format.
 
-חשוב מאוד:
-- instructionGroups: **חובה** - חלץ את כל ההוראות. חפש כותרות כמו "אופן ההכנה:", "הוראות הכנה", "איך להכין", "הכנה" וכו'. אם ההוראות כתובות בפסקה אחת, חלק אותן למשפטים נפרדים. כל משפט = הוראה אחת. אם אין כותרות, שים הכל תחת "הוראות הכנה". דוגמה: אם כתוב "חותכים את החלומי... אופים במצב גריל... בקערה גדולה..." -> 3 הוראות נפרדות.
-- servings: מחרוזת (string), לא מספר. דוגמה: "4 מנות" או "2"
-- ingredientGroups: [{{"name": null, "ingredients": [{{"raw": "טקסט מלא של המרכיב"}}]}}]
-- ingredients: רשימה שטוחה של מחרוזות ["מרכיב 1", "מרכיב 2"]
-- nutrition: מספרים בלבד (לא "לא צוין"). אם לא ידוע: null או 0
+Important:
+- instructionGroups: **MANDATORY** - Extract all instructions. Look for headers like "Instructions", "Preparation", "אופן הכנה". If instructions are in one paragraph, split them into separate sentences. Each sentence = one instruction. If no headers, put everything under "Preparation".
+- servings: string, not number. Example: "4 servings", "4 מנות".
+- ingredientGroups: [{{"name": null, "ingredients": [{{"raw": "Full text of ingredient"}}]}}]
+- ingredients: Flat list of strings ["ingredient 1", "ingredient 2"]
+- nutrition: Numbers only (not "not specified"). If unknown: null or 0.
 
-אל תמציא, אל תשנה, nutrition חובה.
+Do not invent, do not change, nutrition information is mandatory if available.
 """
+

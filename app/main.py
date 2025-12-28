@@ -205,7 +205,7 @@ async def extract_recipe_legacy(
         # New format: prepTimeMinutes, cookTimeMinutes (int), servings (str), notes (list)
         result = {
             "title": recipe.title or "",
-            "description": recipe.description or "",
+
             "ingredients": flat_ingredients,
             "instructions": flat_instructions,
             "prepTime": recipe.prepTimeMinutes or 0,
@@ -293,8 +293,8 @@ async def extract_recipe_from_image_legacy(
         # Convert new Recipe format to old format for backward compatibility
         result = {
             "title": recipe.title or "",
-            "description": recipe.description or "",
             "ingredients": flat_ingredients,
+
             "instructions": flat_instructions,
             "prepTime": recipe.prepTimeMinutes or 0,
             "cookTime": recipe.cookTimeMinutes or 0,

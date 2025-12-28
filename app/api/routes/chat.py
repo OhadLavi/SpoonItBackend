@@ -97,7 +97,7 @@ async def chat(
             f"Based on the user's request, generate a recipe in JSON format matching this exact structure:\n\n"
             f"{{\n"
             f'  "title": "Recipe title",\n'
-            f'  "description": "Brief recipe description",\n'
+
             f'  "language": "{chat_request.language}",\n'
             f'  "servings": "Number of servings",\n'
             f'  "prepTimeMinutes": number or null,\n'
