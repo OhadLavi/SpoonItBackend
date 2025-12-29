@@ -4,12 +4,16 @@ import asyncio
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
+import requests
+from bs4 import BeautifulSoup
 from google import genai
 from google.genai import types
+from markdownify import markdownify
 from playwright.async_api import async_playwright, TimeoutError as PWTimeoutError
 
 from app.config import settings
@@ -20,11 +24,80 @@ logger = logging.getLogger(__name__)
 
 SOCIAL_DOMAINS = ("instagram.com", "tiktok.com")
 GEMINI_MODEL = "gemini-2.5-flash-lite"
+BRIGHTDATA_API_URL = "https://api.brightdata.com/request"
 
 
 # =========================================================
 # Utils
 # =========================================================
+def find_main_content(soup: BeautifulSoup, selector: Optional[str] = None) -> Tuple[Any, str]:
+    """
+    Find the main content element in the HTML.
+    If selector is provided, use it. Otherwise, try common selectors.
+    Returns the element and the selector used.
+    """
+    # If selector is provided, try it first
+    if selector:
+        element = soup.select_one(selector)
+        if element:
+            return element, selector
+    
+    # Common selectors to try (in order of preference)
+    common_selectors = [
+        "main",
+        "article",
+        "[role='main']",
+        ".content",
+        "#content",
+        ".main-content",
+        "#main-content",
+        ".post-content",
+        ".entry-content",
+        ".recipe-content",
+        "#recipe",
+        ".article-content",
+        "body > div.container",
+        "body > div.wrapper > div.content",
+    ]
+    
+    # Try common selectors
+    for sel in common_selectors:
+        element = soup.select_one(sel)
+        if element:
+            # Check if element has substantial content (more than just a few words)
+            text_content = element.get_text(strip=True)
+            if len(text_content) > 100:  # At least 100 characters
+                return element, sel
+    
+    # Fallback: try to find the largest text-containing div
+    all_divs = soup.find_all(['div', 'section', 'article', 'main'])
+    best_element = None
+    max_text_length = 0
+    
+    for div in all_divs:
+        text = div.get_text(strip=True)
+        # Skip navigation, header, footer, sidebar
+        classes = div.get('class', [])
+        id_attr = div.get('id', '')
+        skip_keywords = ['nav', 'header', 'footer', 'sidebar', 'menu', 'widget']
+        
+        if any(keyword in str(classes).lower() or keyword in id_attr.lower() for keyword in skip_keywords):
+            continue
+        
+        if len(text) > max_text_length:
+            max_text_length = len(text)
+            best_element = div
+    
+    if best_element and max_text_length > 200:
+        return best_element, "auto-detected (largest content block)"
+    
+    # Last resort: use body
+    body = soup.find('body')
+    if body:
+        return body, "body (fallback)"
+    
+    # Ultimate fallback: entire document
+    return soup, "entire document (fallback)"
 def is_social_url(url: str) -> bool:
     domain = urlparse(url).netloc.lower()
     return any(d in domain for d in SOCIAL_DOMAINS)
@@ -247,114 +320,144 @@ class ScraperService:
             logger.info(f"[social] Using headless browser for: {url}")
             return await self._extract_social(url)
 
-        # Regular website
+        # Regular website - use BrightData API approach
+        logger.info(f"[brightdata] Extracting recipe from: {url}")
+        return await self._extract_with_brightdata(url)
+
+
+
+    # -------------------------
+    # Regular URLs - BrightData API Approach
+    # -------------------------
+    async def _extract_with_brightdata(self, url: str) -> Recipe:
+        """
+        Extract recipe using BrightData API to fetch HTML, parse to markdown,
+        and send to Gemini with recipe schema.
+        """
+        start_time = time.time()
+        timings = {}
+        
+        # STEP 1: Fetch HTML using BrightData API
+        logger.info(f"Step 1: Fetching HTML from BrightData API for: {url}")
+        fetch_start = time.time()
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {settings.brightdata_api_key}"
+        }
+        
+        payload = {
+            "zone": "spoonit_unlocker_api",
+            "url": url,
+            "format": "raw"
+        }
+        
+        brightdata_start = time.time()
         try:
-            logger.info(f"[url_context] Trying url_context: {url}")
-            return await self._extract_with_url_context(url)
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: requests.post(BRIGHTDATA_API_URL, json=payload, headers=headers, timeout=30)
+            )
+            response.raise_for_status()
         except Exception as e:
-            logger.warning(f"url_context failed: {e}, trying google_search")
-            try:
-                recipe = await self._extract_with_google_search(url)
-                # Verify we actually got instructions
-                if not recipe.instructionGroups or not recipe.instructionGroups[0].instructions:
-                    logger.warning("google_search returned empty instructions, trying Playwright fallback")
-                    raise ScrapingError("Empty instructions from google_search")
-                return recipe
-            except Exception as e2:
-                logger.warning(f"google_search failed (or returned empty): {e2}, trying Playwright text extraction")
-                return await self._extract_with_playwright(url)
-
-
-
-    # -------------------------
-    # Regular URLs
-    # -------------------------
-    async def _extract_with_url_context(self, url: str) -> Recipe:
-        prompt = self._build_url_context_prompt(url)
+            logger.error(f"BrightData API request failed: {e}")
+            raise ScrapingError(f"Failed to fetch HTML from BrightData API: {e}") from e
+        
+        timings["brightdata_api"] = time.time() - brightdata_start
+        timings["html_fetch"] = time.time() - fetch_start
+        logger.info(f"BrightData API Time: {timings['brightdata_api']:.2f} seconds")
+        logger.info(f"Total HTML Fetch Time: {timings['html_fetch']:.2f} seconds")
+        
+        # STEP 2: Parse HTML and convert to Markdown
+        logger.info("Step 2: Parsing HTML and converting to Markdown")
+        parse_start = time.time()
+        
+        soup = BeautifulSoup(response.content, "html.parser")
+        
+        # Find main content (auto-detect)
+        main_element, used_selector = find_main_content(soup, None)
+        logger.info(f"Content selector used: {used_selector}")
+        
+        if main_element is None:
+            logger.warning("Could not find main content element, using entire body")
+            main_element = soup.find('body') or soup
+        
+        main_html = str(main_element)
+        main_markdown = markdownify(main_html)
+        
+        timings["html_parse"] = time.time() - parse_start
+        logger.info(f"Time to parse HTML and convert to Markdown: {timings['html_parse']:.2f} seconds")
+        
+        # STEP 3: Extract recipe data using Gemini API
+        logger.info("Step 3: Extracting recipe data with Gemini API")
+        gemini_start = time.time()
+        
+        prompt = self._build_markdown_extraction_prompt(url, main_markdown)
+        response_schema = self._get_recipe_response_schema()
+        
         loop = asyncio.get_event_loop()
-
-        response = await loop.run_in_executor(
-            None,
-            lambda: self.client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    tools=[{"url_context": {}}],
-                    response_mime_type="text/plain",
-
-
-                    temperature=0.0,
-                ),
-            ),
-        )
-
-        return self._parse_recipe_response(response, url)
-
-    async def _extract_with_google_search(self, url: str) -> Recipe:
-        prompt = self._build_google_search_prompt(url)
-        loop = asyncio.get_event_loop()
-
-
-        response = await loop.run_in_executor(
-            None,
-            lambda: self.client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    tools=[types.Tool(google_search=types.GoogleSearch())],
-                    response_mime_type="text/plain",
-
-
-
-                    temperature=0.0,
-                ),
-            ),
-        )
-
-        return self._parse_recipe_response(response, url)
-
-    async def _extract_with_playwright(self, url: str) -> Recipe:
-
-        """
-        Fallback method using Playwright to extract page text rather than the `google_search` tool
-        (which often returns only snippets).
-        Uses a generalized version of the `extract_social_text_headless` logic (now suitable for any site).
-        """
         try:
-            # Reusing extract_social_text_headless as it does a generic body extraction
-            # We bump timeout slightly for general sites which might be heavier
-            content_data = await asyncio.wait_for(
-                extract_social_text_headless(url, timeout_ms=15000),
-                timeout=20.0
+            gemini_response = await loop.run_in_executor(
+                None,
+                lambda: self.client.models.generate_content(
+                    model=GEMINI_MODEL,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=response_schema,
+                        temperature=0.0,
+                    ),
+                ),
             )
         except Exception as e:
-            logger.error(f"Fallback Playwright extraction failed: {e}")
-            raise ScrapingError(f"Both url_context and fallback extraction failed for {url}") from e
-
-        # Convert extraction to text for the prompt
-        # We can reuse _build_text_prompt which takes raw text and asks for JSON
-        text = content_data.as_prompt_text()
-        if len(text.strip()) < 50:
-             # If we got almost nothing, it's likely blocked or empty
-             raise ScrapingError("Fallback extraction returned insufficient text.")
-
-        prompt = self._build_text_prompt(url, text)
-
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: self.client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-
-                    temperature=0.0,
-                ),
-            ),
-        )
-
-        return self._parse_recipe_response(response, url)
+            logger.error(f"Gemini API extraction failed: {e}")
+            raise ScrapingError(f"Failed to extract recipe with Gemini: {e}") from e
+        
+        timings["gemini_api"] = time.time() - gemini_start
+        logger.info(f"Time for Gemini API extraction: {timings['gemini_api']:.2f} seconds")
+        
+        # STEP 4: Parse JSON response
+        logger.info("Step 4: Parsing JSON response")
+        parse_json_start = time.time()
+        
+        if not gemini_response or not gemini_response.text:
+            logger.error("Gemini returned empty response")
+            raise ScrapingError("Gemini returned empty response")
+        
+        recipe_raw_string = gemini_response.text.strip()
+        
+        # Try to extract JSON if wrapped in markdown code blocks
+        json_text = extract_first_json_object(recipe_raw_string)
+        
+        try:
+            recipe_data = json.loads(json_text)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON from Gemini response: {e}")
+            logger.error(f"Raw response text: {recipe_raw_string[:500]}...")  # Log first 500 chars
+            raise ScrapingError(f"Failed to parse recipe JSON: {e}") from e
+        
+        timings["json_parse"] = time.time() - parse_json_start
+        logger.info(f"Time for JSON parsing: {timings['json_parse']:.4f} seconds")
+        
+        # STEP 5: Calculate total time and log summary
+        timings["total"] = time.time() - start_time
+        
+        logger.info("="*60)
+        logger.info("TIMING SUMMARY:")
+        logger.info("="*60)
+        logger.info(f"BrightData API Time: {timings['brightdata_api']:.2f} seconds")
+        logger.info(f"Total HTML Fetch Time: {timings['html_fetch']:.2f} seconds")
+        logger.info(f"HTML Parse & Markdown Conversion Time: {timings['html_parse']:.2f} seconds")
+        logger.info(f"Gemini API Extraction Time: {timings['gemini_api']:.2f} seconds")
+        logger.info(f"JSON Parsing Time: {timings['json_parse']:.4f} seconds")
+        logger.info(f"Total Time: {timings['total']:.2f} seconds")
+        logger.info("="*60)
+        
+        # Normalize data to match Recipe model
+        recipe_data = self._normalize_recipe_data(recipe_data)
+        recipe_data["source"] = url
+        
+        return Recipe(**recipe_data)
 
 
     # -------------------------
@@ -370,16 +473,8 @@ class ScraperService:
         except asyncio.TimeoutError:
             raise ScrapingError("Social media extraction timed out after 15 seconds")
         except Exception as e:
-            # If Playwright fails (browser crash, etc.), fallback to generalized extraction (which is also Playwright based, but cleaner recursion)
-            # Actually, if social extract fails here, it essentially failed Playwright.
-            # We can try one last ditch effort or just raise. 
-            # Given we are already in _extract_social, let's just fail or try the fallback method which wraps the same logic.
-            # If Playwright fails (browser crash, etc.), fallback to generalized extraction (which is also Playwright based, but cleaner recursion)
-            # Actually, if social extract fails here, it essentially failed Playwright.
-            # We can try one last ditch effort or just raise. 
-            # Given we are already in _extract_social, let's just fail or try the fallback method which wraps the same logic.
-            logger.warning(f"Playwright social extraction failed: {e}, attempting generic fallback")
-            return await self._extract_with_playwright(url)
+            logger.error(f"Playwright social extraction failed: {e}")
+            raise ScrapingError(f"Social media extraction failed: {e}") from e
 
 
         
@@ -546,7 +641,7 @@ class ScraperService:
         else:
             normalized["ingredients"] = []
         
-        # ingredientGroups: ensure ingredients are in correct format [{"raw": "..."}]
+        # ingredientGroups: normalize to new structured format, preserve if already structured
         if "ingredientGroups" in normalized and isinstance(normalized["ingredientGroups"], list):
             for group in normalized["ingredientGroups"]:
                 if isinstance(group, dict) and "ingredients" in group:
@@ -554,20 +649,26 @@ class ScraperService:
                         normalized_ingredients = []
                         for ing in group["ingredients"]:
                             if isinstance(ing, str):
-                                normalized_ingredients.append({"raw": ing})
+                                # String format: convert to structured with raw
+                                normalized_ingredients.append({"name": ing, "raw": ing})
                             elif isinstance(ing, dict):
-                                if "raw" in ing:
+                                # Already an object - preserve structured format if it has 'name'
+                                if "name" in ing:
+                                    # New structured format - ensure it has required fields
+                                    normalized_ing = {
+                                        "name": ing.get("name", ""),
+                                        "quantity": ing.get("quantity"),
+                                        "unit": ing.get("unit"),
+                                        "preparation": ing.get("preparation"),
+                                        "raw": ing.get("raw")
+                                    }
+                                    normalized_ingredients.append(normalized_ing)
+                                elif "raw" in ing:
+                                    # Old format with just raw - keep it for backward compatibility
                                     normalized_ingredients.append(ing)
                                 else:
-                                    # Convert object format to raw string
-                                    parts = []
-                                    if "quantity" in ing and ing["quantity"]:
-                                        parts.append(str(ing["quantity"]))
-                                    if "unit" in ing and ing["unit"]:
-                                        parts.append(ing["unit"])
-                                    if "name" in ing and ing["name"]:
-                                        parts.append(ing["name"])
-                                    normalized_ingredients.append({"raw": " ".join(parts) if parts else str(ing)})
+                                    # Unknown format - convert to raw
+                                    normalized_ingredients.append({"raw": str(ing)})
                             else:
                                 normalized_ingredients.append({"raw": str(ing)})
                         group["ingredients"] = normalized_ingredients
@@ -621,16 +722,14 @@ class ScraperService:
     # -------------------------
     # Prompts
     # -------------------------
-    def _build_url_context_prompt(self, url: str) -> str:
-        schema = self._get_recipe_json_schema()
-        return f"""
-Use the URL itself: {url}
-Extract the recipe strictly as it appears on the page.
+    def _build_markdown_extraction_prompt(self, url: str, markdown_content: str) -> str:
+        """Build prompt for extracting recipe from markdown content."""
+        return f"""Extract recipe data from the content below. Respond with JSON matching the provided schema.
 
-Required JSON Structure (Schema):
-{schema}
+Source URL: {url}
 
-Return JSON ONLY matching exactly the above structure.
+CONTENT:
+{markdown_content}
 
 Critical Instructions:
 1. **Instruction Groups (MANDATORY):**
@@ -654,74 +753,70 @@ Do not translate (unless it's to English if requested, but keep original text mo
 """
 
 
-    def _build_google_search_prompt(self, url: str) -> str:
-        schema = self._get_recipe_json_schema()
-        return f"""
-Task: Find and extract the full recipe from this URL: {url}
-Use the search tool (google_search) to find the following details:
-
-1. **Title:** Required.
-2. **Servings (Yield/Quantity):**
-   - Look for produced quantity (e.g., "15 cookies", "4 servings", "15 עוגיות").
-   - Prefer item quantity over pan size.
-3. **Ingredients:** All ingredients, no omissions.
-4. **Instructions:**
-   - Bring the full text of all instructions.
-   - **MANDATORY:** Find the full, non-truncated text. If the text in the search result is truncated ("..."), try to find another source or the continuation on the page.
-   - Do not summarize! Bring all steps until the end.
-   - Verify you reached the end of the recipe (e.g., "Serve", "Bon Appetit", "בתיאבון").
-5. **Notes:**
-   - Search for tips, notes, and highlights (usually at the end of the recipe), e.g., "Tips", "Notes", "טיפים".
-
-Required JSON Structure (Schema):
-{schema}
-
-Return JSON ONLY.
-
-Critical Instructions:
-- title: Do not forget!
-- instructionGroups: Find the **FULL** text! Do not settle for truncated text.
-- servings: be precise (e.g., "15-17 cookies").
-- notes: Find tips at the end of the recipe.
-
-Ensure instructions are complete and not truncated.
-"""
 
 
 
-
-
-    def _get_recipe_json_schema(self) -> str:
-        return """
-{
-  "title": "string (Required)",
-  "servings": "string (Required, e.g. '15 cookies'. Prefer quantity over size)",
-
-  "prepTimeMinutes": "integer",
-  "cookTimeMinutes": "integer",
-  "totalTimeMinutes": "integer",
-  "ingredients": ["string (flat list of all ingredients)"],
-  "ingredientGroups": [
-    {
-      "name": "string (e.g. 'For the dough')",
-      "ingredients": [{"raw": "string (full text)"}]
-    }
-  ],
-  "instructionGroups": [
-    {
-      "name": "string (e.g. 'Preparation')",
-      "instructions": ["string (each step as a separate string). Must be complete."]
-    }
-  ],
-  "notes": ["string (Tips, Did you know, etc.)"],
-  "nutrition": {
-    "calories": "number",
-    "protein_g": "number",
-    "fat_g": "number",
-    "carbs_g": "number"
-  }
-}
-"""
+    def _get_recipe_response_schema(self) -> Dict[str, Any]:
+        """Get the recipe JSON schema from Pydantic model for Gemini responseSchema."""
+        # Get the JSON schema from the Recipe Pydantic model
+        schema = Recipe.model_json_schema()
+        
+        # Convert to the format expected by Gemini's responseSchema
+        # Remove Pydantic-specific fields and simplify
+        def clean_schema(s: Dict[str, Any]) -> Dict[str, Any]:
+            """Clean Pydantic JSON schema for Gemini responseSchema format."""
+            result: Dict[str, Any] = {}
+            
+            # Copy type
+            if "type" in s:
+                result["type"] = s["type"]
+            
+            # Handle properties
+            if "properties" in s:
+                result["properties"] = {}
+                for key, value in s["properties"].items():
+                    if isinstance(value, dict):
+                        cleaned = clean_schema(value)
+                        # Remove Pydantic-specific fields
+                        cleaned.pop("title", None)
+                        cleaned.pop("description", None)
+                        result["properties"][key] = cleaned
+                    else:
+                        result["properties"][key] = value
+            
+            # Handle items (for arrays)
+            if "items" in s:
+                if isinstance(s["items"], dict):
+                    result["items"] = clean_schema(s["items"])
+                else:
+                    result["items"] = s["items"]
+            
+            # Handle anyOf/oneOf for Optional fields
+            if "anyOf" in s:
+                # Find the non-null type and use it
+                for option in s["anyOf"]:
+                    if isinstance(option, dict) and option.get("type") != "null":
+                        cleaned = clean_schema(option)
+                        result.update(cleaned)
+                        break
+                # If we didn't find a non-null type, just use the first option
+                if "type" not in result and s["anyOf"]:
+                    if isinstance(s["anyOf"][0], dict):
+                        result.update(clean_schema(s["anyOf"][0]))
+            
+            # Copy required fields (but filter out optional ones)
+            if "required" in s:
+                result["required"] = s["required"]
+            
+            return result
+        
+        cleaned = clean_schema(schema)
+        # Remove top-level Pydantic metadata
+        cleaned.pop("title", None)
+        cleaned.pop("description", None)
+        cleaned.pop("$defs", None)
+        
+        return cleaned
 
 
 
@@ -741,7 +836,7 @@ Extract a recipe and return JSON ONLY in the Recipe format.
 Important:
 - instructionGroups: **MANDATORY** - Extract all instructions. Look for headers like "Instructions", "Preparation", "אופן הכנה". If instructions are in one paragraph, split them into separate sentences. Each sentence = one instruction. If no headers, put everything under "Preparation".
 - servings: string, not number. Example: "4 servings", "4 מנות".
-- ingredientGroups: [{{"name": null, "ingredients": [{{"raw": "Full text of ingredient"}}]}}]
+- ingredientGroups: [{{"name": null, "ingredients": [{{"quantity": "amount or null", "name": "ingredient name (required)", "unit": "unit of measurement or null", "preparation": "preparation notes or null", "raw": "original text or null"}}]}}]
 - ingredients: Flat list of strings ["ingredient 1", "ingredient 2"]
 - nutrition: Numbers only (not "not specified"). If unknown: null or 0.
 

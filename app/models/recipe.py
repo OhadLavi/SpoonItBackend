@@ -1,13 +1,17 @@
 """Recipe Pydantic models."""
 
 from typing import List, Optional
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 
 
 class Ingredient(BaseModel):
     """Single ingredient model."""
 
-    raw: str = Field(..., description="Raw ingredient text as it appears in the recipe")
+    quantity: Optional[str] = Field(None, description="Quantity/amount (e.g., '1', '2.5', '30')")
+    name: str = Field(..., description="Ingredient name")
+    unit: Optional[str] = Field(None, description="Unit of measurement (e.g., 'כוס', 'כפות', 'מ״ל', 'גרם')")
+    preparation: Optional[str] = Field(None, description="Preparation notes (e.g., 'chopped', 'diced', 'at room temperature')")
+    raw: Optional[str] = Field(None, description="Original raw ingredient text for reference")
 
 
 class IngredientGroup(BaseModel):
@@ -56,11 +60,8 @@ class Recipe(BaseModel):
         default_factory=list, description="Grouped instructions (e.g., 'הכנת הבצק', 'הגשה')"
     )
     notes: List[str] = Field(default_factory=list, description="Additional notes")
-    imageUrl: Optional[HttpUrl] = Field(None, description="Main recipe image URL")
-    images: List[str] = Field(default_factory=list, description="All recipe image URLs")
+    images: List[str] = Field(default_factory=list, description="Recipe image URLs")
     nutrition: Optional[Nutrition] = Field(None, description="Nutritional information")
-    createdAt: Optional[str] = Field(None, description="Creation timestamp (null for extracted)")
-    updatedAt: Optional[str] = Field(None, description="Update timestamp (null for extracted)")
 
     class Config:
         """Pydantic config."""
@@ -79,13 +80,40 @@ class Recipe(BaseModel):
                 "ingredientGroups": [
                     {
                         "name": "לבסיס",
-                        "ingredients": [{"raw": "30 בישקוטים"}, {"raw": "1 כוס קפה חזק"}],
+                        "ingredients": [
+                            {
+                                "quantity": "30",
+                                "name": "בישקוטים",
+                                "unit": None,
+                                "preparation": None,
+                                "raw": "30 בישקוטים"
+                            },
+                            {
+                                "quantity": "1",
+                                "name": "קפה חזק",
+                                "unit": "כוס",
+                                "preparation": None,
+                                "raw": "1 כוס קפה חזק"
+                            }
+                        ],
                     },
                     {
                         "name": "לקרם",
                         "ingredients": [
-                            {"raw": "1 שמנת להקצפה 250 מ״ל"},
-                            {"raw": "5 כפות אבקת סוכר"},
+                            {
+                                "quantity": "1",
+                                "name": "שמנת להקצפה",
+                                "unit": "מ״ל",
+                                "preparation": None,
+                                "raw": "1 שמנת להקצפה 250 מ״ל"
+                            },
+                            {
+                                "quantity": "5",
+                                "name": "אבקת סוכר",
+                                "unit": "כפות",
+                                "preparation": None,
+                                "raw": "5 כפות אבקת סוכר"
+                            }
                         ],
                     },
                 ],
@@ -97,7 +125,6 @@ class Recipe(BaseModel):
                     }
                 ],
                 "notes": ["מומלץ להכין את הרולדה יום מראש כדי שתתייצב היטב."],
-                "imageUrl": "https://example.com/main-image.jpg",
                 "images": ["https://example.com/main-image.jpg"],
                 "nutrition": {
                     "calories": None,
@@ -106,8 +133,6 @@ class Recipe(BaseModel):
                     "carbs_g": None,
                     "per": "slice",
                 },
-                "createdAt": None,
-                "updatedAt": None,
             }
         }
 

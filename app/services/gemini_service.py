@@ -219,7 +219,7 @@ nutrition (חובה למלא):
   "prepTimeMinutes": null,
   "cookTimeMinutes": null,
   "totalTimeMinutes": null,
-  "ingredientGroups": [{"name": null, "ingredients": [{"raw": ""}]}],
+  "ingredientGroups": [{"name": null, "ingredients": [{"quantity": null, "name": "", "unit": null, "preparation": null, "raw": null}]}],
   "instructionGroups": [{"name": "כותרת הסעיף או null אם אין", "instructions": [""]}],
   "notes": [],
   "images": [],
@@ -262,7 +262,7 @@ nutrition (חובה למלא):
   "prepTimeMinutes": null,
   "cookTimeMinutes": null,
   "totalTimeMinutes": null,
-  "ingredientGroups": [{{"name": null, "ingredients": [{{"raw": ""}}]}}],
+  "ingredientGroups": [{{"name": null, "ingredients": [{{"quantity": null, "name": "", "unit": null, "preparation": null, "raw": null}}]}}],
   "instructionGroups": [{{"name": "הכנה", "instructions": [""]}}],
   "notes": [],
   "images": [],
@@ -304,7 +304,7 @@ nutrition (חובה למלא):
   "prepTimeMinutes": null,
   "cookTimeMinutes": null,
   "totalTimeMinutes": null,
-  "ingredientGroups": [{{"name": null, "ingredients": [{{"raw": ""}}]}}],
+  "ingredientGroups": [{{"name": null, "ingredients": [{{"quantity": null, "name": "", "unit": null, "preparation": null, "raw": null}}]}}],
   "instructionGroups": [{{"name": "הכנה", "instructions": [""]}}],
   "notes": [],
   "images": [],
@@ -359,7 +359,7 @@ nutrition (חובה למלא):
         if isinstance(imgs, list):
             normalized["images"] = [x for x in imgs if isinstance(x, str) and x.strip()]
 
-        # tolerate ingredientGroups.ingredients as ["..."] instead of [{"raw": "..."}]
+        # Normalize ingredientGroups: handle string lists, old {"raw": "..."} format, and new structured format
         ig = normalized.get("ingredientGroups")
         if isinstance(ig, list):
             fixed_groups = []
@@ -367,9 +367,34 @@ nutrition (חובה למלא):
                 if not isinstance(g, dict):
                     continue
                 ingr = g.get("ingredients")
-                if isinstance(ingr, list) and ingr and all(isinstance(x, str) for x in ingr):
+                if isinstance(ingr, list):
+                    normalized_ingredients = []
+                    for ing in ingr:
+                        if isinstance(ing, str):
+                            # String format: convert to structured with raw
+                            normalized_ingredients.append({"name": ing, "raw": ing})
+                        elif isinstance(ing, dict):
+                            # Already an object - preserve structured format if it has 'name', otherwise keep as-is
+                            if "name" in ing:
+                                # New structured format - ensure it has required fields
+                                normalized_ing = {
+                                    "name": ing.get("name", ""),
+                                    "quantity": ing.get("quantity"),
+                                    "unit": ing.get("unit"),
+                                    "preparation": ing.get("preparation"),
+                                    "raw": ing.get("raw")
+                                }
+                                normalized_ingredients.append(normalized_ing)
+                            elif "raw" in ing:
+                                # Old format with just raw - keep it for backward compatibility
+                                normalized_ingredients.append(ing)
+                            else:
+                                # Unknown format - convert to raw
+                                normalized_ingredients.append({"raw": str(ing)})
+                        else:
+                            normalized_ingredients.append({"raw": str(ing)})
                     g = dict(g)
-                    g["ingredients"] = [{"raw": x} for x in ingr if x.strip()]
+                    g["ingredients"] = normalized_ingredients
                 fixed_groups.append(g)
             normalized["ingredientGroups"] = fixed_groups
 

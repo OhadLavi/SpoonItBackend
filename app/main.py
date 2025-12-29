@@ -28,6 +28,7 @@ from app.utils.exceptions import (
 )
 from app.utils.logging_config import setup_logging
 from app.utils.validators import validate_url
+from app.models.recipe import Recipe
 
 # Setup logging
 setup_logging(settings.log_level)
@@ -160,16 +161,16 @@ class RecipeExtractionRequest(BaseModel):
     url: str
 
 
-@app.post("/extract_recipe")
+@app.post("/extract_recipe", response_model=Recipe)
 async def extract_recipe_legacy(
     request: Request,
     req: RecipeExtractionRequest = Body(...),
     _: None = Depends(rate_limit_dependency),
     recipe_extractor: RecipeExtractor = Depends(get_recipe_extractor),
-):
+) -> Recipe:
     """
     Legacy compatibility endpoint for /extract_recipe.
-    Accepts JSON body with {"url": "..."} and returns recipe in old format.
+    Accepts JSON body with {"url": "..."} and returns Recipe model.
     """
     # Log route-specific parameters
     logger.info(
@@ -188,38 +189,7 @@ async def extract_recipe_legacy(
         # Extract recipe using new service
         recipe = await recipe_extractor.extract_from_url(validated_url)
         
-        # Flatten ingredientGroups and instructionGroups for legacy compatibility
-        flat_ingredients = []
-        if recipe.ingredientGroups:
-            for group in recipe.ingredientGroups:
-                for ing in group.ingredients:
-                    flat_ingredients.append(ing.raw)
-        
-        flat_instructions = []
-        if recipe.instructionGroups:
-            for group in recipe.instructionGroups:
-                flat_instructions.extend(group.instructions)
-        
-        # Convert new Recipe format to old format for backward compatibility
-        # Old format: prepTime, cookTime (int), servings (int), notes (str), tags (list)
-        # New format: prepTimeMinutes, cookTimeMinutes (int), servings (str), notes (list)
-        result = {
-            "title": recipe.title or "",
-
-            "ingredients": flat_ingredients,
-            "instructions": flat_instructions,
-            "prepTime": recipe.prepTimeMinutes or 0,
-            "cookTime": recipe.cookTimeMinutes or 0,
-            "servings": int(recipe.servings) if recipe.servings and recipe.servings.isdigit() else 1,
-            "tags": [],
-            "notes": " ".join(recipe.notes) if recipe.notes else "",
-            "source": recipe.source or validated_url,
-            "imageUrl": str(recipe.imageUrl) if recipe.imageUrl else "",
-            "images": recipe.images or [],
-            "ingredientGroups": [group.model_dump() for group in recipe.ingredientGroups] if recipe.ingredientGroups else [],
-        }
-        
-        return result
+        return recipe
         
     except ValidationError as e:
         raise HTTPException(
@@ -244,16 +214,16 @@ async def extract_recipe_legacy(
         ) from e
 
 
-@app.post("/extract_recipe_from_image")
+@app.post("/extract_recipe_from_image", response_model=Recipe)
 async def extract_recipe_from_image_legacy(
     request: Request,
     file: UploadFile = File(..., description="Image file to extract recipe from"),
     _: None = Depends(rate_limit_dependency),
     recipe_extractor: RecipeExtractor = Depends(get_recipe_extractor),
-):
+) -> Recipe:
     """
     Legacy compatibility endpoint for /extract_recipe_from_image.
-    Accepts multipart/form-data with an image file and returns recipe in old format.
+    Accepts multipart/form-data with an image file and returns Recipe model.
     
     The file should be sent as multipart/form-data with field name 'file'.
     """
@@ -278,36 +248,7 @@ async def extract_recipe_from_image_legacy(
         # Extract recipe using new service
         recipe = await recipe_extractor.extract_from_image(image_data, filename)
         
-        # Flatten ingredientGroups and instructionGroups for legacy compatibility
-        flat_ingredients = []
-        if recipe.ingredientGroups:
-            for group in recipe.ingredientGroups:
-                for ing in group.ingredients:
-                    flat_ingredients.append(ing.raw)
-        
-        flat_instructions = []
-        if recipe.instructionGroups:
-            for group in recipe.instructionGroups:
-                flat_instructions.extend(group.instructions)
-        
-        # Convert new Recipe format to old format for backward compatibility
-        result = {
-            "title": recipe.title or "",
-            "ingredients": flat_ingredients,
-
-            "instructions": flat_instructions,
-            "prepTime": recipe.prepTimeMinutes or 0,
-            "cookTime": recipe.cookTimeMinutes or 0,
-            "servings": int(recipe.servings) if recipe.servings and recipe.servings.isdigit() else 1,
-            "tags": [],
-            "notes": " ".join(recipe.notes) if recipe.notes else "",
-            "source": recipe.source or "",
-            "imageUrl": str(recipe.imageUrl) if recipe.imageUrl else "",
-            "images": recipe.images or [],
-            "ingredientGroups": [group.model_dump() for group in recipe.ingredientGroups] if recipe.ingredientGroups else [],
-        }
-        
-        return result
+        return recipe
         
     except ImageProcessingError as e:
         raise HTTPException(

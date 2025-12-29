@@ -59,7 +59,6 @@ async def test_chat_recipe_generation():
         f'  "ingredients": ["flat list of all ingredients with amounts"],\n'
         f'  "instructions": ["detailed step 1", "detailed step 2", ...],\n'
         f'  "notes": ["helpful tip 1", ...] or [],\n'
-        f'  "imageUrl": null,\n'
         f'  "images": [],\n'
         f'  "nutrition": {{\n'
         f'    "calories": number or null,\n'

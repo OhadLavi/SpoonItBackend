@@ -9,6 +9,7 @@ class Settings(BaseSettings):
 
     # API Keys
     gemini_api_key: str
+    brightdata_api_key: str
 
     # Server
     port: int = 8080
