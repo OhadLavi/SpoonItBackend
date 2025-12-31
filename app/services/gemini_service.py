@@ -1,24 +1,14 @@
-"""
-Gemini LLM service for recipe extraction and generation.
-
-Key design:
-- Image extraction = OCR-faithful (do NOT interpret quantities/units). We keep the ingredient line as-is.
-- Nutrition for image extraction = null (no guessing). Do nutrition/enrichment in a separate step.
-- Strict JSON guard + automatic repair retries if Gemini returns invalid JSON / wrong schema.
-"""
-
-from __future__ import annotations
+""""Gemini LLM service for recipe extraction and generation."""
 
 import asyncio
 import base64
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from google import genai
 from google.genai import types
-from pydantic import ValidationError
 
 from app.config import settings
 from app.models.recipe import Recipe
@@ -26,262 +16,253 @@ from app.utils.exceptions import GeminiError
 
 logger = logging.getLogger(__name__)
 
-
-# ----------------------------
-# Models (override via settings if you want)
-# ----------------------------
-DEFAULT_IMAGE_MODEL = getattr(settings, "gemini_image_model", None) or "gemini-2.5-pro"
-DEFAULT_TEXT_MODEL = getattr(settings, "gemini_text_model", None) or "gemini-2.5-flash"
+try:
+    from PIL import Image, ImageEnhance, ImageOps  # type: ignore
+    from io import BytesIO
+    _PIL_AVAILABLE = True
+except Exception:
+    _PIL_AVAILABLE = False
 
 
 class GeminiService:
     """Service for interacting with Gemini API."""
 
-    def __init__(self) -> None:
-        self._client: Optional[genai.Client] = None
+    def __init__(self):
+        self._client = None
 
     @property
-    def client(self) -> genai.Client:
-        """Get or create Gemini client (lazy initialization)."""
+    def client(self):
         if self._client is None:
             self._client = genai.Client(api_key=settings.gemini_api_key)
         return self._client
 
-    # ---------------------------------------------------------------------
+    # --------------------------
     # Public API
-    # ---------------------------------------------------------------------
+    # --------------------------
 
     async def extract_recipe_from_image(self, image_data: bytes, mime_type: str) -> Recipe:
         """
-        Extract recipe from image using Gemini Vision (OCR-faithful).
-
-        IMPORTANT behavior:
-        - Ingredients are preserved as-is (raw line), no quantity/unit parsing.
-        - Nutrition is null (no guessing).
+        Extract recipe from image using a 2-pass approach:
+        (1) strict transcription (no guessing; ??? for unreadable)
+        (2) structuring only from that transcription (prevents hallucinations)
         """
-        prompt = self._build_image_extraction_prompt()
-
-        # Inline image data
-        image_base64 = base64.b64encode(image_data).decode("utf-8")
-        contents = [
-            prompt,
-            {"inline_data": {"mime_type": mime_type, "data": image_base64}},
-        ]
-
         try:
-            logger.info("Extracting recipe from image (mime_type=%s)", mime_type)
+            logger.info(f"Extracting recipe from image (mime_type: {mime_type})")
 
-            recipe_json = await self._generate_json_with_retries(
-                model=DEFAULT_IMAGE_MODEL,
-                contents=contents,
-                schema=Recipe.model_json_schema(),
-                temperature=0.0,
-                max_retries=2,
+            processed_bytes, processed_mime = self._preprocess_image_for_handwriting(image_data, mime_type)
+            image_b64 = base64.b64encode(processed_bytes).decode("utf-8")
+
+            # Pass A: Transcribe
+            transcript = await self._transcribe_recipe_text_from_image(
+                image_base64=image_b64,
+                mime_type=processed_mime,
             )
 
-            normalized = self._normalize_recipe_json(recipe_json, ocr_mode=True)
+            # Pass B: Structure strictly from transcript text (no extra info)
+            recipe_json = await self._structure_recipe_from_transcript(transcript)
+
+            normalized = self._normalize_recipe_json(recipe_json)
             return Recipe(**normalized)
 
-        except (json.JSONDecodeError, ValidationError) as e:
-            logger.error("Image extraction parse/validation failed: %s", str(e), exc_info=True)
-            raise GeminiError(f"Failed to parse/validate recipe JSON from image: {str(e)}") from e
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON from image extraction: {str(e)}")
+            raise GeminiError(f"Failed to parse recipe JSON from image: {str(e)}") from e
         except Exception as e:
-            logger.error("Image extraction failed: %s", str(e), exc_info=True)
+            logger.error(f"Image extraction failed: {str(e)}", exc_info=True)
             raise GeminiError(f"Failed to extract recipe from image: {str(e)}") from e
 
     async def generate_recipe_from_ingredients(self, ingredients: List[str]) -> Recipe:
-        """
-        Generate a recipe from a list of ingredients (creative generation).
-        Here, nutrition can be estimated (you asked for it previously).
-        """
         prompt = self._build_generation_prompt(ingredients)
-
         try:
-            logger.info("Generating recipe from %d ingredients", len(ingredients))
-
-            recipe_json = await self._generate_json_with_retries(
-                model=DEFAULT_TEXT_MODEL,
-                contents=prompt,
-                schema=Recipe.model_json_schema(),
-                temperature=0.2,
-                max_retries=2,
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.client.models.generate_content(
+                    model=settings.gemini_model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=settings.gemini_temperature,
+                        response_mime_type="text/plain",
+                    ),
+                ),
             )
+            if response is None or response.text is None:
+                raise GeminiError("Gemini returned empty response for recipe generation")
 
-            normalized = self._normalize_recipe_json(recipe_json, ocr_mode=False)
+            json_text = self._extract_json_from_text(response.text)
+            recipe_json = json.loads(json_text)
+            normalized = self._normalize_recipe_json(recipe_json)
             return Recipe(**normalized)
 
-        except (json.JSONDecodeError, ValidationError) as e:
-            logger.error("Recipe generation parse/validation failed: %s", str(e), exc_info=True)
-            raise GeminiError(f"Failed to parse/validate generated recipe JSON: {str(e)}") from e
         except Exception as e:
-            logger.error("Recipe generation failed: %s", str(e), exc_info=True)
+            logger.error(f"Recipe generation failed: {str(e)}", exc_info=True)
             raise GeminiError(f"Failed to generate recipe: {str(e)}") from e
 
     async def generate_recipe_from_text(self, user_prompt: str) -> Recipe:
-        """
-        Generate a recipe from free-form text (chat-based).
-        """
         prompt = self._build_text_generation_prompt(user_prompt)
-
         try:
-            logger.info("Generating recipe from text prompt")
-
-            recipe_json = await self._generate_json_with_retries(
-                model=DEFAULT_TEXT_MODEL,
-                contents=prompt,
-                schema=Recipe.model_json_schema(),
-                temperature=0.2,
-                max_retries=2,
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.client.models.generate_content(
+                    model=settings.gemini_model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=settings.gemini_temperature,
+                        response_mime_type="text/plain",
+                    ),
+                ),
             )
+            if response is None or response.text is None:
+                raise GeminiError("Gemini returned empty response for text generation")
 
-            normalized = self._normalize_recipe_json(recipe_json, ocr_mode=False)
+            json_text = self._extract_json_from_text(response.text)
+            recipe_json = json.loads(json_text)
+            normalized = self._normalize_recipe_json(recipe_json)
             return Recipe(**normalized)
 
-        except (json.JSONDecodeError, ValidationError) as e:
-            logger.error("Text recipe generation parse/validation failed: %s", str(e), exc_info=True)
-            raise GeminiError(f"Failed to parse/validate generated recipe JSON: {str(e)}") from e
         except Exception as e:
-            logger.error("Text recipe generation failed: %s", str(e), exc_info=True)
+            logger.error(f"Text recipe generation failed: {str(e)}", exc_info=True)
             raise GeminiError(f"Failed to generate recipe from text: {str(e)}") from e
 
-    async def enrich_nutrition(self, recipe: Recipe) -> Recipe:
+    # --------------------------
+    # Pass A: strict transcription
+    # --------------------------
+
+    async def _transcribe_recipe_text_from_image(self, image_base64: str, mime_type: str) -> Dict[str, Any]:
         """
-        Optional step (recommended): compute/estimate nutrition AFTER OCR extraction.
+        Returns JSON with keys only:
+          - title (string|null)
+          - ingredients_lines (array of strings)
+          - instructions_lines (array of strings)
+          - other_lines (array of strings)
 
-        This avoids hallucinated nutrition during image extraction.
+        IMPORTANT: no guessing. If unreadable -> ??? (do NOT infer).
         """
-        prompt = self._build_nutrition_enrichment_prompt(recipe)
+        prompt = """
+תעתיק את כל הטקסט שמופיע בתמונה בצורה מדויקת.
 
-        try:
-            logger.info("Enriching nutrition for recipe title=%s", recipe.title)
+כללים נוקשים:
+- אל תתרגם ואל תשפר ניסוח.
+- אל תנחש מילים. אם משהו לא קריא כתוב ??? במקום המילה/הקטע.
+- שמור על סדר השורות כפי שמופיע.
+- אל תוסיף שום מידע שלא קיים בתמונה.
 
-            recipe_json = await self._generate_json_with_retries(
-                model=DEFAULT_TEXT_MODEL,
-                contents=prompt,
-                schema=Recipe.model_json_schema(),
-                temperature=0.0,
-                max_retries=2,
-            )
-
-            normalized = self._normalize_recipe_json(recipe_json, ocr_mode=False)
-            return Recipe(**normalized)
-
-        except Exception as e:
-            logger.error("Nutrition enrichment failed: %s", str(e), exc_info=True)
-            raise GeminiError(f"Failed to enrich nutrition: {str(e)}") from e
-
-    # ---------------------------------------------------------------------
-    # Prompts
-    # ---------------------------------------------------------------------
-
-    def _build_image_extraction_prompt(self) -> str:
-        """
-        OCR-faithful prompt: do not interpret quantities/units.
-        Keep each ingredient line as a single raw string.
-        Nutrition must be null unless explicitly present (usually not).
-        """
-        return """
-חלץ את המתכון מהתמונה.
-
-כללים נוקשים (OCR-faithful):
-- החזר JSON תקין בלבד (האובייקט עצמו חייב להתחיל ב-{ ולהסתיים ב-}).
-- ללא Markdown, ללא ``` , ללא טקסט לפני/אחרי ה-JSON.
-- אל תתרגם ואל תנרמל.
-- אל תפצל שברים/מספרים (למשל "3/4 כוס מים" חייב להישאר בדיוק כך).
-- אל תפרש כמויות/יחידות. כל מרכיב מוחזר כשורה אחת (raw).
-- אל תמציא מרכיבים/שלבים/זמנים שלא מופיעים בתמונה.
-- אם שדה לא מופיע בתמונה: השתמש null לשדות, [] לרשימות.
-
-מבנה מרכיבים:
-- ingredientGroups[*].ingredients[*] חייבים להיות אובייקטים עם:
-  - raw: הטקסט המדויק של המרכיב כפי שמופיע בתמונה
-  - name: אותו ערך כמו raw (כדי להתאים לסכמות), ללא פירוק
-  - quantity/unit/preparation חייבים להיות null
-
-instructionGroups:
-- אל תשאיר name=null. אם אין כותרת, השתמש בשם "הוראות".
-- שמור על טקסט ההוראות כפי שמופיע, בלי להוסיף.
-
-nutrition:
-- אם אין ערכים תזונתיים בתמונה → החזר nutrition: null (אל תנחש).
-
-תבנית דוגמה (להעתקה של שדות/מבנה בלבד):
-{
-  "title": null,
-  "language": "he",
-  "servings": null,
-  "prepTimeMinutes": null,
-  "cookTimeMinutes": null,
-  "totalTimeMinutes": null,
-  "ingredientGroups": [
-    {
-      "name": null,
-      "ingredients": [
-        {
-          "quantity": null,
-          "name": "",
-          "unit": null,
-          "preparation": null,
-          "raw": ""
-        }
-      ]
-    }
-  ],
-  "instructionGroups": [
-    {
-      "name": "הוראות",
-      "instructions": [""]
-    }
-  ],
-  "notes": [],
-  "images": [],
-  "nutrition": null
-}
+החזר JSON בלבד (ללא markdown וללא הסברים) עם המפתחות הבאים בלבד:
+- title: string או null
+- ingredients_lines: רשימת שורות של מרכיבים (strings)
+- instructions_lines: רשימת שורות של הוראות/טקסט הכנה (strings)
+- other_lines: כל שורה אחרת שלא בטוח לאיזה חלק שייכת (strings)
 """.strip()
+
+        loop = asyncio.get_event_loop()
+        # Use a stronger model for handwriting OCR if you have one (pro often better)
+        model_for_ocr = getattr(settings, "gemini_model_ocr", None) or "gemini-2.5-pro"
+
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.client.models.generate_content(
+                model=model_for_ocr,
+                contents=[
+                    prompt,
+                    {"inline_data": {"mime_type": mime_type, "data": image_base64}},
+                ],
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    response_mime_type="text/plain",
+                ),
+            ),
+        )
+
+        if response is None or response.text is None or not response.text.strip():
+            raise GeminiError("Gemini returned empty response for transcription")
+
+        raw = response.text.strip()
+        logger.info(f"Gemini transcription raw:\n{raw}")
+
+        json_text = self._extract_json_from_text(raw)
+        data = json.loads(json_text)
+
+        # Minimal sanity normalization
+        return {
+            "title": data.get("title"),
+            "ingredients_lines": [x for x in (data.get("ingredients_lines") or []) if isinstance(x, str) and x.strip()],
+            "instructions_lines": [x for x in (data.get("instructions_lines") or []) if isinstance(x, str) and x.strip()],
+            "other_lines": [x for x in (data.get("other_lines") or []) if isinstance(x, str) and x.strip()],
+        }
+
+    # --------------------------
+    # Pass B: structure only from transcript
+    # --------------------------
+
+    async def _structure_recipe_from_transcript(self, transcript: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert transcript -> Recipe JSON.
+        MUST only use provided transcript lines. No invention.
+        """
+        title = transcript.get("title")
+        ingredients_lines = transcript.get("ingredients_lines", [])
+        instructions_lines = transcript.get("instructions_lines", [])
+        other_lines = transcript.get("other_lines", [])
+
+        prompt = f"""
+יש לך תמלול מדויק של מתכון מתוך תמונה.
+אתה חייב לבנות אובייקט Recipe JSON רק מתוך התמלול הזה.
+אסור להוסיף שום מרכיב/שלב שלא קיים בתמלול.
+
+תמלול:
+- title: {title}
+- ingredients_lines:
+{json.dumps(ingredients_lines, ensure_ascii=False)}
+- instructions_lines:
+{json.dumps(instructions_lines, ensure_ascii=False)}
+- other_lines:
+{json.dumps(other_lines, ensure_ascii=False)}
+
+כללים נוקשים:
+- ingredientGroups: צור קבוצה אחת לפחות, וכל מרכיב חייב להופיע ב-raw בדיוק כמו בשורה בתמלול.
+- instructionGroups: צור קבוצה אחת לפחות, ו-instructions חייב להיות רשימת צעדים (List[str]).
+  אם ההוראות בפסקה אחת/שורה אחת: חלק לצעדים קצרים בלי להמציא (רק פיצול).
+- nutrition: אם אי אפשר לחשב בוודאות על סמך התמלול, החזר ערכים מספריים 0 ו-per="מנה" (לא null).
+- החזר JSON בלבד. ללא markdown. ללא הסברים. ללא טקסט נוסף.
+""".strip()
+
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.client.models.generate_content(
+                model=settings.gemini_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    response_mime_type="text/plain",
+                ),
+            ),
+        )
+
+        if response is None or response.text is None or not response.text.strip():
+            raise GeminiError("Gemini returned empty response for structuring from transcript")
+
+        raw = response.text.strip()
+        logger.info(f"Gemini structured-from-transcript raw:\n{raw}")
+
+        json_text = self._extract_json_from_text(raw)
+        return json.loads(json_text)
+
+    # --------------------------
+    # Prompts for generation
+    # --------------------------
 
     def _build_generation_prompt(self, ingredients: List[str]) -> str:
         ingredients_text = "\n".join(f"- {ing}" for ing in ingredients)
         return f"""
-צור מתכון מקורי ויצירתי עם המרכיבים הבאים:
+צור מתכון מקורי עם המרכיבים הבאים:
 {ingredients_text}
 
-החזר אובייקט JSON תקין בלבד בתבנית Recipe.
-ללא Markdown, ללא ``` , ללא טקסט לפני/אחרי ה-JSON.
-
-כללים:
-- אפשר להוסיף תבלינים בסיסיים (מלח/פלפל/שמן/תבלינים נפוצים) לפי הצורך.
-- instructionGroups: לעולם אל תשאיר name=null.
-- nutrition: הערך יכול להיות הערכה סבירה.
-
-תבנית:
-{{
-  "title": null,
-  "language": "he",
-  "servings": null,
-  "prepTimeMinutes": null,
-  "cookTimeMinutes": null,
-  "totalTimeMinutes": null,
-  "ingredientGroups": [
-    {{
-      "name": null,
-      "ingredients": [
-        {{"quantity": null, "name": "", "unit": null, "preparation": null, "raw": null}}
-      ]
-    }}
-  ],
-  "instructionGroups": [
-    {{"name": "הכנה", "instructions": [""]}}
-  ],
-  "notes": [],
-  "images": [],
-  "nutrition": {{
-    "calories": 0,
-    "protein_g": 0,
-    "fat_g": 0,
-    "carbs_g": 0,
-    "per": "מנה"
-  }}
-}}
+החזר JSON תקין בלבד לפי מודל Recipe.
+- instructionGroups.instructions חייב להיות רשימת צעדים (לא פסקה אחת).
+- nutrition חייב להיות אובייקט מלא עם מספרים (אם לא בטוח -> 0).
+ללא markdown. ללא הסברים.
 """.strip()
 
     def _build_text_generation_prompt(self, user_prompt: str) -> str:
@@ -289,358 +270,286 @@ nutrition:
 המשתמש ביקש:
 {user_prompt}
 
-צור מתכון מתאים לבקשה.
-החזר אובייקט JSON תקין בלבד בתבנית Recipe.
-ללא Markdown, ללא ``` , ללא טקסט לפני/אחרי ה-JSON.
-
-כללים:
-- instructionGroups: לעולם אל תשאיר name=null.
-- nutrition: הערך יכול להיות הערכה סבירה.
-
-תבנית:
-{{
-  "title": null,
-  "language": "he",
-  "servings": null,
-  "prepTimeMinutes": null,
-  "cookTimeMinutes": null,
-  "totalTimeMinutes": null,
-  "ingredientGroups": [
-    {{
-      "name": null,
-      "ingredients": [
-        {{"quantity": null, "name": "", "unit": null, "preparation": null, "raw": null}}
-      ]
-    }}
-  ],
-  "instructionGroups": [
-    {{"name": "הכנה", "instructions": [""]}}
-  ],
-  "notes": [],
-  "images": [],
-  "nutrition": {{
-    "calories": 0,
-    "protein_g": 0,
-    "fat_g": 0,
-    "carbs_g": 0,
-    "per": "מנה"
-  }}
-}}
+צור מתכון מתאים לבקשה והחזר JSON תקין בלבד לפי מודל Recipe.
+- instructionGroups.instructions חייב להיות רשימת צעדים (לא פסקה אחת).
+- nutrition חייב להיות אובייקט מלא עם מספרים (אם לא בטוח -> 0).
+ללא markdown. ללא הסברים.
 """.strip()
 
-    def _build_nutrition_enrichment_prompt(self, recipe: Recipe) -> str:
-        # Keep it simple and deterministic: “fill nutrition only”, don’t rewrite everything unless needed.
-        recipe_dict = recipe.model_dump()
-        # Ensure JSON serializable
-        recipe_json = json.dumps(recipe_dict, ensure_ascii=False)
-
-        return f"""
-יש לך מתכון בפורמט JSON (Recipe). מלא/עדכן רק את השדה nutrition (הערכה סבירה),
-מבלי לשנות את המרכיבים/הוראות/כותרות/קבוצות, אלא אם חייבים כדי לחשב.
-
-החזר JSON תקין בלבד של כל האובייקט Recipe.
-ללא Markdown, ללא ``` , ללא טקסט לפני/אחרי ה-JSON.
-
-המתכון:
-{recipe_json}
-""".strip()
-
-    # ---------------------------------------------------------------------
-    # Core Gemini call + JSON guard + repair retries
-    # ---------------------------------------------------------------------
-
-    async def _generate_json_with_retries(
-        self,
-        *,
-        model: str,
-        contents: Any,
-        schema: Dict[str, Any],
-        temperature: float,
-        max_retries: int = 2,
-    ) -> Dict[str, Any]:
-        """
-        Calls Gemini and enforces:
-        - Return must contain a valid JSON object
-        - JSON must validate (at least parse) and be compatible with our normalization
-        - If it fails, we ask Gemini to repair and retry.
-        """
-        last_text: Optional[str] = None
-        last_err: Optional[str] = None
-
-        for attempt in range(max_retries + 1):
-            try:
-                response_text = await self._call_gemini(
-                    model=model,
-                    contents=contents,
-                    schema=schema,
-                    temperature=temperature,
-                )
-                last_text = response_text
-
-                json_text = self._extract_json_from_text(response_text)
-                data = json.loads(json_text)
-
-                # Basic sanity: must be dict
-                if not isinstance(data, dict):
-                    raise GeminiError("Gemini returned JSON that is not an object")
-
-                # Try a lightweight validation by normalizing + constructing Recipe (strict guard)
-                # NOTE: OCR-mode normalization is applied in the caller; here we just ensure it's close enough.
-                normalized = self._normalize_recipe_json(data, ocr_mode=False)
-                Recipe(**normalized)  # will raise ValidationError if schema is off
-
-                return data
-
-            except Exception as e:
-                last_err = str(e)
-                logger.warning(
-                    "Gemini JSON attempt %d/%d failed: %s",
-                    attempt + 1,
-                    max_retries + 1,
-                    last_err,
-                )
-
-                if attempt >= max_retries:
-                    break
-
-                # Build repair prompt: provide errors + previous output; force "JSON only".
-                repair_prompt = self._build_repair_prompt(
-                    error_message=last_err,
-                    bad_output=last_text or "",
-                    schema=schema,
-                )
-
-                # If original contents were a list (image+prompt), keep the image part and replace the prompt
-                if isinstance(contents, list) and contents:
-                    # assume first item is prompt, second is inline_data
-                    fixed_contents = [repair_prompt] + contents[1:]
-                    contents = fixed_contents
-                else:
-                    contents = repair_prompt
-
-        raise GeminiError(f"Gemini could not produce valid JSON after retries. Last error: {last_err}")
-
-    async def _call_gemini(
-        self,
-        *,
-        model: str,
-        contents: Any,
-        schema: Dict[str, Any],
-        temperature: float,
-    ) -> str:
-        """
-        Single Gemini call. We *request* JSON via response_schema + application/json,
-        but still handle messy returns using _extract_json_from_text.
-        """
-        def _sync_call() -> Any:
-            return self.client.models.generate_content(
-                model=model,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=schema,
-                    temperature=temperature,
-                ),
-            )
-
-        resp = await asyncio.to_thread(_sync_call)
-
-        # Depending on SDK version, resp.text is usually present.
-        text = getattr(resp, "text", None)
-        if not text:
-            raise GeminiError("Gemini returned empty response")
-        logger.debug("Gemini raw response:\n%s", text)
-        return text.strip()
-
-    def _build_repair_prompt(self, *, error_message: str, bad_output: str, schema: Dict[str, Any]) -> str:
-        schema_str = json.dumps(schema, ensure_ascii=False)
-        return f"""
-הפלט הקודם אינו JSON תקין / אינו תואם סכמת Recipe.
-
-שגיאה:
-{error_message}
-
-הפלט הקודם (לתיקון):
-{bad_output}
-
-דרישות:
-- החזר אובייקט JSON תקין בלבד (מתחיל ב-{{ ומסתיים ב-}}).
-- ללא Markdown, ללא ``` , ללא טקסט לפני/אחרי.
-- אל תשנה את המשמעות של הנתונים, רק תקן מבנה/שדות/טיפוסים כדי להתאים לסכמה.
-
-סכמת JSON (לייחוס בלבד):
-{schema_str}
-""".strip()
-
-    # ---------------------------------------------------------------------
-    # Parsing / normalization
-    # ---------------------------------------------------------------------
+    # --------------------------
+    # Parsing helpers
+    # --------------------------
 
     def _extract_json_from_text(self, text: str) -> str:
-        """Extract JSON object from text (handles accidental wrappers)."""
-        t = text.strip()
+        text = (text or "").strip()
+        text = re.sub(r"^```json\s*", "", text, flags=re.MULTILINE)
+        text = re.sub(r"^```\s*", "", text, flags=re.MULTILINE)
+        text = text.strip()
 
-        # Remove markdown code fences if they appear
-        t = re.sub(r"^```json\s*", "", t, flags=re.IGNORECASE | re.MULTILINE)
-        t = re.sub(r"^```\s*", "", t, flags=re.MULTILINE)
-        t = re.sub(r"\s*```$", "", t, flags=re.MULTILINE).strip()
+        if text.startswith("{") and text.endswith("}"):
+            return text
 
-        # If already pure JSON
-        if t.startswith("{") and t.endswith("}"):
-            return t
-
-        # Find first/last braces
-        first = t.find("{")
-        last = t.rfind("}")
+        first = text.find("{")
+        last = text.rfind("}")
         if first != -1 and last != -1 and last > first:
-            return t[first:last + 1]
+            return text[first : last + 1]
+        return text
 
-        return t
+    # --------------------------
+    # Normalization
+    # --------------------------
 
-    def _normalize_recipe_json(self, recipe_json: Dict[str, Any], *, ocr_mode: bool) -> Dict[str, Any]:
-        """
-        Normalize recipe JSON to satisfy Pydantic model types.
-        If ocr_mode=True:
-          - Force ingredients to be raw-faithful (name=raw, quantity/unit/preparation=None).
-          - Force nutrition to None if missing / invalid.
-        """
+    def _normalize_recipe_json(self, recipe_json: Dict[str, Any]) -> Dict[str, Any]:
         normalized: Dict[str, Any] = dict(recipe_json or {})
 
-        # Ensure list fields exist
         for k in ("ingredientGroups", "instructionGroups", "notes", "images"):
             if normalized.get(k) is None:
                 normalized[k] = []
 
-        # Backward compatibility (if model expects it)
         normalized.setdefault("ingredients", [])
 
-        # servings -> str
         if "servings" in normalized and normalized["servings"] is not None and not isinstance(normalized["servings"], str):
             normalized["servings"] = str(normalized["servings"])
 
-        # images: remove empties
         imgs = normalized.get("images")
         if isinstance(imgs, list):
             normalized["images"] = [x for x in imgs if isinstance(x, str) and x.strip()]
 
-        # instructionGroups: ensure name is not null
-        igroups = normalized.get("instructionGroups")
-        if isinstance(igroups, list):
-            fixed = []
-            for g in igroups:
-                if not isinstance(g, dict):
-                    continue
-                g2 = dict(g)
-                if not g2.get("name"):
-                    g2["name"] = "הוראות"
-                instr = g2.get("instructions")
-                if instr is None:
-                    g2["instructions"] = []
-                elif isinstance(instr, list):
-                    g2["instructions"] = [str(x).strip() for x in instr if str(x).strip()]
-                else:
-                    g2["instructions"] = [str(instr).strip()] if str(instr).strip() else []
-                fixed.append(g2)
-            normalized["instructionGroups"] = fixed
-
-        # notes: ensure strings
-        notes = normalized.get("notes")
-        if isinstance(notes, list):
-            normalized["notes"] = [str(x).strip() for x in notes if str(x).strip()]
-
-        # ingredientGroups normalization
-        groups = normalized.get("ingredientGroups")
-        if isinstance(groups, list):
+        # Normalize ingredientGroups
+        ig = normalized.get("ingredientGroups")
+        if isinstance(ig, list):
             fixed_groups = []
-            for g in groups:
+            for g in ig:
                 if not isinstance(g, dict):
                     continue
-                g2 = dict(g)
-                ingr = g2.get("ingredients")
-
-                normalized_ingredients: List[Dict[str, Any]] = []
-
+                ingr = g.get("ingredients")
                 if isinstance(ingr, list):
+                    out_ing = []
                     for ing in ingr:
-                        # Allow strings -> convert
                         if isinstance(ing, str):
-                            raw = ing.strip()
-                            obj = {
-                                "name": raw,
-                                "raw": raw,
-                                "quantity": None,
-                                "unit": None,
-                                "preparation": None,
-                            }
-                            normalized_ingredients.append(obj)
-                            continue
-
-                        if isinstance(ing, dict):
-                            raw_val = ing.get("raw")
-                            name_val = ing.get("name")
-
-                            # If OCR mode: enforce raw-faithful representation
-                            if ocr_mode:
-                                raw = (raw_val or name_val or "").strip()
-                                if not raw:
-                                    # skip empty
-                                    continue
-                                obj = {
-                                    "name": raw,            # keep full line
-                                    "raw": raw,
-                                    "quantity": None,
-                                    "unit": None,
-                                    "preparation": None,
-                                }
-                                normalized_ingredients.append(obj)
-                                continue
-
-                            # Non-OCR mode: keep structured data if present, but fix obvious type issues
+                            out_ing.append({"name": ing, "raw": ing})
+                        elif isinstance(ing, dict):
+                            # keep raw exact if exists
+                            raw = ing.get("raw")
+                            name = ing.get("name") or (raw or "")
                             quantity = ing.get("quantity")
                             if quantity is not None and not isinstance(quantity, str):
                                 quantity = str(quantity)
-
-                            obj = {
-                                "name": str(name_val or raw_val or "").strip(),
-                                "raw": (str(raw_val).strip() if raw_val is not None else None),
-                                "quantity": quantity,
-                                "unit": ing.get("unit"),
-                                "preparation": ing.get("preparation"),
-                            }
-
-                            # If name missing but raw exists, set name=raw
-                            if not obj["name"] and obj["raw"]:
-                                obj["name"] = obj["raw"]
-
-                            # If still empty, skip
-                            if not obj["name"] and not obj["raw"]:
-                                continue
-
-                            normalized_ingredients.append(obj)
-                            continue
-
-                        # Unknown type
-                        raw = str(ing).strip()
-                        if raw:
-                            normalized_ingredients.append(
-                                {"name": raw, "raw": raw, "quantity": None, "unit": None, "preparation": None}
+                            out_ing.append(
+                                {
+                                    "name": name,
+                                    "quantity": quantity,
+                                    "unit": ing.get("unit"),
+                                    "preparation": ing.get("preparation"),
+                                    "raw": raw or name,
+                                }
                             )
-
-                else:
-                    # ingredients field missing or wrong type
-                    normalized_ingredients = []
-
-                g2["ingredients"] = normalized_ingredients
-                fixed_groups.append(g2)
-
+                        else:
+                            out_ing.append({"raw": str(ing)})
+                    g = dict(g)
+                    g["ingredients"] = out_ing
+                fixed_groups.append(g)
             normalized["ingredientGroups"] = fixed_groups
 
-        # nutrition handling
-        if ocr_mode:
-            # do not guess nutrition in OCR mode
-            normalized["nutrition"] = None
-        else:
-            # if nutrition is present but malformed, keep it as-is; Recipe validation will enforce correctness
-            pass
+        # Normalize instructionGroups + ensure multi-step
+        normalized["instructionGroups"] = self._normalize_instruction_groups(normalized.get("instructionGroups"))
+
+        # Ensure nutrition is never null
+        normalized["nutrition"] = self._ensure_nutrition_object(normalized.get("nutrition"))
 
         return normalized
+
+    def _ensure_nutrition_object(self, nutrition: Any) -> Dict[str, Any]:
+        if isinstance(nutrition, dict):
+            def _f(x: Any) -> float:
+                try:
+                    return float(x)
+                except Exception:
+                    return 0.0
+
+            return {
+                "calories": _f(nutrition.get("calories", 0)),
+                "protein_g": _f(nutrition.get("protein_g", 0)),
+                "fat_g": _f(nutrition.get("fat_g", 0)),
+                "carbs_g": _f(nutrition.get("carbs_g", 0)),
+                "per": nutrition.get("per") or "מנה",
+            }
+        return {"calories": 0, "protein_g": 0, "fat_g": 0, "carbs_g": 0, "per": "מנה"}
+
+    def _normalize_instruction_groups(self, groups: Any) -> List[Dict[str, Any]]:
+        if not isinstance(groups, list):
+            return [{"name": "הוראות", "instructions": []}]
+
+        out: List[Dict[str, Any]] = []
+        for g in groups:
+            if not isinstance(g, dict):
+                continue
+
+            name = g.get("name") or "הוראות"
+            instr = g.get("instructions")
+
+            steps: List[str] = []
+            if isinstance(instr, str):
+                steps = self._split_to_steps(instr)
+            elif isinstance(instr, list):
+                for item in instr:
+                    if isinstance(item, str):
+                        steps.extend(self._split_to_steps(item))
+
+            steps = [s.strip() for s in steps if isinstance(s, str) and s.strip()]
+
+            # If still one big paragraph -> force a slightly more aggressive split
+            if len(steps) == 1:
+                forced = self._split_to_steps(steps[0], aggressive=True)
+                forced = [s.strip() for s in forced if s.strip()]
+                if len(forced) > 1:
+                    steps = forced
+
+            if steps:
+                out.append({"name": name, "instructions": steps})
+
+        if not out:
+            out = [{"name": "הוראות", "instructions": []}]
+        return out
+
+    def _split_to_steps(self, text: str, aggressive: bool = False) -> List[str]:
+        """
+        Step splitting WITHOUT verb lists.
+        Uses:
+          - punctuation (.!?)
+          - explicit separators (newline, ';', ' - ')
+          - sequencing words (ואז / אחר כך / לאחר מכן)
+          - optional comma splitting only when it likely contains multiple actions
+        """
+        t = (text or "").strip()
+        if not t:
+            return []
+
+        # Normalize whitespace
+        t = re.sub(r"\s+", " ", t)
+
+        # Insert split markers for sequencing words
+        if aggressive:
+            t = re.sub(r"\s+(ואז|אחר כך|לאחר מכן)\s+", r" | \1 ", t)
+
+        # Split by sentence punctuation
+        parts = re.split(r"(?<=[\.\!\?])\s+", t)
+
+        # Expand by common separators
+        expanded: List[str] = []
+        for p in parts:
+            p = p.strip()
+            if not p:
+                continue
+            for sep in ["\n", ";", " - ", " – ", " — "]:
+                if sep in p:
+                    tmp = []
+                    for chunk in p.split(sep):
+                        c = chunk.strip()
+                        if c:
+                            tmp.append(c)
+                    p = " | ".join(tmp)
+            expanded.extend([x.strip() for x in p.split("|") if x.strip()])
+
+        final_steps: List[str] = []
+        for p in expanded:
+            p = p.strip()
+            if not p:
+                continue
+
+            # Comma splitting only if it likely contains multiple actions/time segments
+            if "," in p and (aggressive or self._likely_multi_step_clause(p)):
+                chunks = [c.strip() for c in p.split(",") if c.strip()]
+                # Merge tiny fragments to avoid garbage steps
+                merged: List[str] = []
+                for c in chunks:
+                    if merged and len(c) < 6:
+                        merged[-1] = f"{merged[-1]}, {c}"
+                    else:
+                        merged.append(c)
+                final_steps.extend(merged)
+            else:
+                final_steps.append(p)
+
+        # Clean duplicates / empties
+        cleaned: List[str] = []
+        for s in final_steps:
+            s = re.sub(r"\s+", " ", s).strip()
+            if s:
+                cleaned.append(s)
+
+        return cleaned
+
+    def _likely_multi_step_clause(self, s: str) -> bool:
+        """
+        No verbs list. Use generic signals:
+          - multiple time tokens
+          - multiple commas
+          - contains 'ול' + time/temperature patterns
+        """
+        if s.count(",") >= 2:
+            return True
+
+        # time/temperature signals
+        time_hits = len(re.findall(r"\b\d+\s*(דק|דק'|דקות|שעה|שעות)\b", s))
+        temp_hits = len(re.findall(r"\b\d+\s*(מעלות|°)\b", s))
+
+        if time_hits + temp_hits >= 2:
+            return True
+
+        if " ול" in s and (time_hits + temp_hits >= 1):
+            return True
+
+        if " ואז " in s or " אחר כך " in s or " לאחר מכן " in s:
+            return True
+
+        return False
+
+    # --------------------------
+    # Image preprocessing (handwriting)
+    # --------------------------
+
+    def _preprocess_image_for_handwriting(self, image_bytes: bytes, mime_type: str) -> Tuple[bytes, str]:
+        """
+        Lightweight preprocessing that often improves handwritten OCR:
+          - exif transpose
+          - grayscale
+          - autocontrast
+          - mild sharpen/contrast
+          - resize to a sane max dimension
+        If Pillow not available -> return original.
+        """
+        if not _PIL_AVAILABLE:
+            return image_bytes, mime_type
+
+        try:
+            img = Image.open(BytesIO(image_bytes))
+            img = ImageOps.exif_transpose(img)
+
+            # Convert to grayscale to focus ink
+            img = img.convert("L")
+
+            # Autocontrast helps pen on paper
+            img = ImageOps.autocontrast(img, cutoff=2)
+
+            # Slight contrast boost
+            img = ImageEnhance.Contrast(img).enhance(1.35)
+
+            # Slight sharpness
+            img = ImageEnhance.Sharpness(img).enhance(1.25)
+
+            # Resize (too large wastes tokens/time; too small loses strokes)
+            max_dim = 1800
+            w, h = img.size
+            scale = min(1.0, max_dim / max(w, h))
+            if scale < 1.0:
+                img = img.resize((int(w * scale), int(h * scale)))
+
+            out = BytesIO()
+            # PNG tends to preserve handwriting better than JPEG artifacts
+            img.save(out, format="PNG", optimize=True)
+            return out.getvalue(), "image/png"
+
+        except Exception as e:
+            logger.warning(f"Image preprocess failed, using original: {e}")
+            return image_bytes, mime_type
