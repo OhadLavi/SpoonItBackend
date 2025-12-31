@@ -36,6 +36,33 @@ class GeminiService:
             self._client = genai.Client(api_key=settings.gemini_api_key)
         return self._client
 
+    def _clean_schema_for_gemini(self, schema: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Remove fields that Gemini API doesn't accept in response_schema.
+        Specifically removes 'additionalProperties' and 'additional_properties'.
+        """
+        if not isinstance(schema, dict):
+            return schema
+        
+        cleaned = {}
+        for key, value in schema.items():
+            # Skip additionalProperties fields
+            if key in ("additionalProperties", "additional_properties"):
+                continue
+            
+            # Recursively clean nested dictionaries
+            if isinstance(value, dict):
+                cleaned[key] = self._clean_schema_for_gemini(value)
+            elif isinstance(value, list):
+                cleaned[key] = [
+                    self._clean_schema_for_gemini(item) if isinstance(item, dict) else item
+                    for item in value
+                ]
+            else:
+                cleaned[key] = value
+        
+        return cleaned
+
     # --------------------------
     # Public API
     # --------------------------
@@ -78,7 +105,7 @@ class GeminiService:
                     config=types.GenerateContentConfig(
                         temperature=settings.gemini_temperature,
                         response_mime_type="application/json",
-                        response_schema=Recipe.model_json_schema(),
+                        response_schema=self._clean_schema_for_gemini(Recipe.model_json_schema()),
                     ),
                 ),
             )
@@ -105,7 +132,7 @@ class GeminiService:
                     config=types.GenerateContentConfig(
                         temperature=settings.gemini_temperature,
                         response_mime_type="application/json",
-                        response_schema=Recipe.model_json_schema(),
+                        response_schema=self._clean_schema_for_gemini(Recipe.model_json_schema()),
                     ),
                 ),
             )
@@ -160,7 +187,6 @@ class GeminiService:
                 "other_lines": {"type": "array", "items": {"type": "string"}},
             },
             "required": ["title", "ingredients_lines", "instructions_lines", "other_lines"],
-            "additionalProperties": False,
         }
 
         loop = asyncio.get_event_loop()
@@ -244,7 +270,7 @@ class GeminiService:
                 config=types.GenerateContentConfig(
                     temperature=0.0,
                     response_mime_type="application/json",
-                    response_schema=Recipe.model_json_schema(),
+                    response_schema=self._clean_schema_for_gemini(Recipe.model_json_schema()),
                 ),
             ),
         )
