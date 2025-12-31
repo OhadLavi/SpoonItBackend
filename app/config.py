@@ -1,4 +1,4 @@
-"""Application configuration using pydantic-settings."""
+""""Application configuration using pydantic-settings."""
 
 from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -26,7 +26,12 @@ class Settings(BaseSettings):
     rate_limit_per_hour: int = 100
 
     # CORS
-    cors_origins: str = "*"  # Comma-separated origins or "*" for all (e.g., "http://localhost:3000,http://localhost:52300")
+    # Comma-separated origins or "*" for all (e.g., "http://localhost:3000,http://localhost:52300")
+    cors_origins: str = "*"
+
+    # Optional regex (useful for localhost with random ports, e.g. Flutter web)
+    # Example: r"^http://localhost:\d+$|^http://127\.0\.0\.1:\d+$"
+    cors_allow_origin_regex: str = r"^http://localhost:\d+$|^http://127\.0\.0\.1:\d+$"
 
     # Gemini Settings
     gemini_model: str = "gemini-2.5-flash-lite"
@@ -47,11 +52,10 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> List[str]:
         """Get list of CORS origins."""
-        if self.cors_origins == "*":
+        if self.cors_origins.strip() == "*":
             return ["*"]
-        return [origin.strip() for origin in self.cors_origins.split(",")]
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
 
 # Global settings instance
 settings = Settings()
-

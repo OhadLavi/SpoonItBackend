@@ -1,16 +1,25 @@
-"""Recipe extraction endpoints."""
+""""Recipe extraction endpoints."""
 
+import asyncio
 import logging
-from typing import List
+import time
+from typing import List, Optional, Tuple
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
 from app.api.dependencies import get_recipe_extractor
-from app.core.request_id import get_request_id
+from app.config import settings
 from app.middleware.rate_limit import rate_limit_dependency
 from app.models.recipe import Recipe
 from app.services.recipe_extractor import RecipeExtractor
@@ -26,8 +35,70 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/recipes", tags=["recipes"])
 
 
+# -----------------------
+# Performance / safety
+# -----------------------
+
+# Keep this LOWER than Cloud Run timeout, so *your app* returns a response (with CORS),
+# instead of the gateway killing it and returning 504 without headers.
+IMAGE_EXTRACT_TIMEOUT_S = 110.0
+
+# Only allow common image types
+ALLOWED_IMAGE_MIME = {"image/jpeg", "image/png", "image/webp"}
+
+# Resize/compress before sending to Gemini (big speed win)
+# 1280–1600 is usually plenty for recipe text screenshots.
+VISION_MAX_DIM = 1400
+JPEG_QUALITY = 78
+
+
+def _maybe_resize_for_vision(image_bytes: bytes, content_type: Optional[str]) -> Tuple[bytes, str]:
+    """
+    Downscale + compress images to reduce Gemini latency.
+
+    Returns: (new_bytes, new_mime)
+    If Pillow isn't installed or processing fails, returns original bytes.
+    """
+    if not image_bytes:
+        return image_bytes, content_type or "image/jpeg"
+
+    # If the image is already small, don't touch it.
+    if len(image_bytes) < 350_000:
+        return image_bytes, content_type or "image/jpeg"
+
+    try:
+        from PIL import Image  # type: ignore
+        import io
+
+        with Image.open(io.BytesIO(image_bytes)) as im:
+            # Normalize to RGB; if alpha exists, composite onto white
+            if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
+                bg = Image.new("RGBA", im.size, (255, 255, 255, 255))
+                im = Image.alpha_composite(bg, im.convert("RGBA")).convert("RGB")
+            else:
+                im = im.convert("RGB")
+
+            w, h = im.size
+            max_side = max(w, h)
+            if max_side > VISION_MAX_DIM:
+                scale = VISION_MAX_DIM / float(max_side)
+                new_w = max(1, int(w * scale))
+                new_h = max(1, int(h * scale))
+                im = im.resize((new_w, new_h), Image.LANCZOS)
+
+            out = io.BytesIO()
+            im.save(out, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+            return out.getvalue(), "image/jpeg"
+
+    except Exception as e:
+        # Don't fail the request because of resizing
+        logger.warning(f"Image resize/compress skipped (Pillow missing or failed): {e}")
+        return image_bytes, content_type or "image/jpeg"
+
+
 class URLRequest(BaseModel):
     """Request model for URL extraction (JSON body)."""
+
     url: str
 
 
@@ -41,59 +112,44 @@ async def extract_from_url(
 ) -> Recipe:
     """
     Extract recipe from a public recipe URL.
-    
+
     Accepts either:
     - Form data: `url` as form field (application/x-www-form-urlencoded or multipart/form-data)
     - JSON body: `{"url": "..."}` (application/json)
-
-    - **url**: Recipe URL to extract from
-    - Returns unified Recipe JSON format
     """
-    # Get URL from either form data or JSON body
     recipe_url = None
-    
-    # Check content type to determine which parameter was used
     content_type = request.headers.get("content-type", "").lower()
-    
+
     if "application/json" in content_type:
-        # JSON body
         if url_request:
             recipe_url = url_request.url
         else:
-            # Fallback: try to parse JSON body directly
             try:
                 body = await request.json()
                 recipe_url = body.get("url")
             except Exception:
                 pass
     else:
-        # Form data
         recipe_url = url
-    
+
     if not recipe_url:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "Missing URL parameter. Provide 'url' in form data or JSON body."},
         )
-    
-    # Log route-specific parameters
+
     logger.info(
-        f"Route /recipes/from-url called",
+        "Route /recipes/from-url called",
         extra={
             "request_id": getattr(request.state, "request_id", None),
             "route": "/recipes/from-url",
-            "params": {"url": recipe_url[:200]},  # Truncate long URLs
+            "params": {"url": recipe_url[:200]},
         },
     )
-    
+
     try:
-        # Validate URL
         validated_url = validate_url(recipe_url)
-
-        # Extract recipe
-        recipe = await recipe_extractor.extract_from_url(validated_url)
-
-        return recipe
+        return await recipe_extractor.extract_from_url(validated_url)
 
     except ValidationError as e:
         raise HTTPException(
@@ -129,11 +185,9 @@ async def extract_from_image(
     Extract recipe from an uploaded image.
 
     - **file**: Image file (JPEG, PNG, or WebP, max 10MB)
-    - Returns unified Recipe JSON format
     """
-    # Log route-specific parameters
     logger.info(
-        f"Route /recipes/from-image called",
+        "Route /recipes/from-image called",
         extra={
             "request_id": getattr(request.state, "request_id", None),
             "route": "/recipes/from-image",
@@ -144,16 +198,74 @@ async def extract_from_image(
             },
         },
     )
-    
+
     try:
-        # Read file content
+        if file.content_type and file.content_type.lower() not in ALLOWED_IMAGE_MIME:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": "Invalid image type",
+                    "detail": f"Unsupported content-type: {file.content_type}. Allowed: {sorted(ALLOWED_IMAGE_MIME)}",
+                },
+            )
+
         image_data = await file.read()
+        if not image_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"error": "Invalid image", "detail": "Empty file"},
+            )
+
+        if len(image_data) > settings.max_request_size:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail={
+                    "error": "File too large",
+                    "detail": f"Max size is {settings.max_request_size} bytes",
+                },
+            )
+
         filename = file.filename or "image"
 
-        # Extract recipe
-        recipe = await recipe_extractor.extract_from_image(image_data, filename)
+        # ✅ Speed-up: resize/compress before Gemini
+        t0 = time.perf_counter()
+        optimized_bytes, optimized_mime = _maybe_resize_for_vision(image_data, file.content_type)
+        t_resize = (time.perf_counter() - t0) * 1000.0
 
-        return recipe
+        if len(optimized_bytes) != len(image_data):
+            logger.info(
+                "Image optimized for vision",
+                extra={
+                    "request_id": getattr(request.state, "request_id", None),
+                    "orig_bytes": len(image_data),
+                    "opt_bytes": len(optimized_bytes),
+                    "mime_out": optimized_mime,
+                    "resize_ms": round(t_resize, 2),
+                },
+            )
+
+        # ✅ Ensure extension matches the new bytes (helps your validator / mime sniffing)
+        opt_filename = filename
+        if optimized_mime == "image/jpeg" and not opt_filename.lower().endswith((".jpg", ".jpeg")):
+            opt_filename = "image.jpg"
+
+        # ✅ Hard timeout so the gateway won't kill us (and you'll get proper CORS headers)
+        try:
+            recipe = await asyncio.wait_for(
+                recipe_extractor.extract_from_image(optimized_bytes, opt_filename),
+                timeout=IMAGE_EXTRACT_TIMEOUT_S,
+            )
+            return recipe
+        except asyncio.TimeoutError as e:
+            # This is the important part: return BEFORE Cloud Run times out.
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail={
+                    "error": "Timeout",
+                    "detail": f"Recipe extraction took too long (> {IMAGE_EXTRACT_TIMEOUT_S:.0f}s). "
+                              f"Try a smaller/clearer image or retry.",
+                },
+            ) from e
 
     except ImageProcessingError as e:
         raise HTTPException(
@@ -165,6 +277,8 @@ async def extract_from_image(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"error": "Failed to extract recipe from image", "detail": str(e)},
         ) from e
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Unexpected error in extract_from_image: {str(e)}", exc_info=True)
         raise HTTPException(
@@ -182,28 +296,19 @@ async def generate_recipe(
 ) -> Recipe:
     """
     Generate a recipe from a list of ingredients.
-
-    - **ingredients**: List of ingredient strings
-    - Returns unified Recipe JSON format
     """
-    # Log route-specific parameters
     logger.info(
-        f"Route /recipes/generate called",
+        "Route /recipes/generate called",
         extra={
             "request_id": getattr(request.state, "request_id", None),
             "route": "/recipes/generate",
             "params": {"ingredients": ingredients, "ingredients_count": len(ingredients)},
         },
     )
-    
+
     try:
-        # Validate ingredients
         validated_ingredients = validate_ingredients_list(ingredients)
-
-        # Generate recipe
-        recipe = await recipe_extractor.generate_from_ingredients(validated_ingredients)
-
-        return recipe
+        return await recipe_extractor.generate_from_ingredients(validated_ingredients)
 
     except ValidationError as e:
         raise HTTPException(
@@ -231,36 +336,36 @@ async def upload_image(
 ):
     """
     Upload and validate an image.
-    
-    - **file**: Image file to validate
-    - Returns validation status and metadata
     """
-    # Log route-specific parameters
     logger.info(
-        f"Route /recipes/upload-image called",
+        "Route /recipes/upload-image called",
         extra={
             "request_id": getattr(request.state, "request_id", None),
             "route": "/recipes/upload-image",
-            "params": {
-                "filename": file.filename,
-                "content_type": file.content_type,
-            },
+            "params": {"filename": file.filename, "content_type": file.content_type},
         },
     )
 
     try:
-        # Read file content
         content = await file.read()
-        
-        # Validate image
+        if len(content) > settings.max_request_size:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail={
+                    "error": "File too large",
+                    "detail": f"Max size is {settings.max_request_size} bytes",
+                },
+            )
+
         from app.services.image_service import ImageService
+
         _, mime_type = ImageService.validate_image(content, file.filename or "image")
-        
+
         return {
             "status": "valid",
             "filename": file.filename,
             "mime_type": mime_type,
-            "size": len(content)
+            "size": len(content),
         }
 
     except ImageProcessingError as e:
@@ -268,6 +373,8 @@ async def upload_image(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "Invalid image", "detail": str(e)},
         ) from e
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Unexpected error in upload_image: {str(e)}", exc_info=True)
         raise HTTPException(
