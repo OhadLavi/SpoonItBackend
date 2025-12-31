@@ -377,9 +377,14 @@ nutrition (חובה למלא):
                             # Already an object - preserve structured format if it has 'name', otherwise keep as-is
                             if "name" in ing:
                                 # New structured format - ensure it has required fields
+                                # Convert quantity to string if it's numeric
+                                quantity = ing.get("quantity")
+                                if quantity is not None and not isinstance(quantity, str):
+                                    quantity = str(quantity)
+                                
                                 normalized_ing = {
                                     "name": ing.get("name", ""),
-                                    "quantity": ing.get("quantity"),
+                                    "quantity": quantity,
                                     "unit": ing.get("unit"),
                                     "preparation": ing.get("preparation"),
                                     "raw": ing.get("raw")
