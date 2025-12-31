@@ -1,4 +1,4 @@
-"""Security headers and CORS middleware."""
+""""Security headers and CORS middleware."""
 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -10,28 +10,31 @@ from app.config import settings
 
 def setup_cors(app: ASGIApp) -> None:
     """Setup CORS middleware."""
-    # Get allowed origins
     origins = settings.cors_origins_list
-    
-    # If wildcard is used, we can't use credentials (CORS security restriction)
-    # So we'll allow all origins without credentials, or use explicit list with credentials
+    origin_regex = (settings.cors_allow_origin_regex or "").strip() or None
+
+    # If wildcard is used, we can't use credentials (CORS restriction)
     if origins == ["*"]:
-        # Wildcard: no credentials allowed
         app.add_middleware(
             CORSMiddleware,
             allow_origins=["*"],
+            allow_origin_regex=origin_regex,  # helps localhost random ports too
             allow_credentials=False,
             allow_methods=["*"],
             allow_headers=["*"],
+            expose_headers=["*"],
+            max_age=600,
         )
     else:
-        # Explicit origins: credentials allowed
         app.add_middleware(
             CORSMiddleware,
             allow_origins=origins,
+            allow_origin_regex=origin_regex,
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
+            expose_headers=["*"],
+            max_age=600,
         )
 
 
@@ -44,10 +47,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Middleware to add security headers."""
 
     async def dispatch(self, request, call_next):
-        """Add security headers to response."""
         response = await call_next(request)
 
-        # Security headers
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
@@ -55,4 +56,3 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
 
         return response
-

@@ -43,28 +43,24 @@ router = APIRouter(prefix="/recipes", tags=["recipes"])
 # instead of the gateway killing it and returning 504 without headers.
 IMAGE_EXTRACT_TIMEOUT_S = 110.0
 
-# Only allow common image types
-ALLOWED_IMAGE_MIME = {"image/jpeg", "image/png", "image/webp"}
-
 # Resize/compress before sending to Gemini (big speed win)
-# 1280–1600 is usually plenty for recipe text screenshots.
 VISION_MAX_DIM = 1400
 JPEG_QUALITY = 78
 
 
-def _maybe_resize_for_vision(image_bytes: bytes, content_type: Optional[str]) -> Tuple[bytes, str]:
+def _maybe_resize_for_vision(image_bytes: bytes) -> bytes:
     """
     Downscale + compress images to reduce Gemini latency.
 
-    Returns: (new_bytes, new_mime)
+    Returns: new_bytes (JPEG)
     If Pillow isn't installed or processing fails, returns original bytes.
     """
     if not image_bytes:
-        return image_bytes, content_type or "image/jpeg"
+        return image_bytes
 
-    # If the image is already small, don't touch it.
+    # If already small, don’t touch it
     if len(image_bytes) < 350_000:
-        return image_bytes, content_type or "image/jpeg"
+        return image_bytes
 
     try:
         from PIL import Image  # type: ignore
@@ -88,12 +84,11 @@ def _maybe_resize_for_vision(image_bytes: bytes, content_type: Optional[str]) ->
 
             out = io.BytesIO()
             im.save(out, format="JPEG", quality=JPEG_QUALITY, optimize=True)
-            return out.getvalue(), "image/jpeg"
+            return out.getvalue()
 
     except Exception as e:
-        # Don't fail the request because of resizing
         logger.warning(f"Image resize/compress skipped (Pillow missing or failed): {e}")
-        return image_bytes, content_type or "image/jpeg"
+        return image_bytes
 
 
 class URLRequest(BaseModel):
@@ -193,22 +188,12 @@ async def extract_from_image(
             "route": "/recipes/from-image",
             "params": {
                 "filename": file.filename,
-                "content_type": file.content_type,
-                "size": getattr(file, "size", "unknown"),
+                "content_type": file.content_type,  # useful debug (but not trusted)
             },
         },
     )
 
     try:
-        if file.content_type and file.content_type.lower() not in ALLOWED_IMAGE_MIME:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "error": "Invalid image type",
-                    "detail": f"Unsupported content-type: {file.content_type}. Allowed: {sorted(ALLOWED_IMAGE_MIME)}",
-                },
-            )
-
         image_data = await file.read()
         if not image_data:
             raise HTTPException(
@@ -227,29 +212,43 @@ async def extract_from_image(
 
         filename = file.filename or "image"
 
-        # ✅ Speed-up: resize/compress before Gemini
-        t0 = time.perf_counter()
-        optimized_bytes, optimized_mime = _maybe_resize_for_vision(image_data, file.content_type)
-        t_resize = (time.perf_counter() - t0) * 1000.0
+        # ✅ Robust validation: detect real mime from bytes (don’t trust UploadFile.content_type)
+        from app.services.image_service import ImageService
 
-        if len(optimized_bytes) != len(image_data):
+        # validate_image returns (processed_bytes, mime_type) in your code usage
+        validated_bytes, detected_mime = ImageService.validate_image(image_data, filename)
+
+        logger.info(
+            "Image validated",
+            extra={
+                "request_id": getattr(request.state, "request_id", None),
+                "detected_mime": detected_mime,
+                "bytes": len(validated_bytes),
+            },
+        )
+
+        # ✅ Speed-up: resize/compress BEFORE Gemini
+        t0 = time.perf_counter()
+        optimized_bytes = _maybe_resize_for_vision(validated_bytes)
+        t_resize_ms = (time.perf_counter() - t0) * 1000.0
+
+        if len(optimized_bytes) != len(validated_bytes):
             logger.info(
                 "Image optimized for vision",
                 extra={
                     "request_id": getattr(request.state, "request_id", None),
-                    "orig_bytes": len(image_data),
+                    "orig_bytes": len(validated_bytes),
                     "opt_bytes": len(optimized_bytes),
-                    "mime_out": optimized_mime,
-                    "resize_ms": round(t_resize, 2),
+                    "resize_ms": round(t_resize_ms, 2),
                 },
             )
 
-        # ✅ Ensure extension matches the new bytes (helps your validator / mime sniffing)
+        # Since we encode as JPEG in _maybe_resize_for_vision, use jpg filename for downstream validators
         opt_filename = filename
-        if optimized_mime == "image/jpeg" and not opt_filename.lower().endswith((".jpg", ".jpeg")):
+        if optimized_bytes is not validated_bytes:
             opt_filename = "image.jpg"
 
-        # ✅ Hard timeout so the gateway won't kill us (and you'll get proper CORS headers)
+        # ✅ Hard timeout to avoid Cloud Run gateway 504
         try:
             recipe = await asyncio.wait_for(
                 recipe_extractor.extract_from_image(optimized_bytes, opt_filename),
@@ -257,7 +256,6 @@ async def extract_from_image(
             )
             return recipe
         except asyncio.TimeoutError as e:
-            # This is the important part: return BEFORE Cloud Run times out.
             raise HTTPException(
                 status_code=status.HTTP_504_GATEWAY_TIMEOUT,
                 detail={
@@ -358,7 +356,6 @@ async def upload_image(
             )
 
         from app.services.image_service import ImageService
-
         _, mime_type = ImageService.validate_image(content, file.filename or "image")
 
         return {
