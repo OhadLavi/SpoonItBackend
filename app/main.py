@@ -3,13 +3,11 @@
 import logging
 
 import httpx
-from fastapi import Body, Depends, FastAPI, File, HTTPException, Query, Request, status, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel
 from slowapi.errors import RateLimitExceeded
 
-from app.api.dependencies import get_recipe_extractor
 from app.api.routes import chat, health, recipes
 from app.config import settings
 from app.core.request_id import get_request_id
@@ -17,7 +15,6 @@ from app.middleware.logging import RequestLoggingMiddleware
 from app.middleware.performance import PerformanceMiddleware
 from app.middleware.rate_limit import get_rate_limit_exceeded_handler, limiter, rate_limit_dependency
 from app.middleware.security import SecurityHeadersMiddleware, setup_compression, setup_cors
-from app.services.recipe_extractor import RecipeExtractor
 from app.utils.exceptions import (
     AuthenticationError,
     GeminiError,
@@ -28,7 +25,6 @@ from app.utils.exceptions import (
 )
 from app.utils.logging_config import setup_logging
 from app.utils.validators import validate_url
-from app.models.recipe import Recipe
 
 # Setup logging
 setup_logging(settings.log_level)
@@ -150,122 +146,6 @@ setup_cors(app)
 app.include_router(health.router)
 app.include_router(recipes.router)
 app.include_router(chat.router)
-
-
-# =============================================================================
-# Compatibility endpoints for backward compatibility with old frontend
-# =============================================================================
-
-class RecipeExtractionRequest(BaseModel):
-    """Legacy request model for /extract_recipe endpoint."""
-    url: str
-
-
-@app.post("/extract_recipe", response_model=Recipe)
-async def extract_recipe_legacy(
-    request: Request,
-    req: RecipeExtractionRequest = Body(...),
-    _: None = Depends(rate_limit_dependency),
-    recipe_extractor: RecipeExtractor = Depends(get_recipe_extractor),
-) -> Recipe:
-    """
-    Legacy compatibility endpoint for /extract_recipe.
-    Accepts JSON body with {"url": "..."} and returns Recipe model.
-    """
-    # Log route-specific parameters
-    logger.info(
-        f"Route /extract_recipe called",
-        extra={
-            "request_id": getattr(request.state, "request_id", None),
-            "route": "/extract_recipe",
-            "params": {"url": req.url[:200]},  # Truncate long URLs
-        },
-    )
-    
-    try:
-        # Validate URL
-        validated_url = validate_url(req.url.strip())
-        
-        # Extract recipe using new service
-        recipe = await recipe_extractor.extract_from_url(validated_url)
-        
-        return recipe
-        
-    except ValidationError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "Invalid URL", "detail": str(e)},
-        ) from e
-    except ScrapingError as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"error": "Failed to scrape recipe URL", "detail": str(e)},
-        ) from e
-    except GeminiError as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"error": "Failed to extract recipe", "detail": str(e)},
-        ) from e
-    except Exception as e:
-        logger.error(f"Unexpected error in extract_recipe_legacy: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": "Internal server error", "detail": "An unexpected error occurred"},
-        ) from e
-
-
-@app.post("/extract_recipe_from_image", response_model=Recipe)
-async def extract_recipe_from_image_legacy(
-    request: Request,
-    file: UploadFile = File(..., description="Image file to extract recipe from"),
-    _: None = Depends(rate_limit_dependency),
-    recipe_extractor: RecipeExtractor = Depends(get_recipe_extractor),
-) -> Recipe:
-    """
-    Legacy compatibility endpoint for /extract_recipe_from_image.
-    Accepts multipart/form-data with an image file and returns Recipe model.
-    
-    The file should be sent as multipart/form-data with field name 'file'.
-    """
-    # Log route-specific parameters
-    logger.info(
-        f"Route /extract_recipe_from_image called",
-        extra={
-            "request_id": getattr(request.state, "request_id", None),
-            "route": "/extract_recipe_from_image",
-            "params": {
-                "filename": file.filename if file else None,
-                "content_type": file.content_type if file else None,
-            },
-        },
-    )
-    
-    try:
-        # Read file content
-        image_data = await file.read()
-        filename = file.filename or "image"
-        
-        # Extract recipe using new service
-        recipe = await recipe_extractor.extract_from_image(image_data, filename)
-        
-        return recipe
-        
-    except ImageProcessingError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "Invalid image", "detail": str(e)},
-        ) from e
-    except GeminiError as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"error": "Failed to extract recipe from image", "detail": str(e)},
-        ) from e
-    except Exception as e:
-        logger.error(f"Unexpected error in extract_recipe_from_image_legacy: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": "Internal server error", "detail": "An unexpected error occurred"},
-        ) from e
 
 
 @app.on_event("startup")
