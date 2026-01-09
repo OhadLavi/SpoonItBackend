@@ -528,6 +528,29 @@ class ScraperService:
         logger.info(f"Final content length: {len(main_markdown)} characters")
         logger.debug(f"Content preview (first 500 chars): {main_markdown[:500]}")
         
+        # Extract website title from HTML and prepend to content
+        page_title = None
+        try:
+            # Parse HTML to extract title
+            soup = BeautifulSoup(html_content, "html.parser")
+            title_tag = soup.find('title')
+            if title_tag:
+                page_title = title_tag.get_text(strip=True)
+                logger.info(f"Extracted page title: {page_title}")
+            else:
+                # Try og:title or other meta tags
+                og_title = soup.find('meta', property='og:title')
+                if og_title and og_title.get('content'):
+                    page_title = og_title.get('content').strip()
+                    logger.info(f"Extracted page title from og:title: {page_title}")
+        except Exception as e:
+            logger.warning(f"Failed to extract page title: {e}")
+        
+        # Prepend title to content if available
+        if page_title:
+            main_markdown = f"Page Title: {page_title}\n\n{main_markdown}"
+            logger.info(f"Added title to content. New content length: {len(main_markdown)} characters")
+        
         # STEP 3: Extract recipe data using Gemini API
         logger.info("Step 3: Extracting recipe data with Gemini API")
         gemini_start = time.time()
