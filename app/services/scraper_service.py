@@ -808,12 +808,38 @@ class ScraperService:
         normalized = dict(data)
 
         
-        # servings: convert int to string
-        if "servings" in normalized and normalized["servings"] is not None:
-            if isinstance(normalized["servings"], (int, float)):
-                normalized["servings"] = str(int(normalized["servings"]))
-            elif not isinstance(normalized["servings"], str):
-                normalized["servings"] = str(normalized["servings"])
+        # servings: normalize to Servings object structure
+        if "servings" in normalized:
+            servings = normalized["servings"]
+            if isinstance(servings, dict):
+                # Already a structured object, ensure it has the right fields
+                if "amount" not in servings and "unit" not in servings and "raw" not in servings:
+                    # Might be old format, try to convert
+                    if isinstance(servings.get("value"), (int, float, str)):
+                        normalized["servings"] = {
+                            "amount": str(servings.get("value")),
+                            "unit": servings.get("unit"),
+                            "raw": servings.get("raw") or str(servings.get("value", ""))
+                        }
+            elif isinstance(servings, (int, float)):
+                # Convert number to Servings object
+                normalized["servings"] = {
+                    "amount": str(int(servings)),
+                    "unit": None,
+                    "raw": str(int(servings))
+                }
+            elif isinstance(servings, str):
+                # String format - try to parse or use as raw
+                normalized["servings"] = {
+                    "amount": None,
+                    "unit": None,
+                    "raw": servings
+                }
+            elif servings is None:
+                normalized["servings"] = None
+            else:
+                # Unknown format, set to None
+                normalized["servings"] = None
         
         # ingredients: ensure it's a list of strings (for backward compatibility)
         if "ingredients" in normalized:
@@ -826,9 +852,12 @@ class ScraperService:
                     elif isinstance(ing, dict):
                         # Convert object format to string
                         parts = []
-                        if "quantity" in ing and ing["quantity"]:
+                        # Handle both old format (quantity+unit) and new format (amount)
+                        if "amount" in ing and ing["amount"]:
+                            parts.append(str(ing["amount"]))
+                        elif "quantity" in ing and ing["quantity"]:
                             parts.append(str(ing["quantity"]))
-                        if "unit" in ing and ing["unit"]:
+                        if "unit" in ing and ing["unit"] and "amount" not in ing:
                             parts.append(ing["unit"])
                         if "name" in ing and ing["name"]:
                             parts.append(ing["name"])
@@ -855,10 +884,22 @@ class ScraperService:
                                 # Already an object - preserve structured format if it has 'name'
                                 if "name" in ing:
                                     # New structured format - ensure it has required fields
+                                    # Handle amount: use existing amount, or combine quantity+unit
+                                    amount = ing.get("amount")
+                                    if amount is None:
+                                        qty = ing.get("quantity")
+                                        unit = ing.get("unit")
+                                        if qty or unit:
+                                            parts = []
+                                            if qty:
+                                                parts.append(str(qty))
+                                            if unit:
+                                                parts.append(str(unit))
+                                            amount = " ".join(parts) if parts else None
+                                    
                                     normalized_ing = {
                                         "name": ing.get("name", ""),
-                                        "quantity": ing.get("quantity"),
-                                        "unit": ing.get("unit"),
+                                        "amount": amount,
                                         "preparation": ing.get("preparation"),
                                         "raw": ing.get("raw")
                                     }
@@ -1027,8 +1068,8 @@ Extract a recipe and return JSON ONLY in the Recipe format.
 
 Important:
 - instructionGroups: **MANDATORY** - Extract all instructions. Look for headers like "Instructions", "Preparation", "אופן הכנה". If instructions are in one paragraph, split them into separate sentences. Each sentence = one instruction. If no headers, put everything under "Preparation".
-- servings: string, not number. Example: "4 servings", "4 מנות".
-- ingredientGroups: [{{"name": null, "ingredients": [{{"quantity": "amount or null", "name": "ingredient name (required)", "unit": "unit of measurement or null", "preparation": "preparation notes or null", "raw": "original text or null"}}]}}]
+- servings: object with {{"amount": "string or null", "unit": "string or null", "raw": "string or null"}}. Example: {{"amount": "4", "unit": "מנות", "raw": "4 מנות"}}.
+- ingredientGroups: [{{"name": null, "ingredients": [{{"amount": "quantity+unit combined (e.g., '1 כוס' or '250 מ״ל') or null", "name": "ingredient name (required)", "preparation": "preparation notes or null", "raw": "original text or null"}}]}}]
 - ingredients: Flat list of strings ["ingredient 1", "ingredient 2"]
 - nutrition: Numbers only (not "not specified"). If unknown: null or 0.
 

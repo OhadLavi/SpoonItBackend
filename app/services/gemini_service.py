@@ -23,6 +23,13 @@ try:
 except Exception:
     _PIL_AVAILABLE = False
 
+try:
+    import pytesseract
+    _TESSERACT_AVAILABLE = True
+except ImportError:
+    _TESSERACT_AVAILABLE = False
+    logger.warning("pytesseract not available. OCR functionality will be disabled.")
+
 
 class GeminiService:
     """Service for interacting with Gemini API."""
@@ -69,22 +76,27 @@ class GeminiService:
 
     async def extract_recipe_from_image(self, image_data: bytes, mime_type: str) -> Recipe:
         """
-        Extract recipe from image using a 2-pass approach:
-        (1) strict transcription (no guessing; ??? for unreadable)
-        (2) structuring only from that transcription (prevents hallucinations)
+        Extract recipe from image using OCR + Gemini:
+        (1) Extract text from image using OCR (Tesseract)
+        (2) Structure the extracted text into Recipe JSON using Gemini
         """
         try:
             logger.info(f"Extracting recipe from image (mime_type: {mime_type})")
 
+            # Preprocess image for better OCR results
             processed_bytes, processed_mime = self._preprocess_image_for_handwriting(image_data, mime_type)
-            image_b64 = base64.b64encode(processed_bytes).decode("utf-8")
+            
+            # Extract text using OCR
+            extracted_text = await self._extract_text_with_ocr(processed_bytes)
+            
+            if not extracted_text or len(extracted_text.strip()) < 10:
+                raise GeminiError("OCR failed to extract any meaningful text from the image")
 
-            transcript = await self._transcribe_recipe_text_from_image(
-                image_base64=image_b64,
-                mime_type=processed_mime,
-            )
+            logger.info(f"OCR extracted {len(extracted_text)} characters of text")
+            logger.debug(f"OCR extracted text preview: {extracted_text[:500]}")
 
-            recipe_json = await self._structure_recipe_from_transcript(transcript)
+            # Structure the extracted text into Recipe JSON using Gemini
+            recipe_json = await self._structure_recipe_from_text(extracted_text)
 
             normalized = self._normalize_recipe_json(recipe_json)
             return Recipe(**normalized)
@@ -166,7 +178,95 @@ class GeminiService:
             raise GeminiError(f"Failed to generate recipe from text: {str(e)}") from e
 
     # --------------------------
-    # Pass A: strict transcription
+    # OCR Text Extraction
+    # --------------------------
+
+    async def _extract_text_with_ocr(self, image_bytes: bytes) -> str:
+        """
+        Extract text from image using Tesseract OCR.
+        Returns the raw extracted text.
+        """
+        if not _TESSERACT_AVAILABLE:
+            raise GeminiError("Tesseract OCR is not available. Please install pytesseract and Tesseract.")
+        
+        if not _PIL_AVAILABLE:
+            raise GeminiError("PIL/Pillow is not available for image processing.")
+        
+        try:
+            # Open image with PIL
+            image = Image.open(BytesIO(image_bytes))
+            
+            # Run OCR with Hebrew and English languages
+            # Tesseract language codes: 'heb' for Hebrew, 'eng' for English
+            extracted_text = pytesseract.image_to_string(
+                image,
+                lang='heb+eng',  # Hebrew + English
+                config='--psm 6'  # Assume a single uniform block of text
+            )
+            
+            return extracted_text.strip()
+            
+        except pytesseract.TesseractNotFoundError:
+            raise GeminiError("Tesseract OCR engine not found. Please install Tesseract OCR on your system.")
+        except Exception as e:
+            logger.error(f"OCR extraction failed: {e}", exc_info=True)
+            raise GeminiError(f"Failed to extract text from image using OCR: {str(e)}") from e
+
+    async def _structure_recipe_from_text(self, extracted_text: str) -> Dict[str, Any]:
+        """
+        Convert OCR-extracted text -> Recipe JSON using Gemini.
+        """
+        prompt = f"""
+יש לך טקסט שמופיע במתכון מתוך תמונה (הוצא באמצעות OCR).
+אתה חייב לבנות אובייקט Recipe JSON תקין *בדיוק לפי הסכימה*.
+אסור להוסיף שום מרכיב/שלב שלא קיים בטקסט.
+
+טקסט שהוצא מהתמונה:
+{extracted_text}
+
+כללים:
+- ingredientGroups: כל מרכיב חייב להיות עם raw זהה לשורה המקורית.
+- instructionGroups.instructions חייב להיות List[str] של צעדים (לא פסקה אחת).
+- אם יש הערת סוגריים (למשל "(...)") — זה לא צעד; זה הערה.
+- אם יש שורה עם ":" (למשל "קרם: ...") — זה תחילת סעיף/קבוצה להוראות בשם "קרם".
+- nutrition: אם לא בטוח, מלא 0 (לא null) ו-per="מנה".
+
+החזר JSON בלבד.
+""".strip()
+
+        schema = self._clean_schema_for_gemini(Recipe.model_json_schema())
+        config = types.GenerateContentConfig(
+            temperature=0.0,
+            response_mime_type="application/json",
+            response_schema=schema,
+        )
+        
+        logger.info(f"Sending to Gemini (_structure_recipe_from_text):")
+        logger.info(f"  Model: {settings.gemini_model}")
+        logger.info(f"  Prompt: {prompt}")
+        logger.info(f"  Config: temperature={config.temperature}, response_mime_type={config.response_mime_type}")
+        logger.info(f"  Response schema: {json.dumps(schema, indent=2, ensure_ascii=False)}")
+        
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.client.models.generate_content(
+                model=settings.gemini_model,
+                contents=prompt,
+                config=config,
+            ),
+        )
+
+        if response is None or response.text is None or not response.text.strip():
+            raise GeminiError("Gemini returned empty response for structuring from OCR text")
+
+        raw = response.text.strip()
+        logger.info(f"Gemini structured-from-OCR-text raw:\n{raw}")
+
+        return json.loads(raw)
+
+    # --------------------------
+    # Legacy: Pass A: strict transcription (kept for backward compatibility)
     # --------------------------
 
     async def _transcribe_recipe_text_from_image(self, image_base64: str, mime_type: str) -> Dict[str, Any]:
@@ -359,24 +459,52 @@ class GeminiService:
         """
         normalized: Dict[str, Any] = dict(recipe_json or {})
 
-        # Map alternate top-level keys if they appear
-        if "prepTime" in normalized and "prepTimeMinutes" not in normalized:
+        # Map alternate top-level keys if they appear (handle both camelCase and snake_case)
+        if "prepTime" in normalized and "prepTimeMinutes" not in normalized and "prep_time_minutes" not in normalized:
             normalized["prepTimeMinutes"] = normalized.pop("prepTime") or None
-        if "cookTime" in normalized and "cookTimeMinutes" not in normalized:
+        if "cookTime" in normalized and "cookTimeMinutes" not in normalized and "cook_time_minutes" not in normalized:
             normalized["cookTimeMinutes"] = normalized.pop("cookTime") or None
-        if "totalTime" in normalized and "totalTimeMinutes" not in normalized:
+        if "totalTime" in normalized and "totalTimeMinutes" not in normalized and "total_time_minutes" not in normalized:
             normalized["totalTimeMinutes"] = normalized.pop("totalTime") or None
 
         # Ensure list fields exist and have correct types
         normalized["images"] = self._ensure_string_list(normalized.get("images"))
-        normalized["notes"] = self._ensure_string_list(normalized.get("notes"))  # <-- fixes your Pydantic error
+        normalized["notes"] = self._ensure_string_list(normalized.get("notes"))
         normalized.setdefault("ingredientGroups", [])
         normalized.setdefault("instructionGroups", [])
-        normalized.setdefault("ingredients", [])  # backward compat in your model
 
-        # servings -> str or None
-        if "servings" in normalized and normalized["servings"] is not None and not isinstance(normalized["servings"], str):
-            normalized["servings"] = str(normalized["servings"])
+        # servings: normalize to Servings object structure
+        if "servings" in normalized:
+            servings = normalized["servings"]
+            if isinstance(servings, dict):
+                # Already a structured object, ensure it has the right fields
+                if "amount" not in servings and "unit" not in servings and "raw" not in servings:
+                    # Might be old format, try to convert
+                    if isinstance(servings.get("value"), (int, float, str)):
+                        normalized["servings"] = {
+                            "amount": str(servings.get("value")),
+                            "unit": servings.get("unit"),
+                            "raw": servings.get("raw") or str(servings.get("value", ""))
+                        }
+            elif isinstance(servings, (int, float)):
+                # Convert number to Servings object
+                normalized["servings"] = {
+                    "amount": str(int(servings)),
+                    "unit": None,
+                    "raw": str(int(servings))
+                }
+            elif isinstance(servings, str):
+                # String format - try to parse or use as raw
+                normalized["servings"] = {
+                    "amount": None,
+                    "unit": None,
+                    "raw": servings
+                }
+            elif servings is None:
+                normalized["servings"] = None
+            else:
+                # Unknown format, set to None
+                normalized["servings"] = None
 
         # Normalize ingredientGroups schema
         normalized["ingredientGroups"] = self._normalize_ingredient_groups(normalized.get("ingredientGroups"))
@@ -392,12 +520,13 @@ class GeminiService:
         # Ensure nutrition is never null + normalize key variants
         normalized["nutrition"] = self._ensure_nutrition_object(normalized.get("nutrition"))
 
-        # Compute total time if missing and parts exist
-        if normalized.get("totalTimeMinutes") is None:
-            pt = normalized.get("prepTimeMinutes") or 0
-            ct = normalized.get("cookTimeMinutes") or 0
-            if isinstance(pt, (int, float)) and isinstance(ct, (int, float)) and (pt or ct):
-                normalized["totalTimeMinutes"] = int(pt + ct)
+        # Compute total time if missing and parts exist (handle both camelCase and snake_case)
+        total_time = normalized.get("totalTimeMinutes") or normalized.get("total_time_minutes")
+        if total_time is None:
+            prep_time = normalized.get("prepTimeMinutes") or normalized.get("prep_time_minutes") or 0
+            cook_time = normalized.get("cookTimeMinutes") or normalized.get("cook_time_minutes") or 0
+            if isinstance(prep_time, (int, float)) and isinstance(cook_time, (int, float)) and (prep_time or cook_time):
+                normalized["totalTimeMinutes"] = int(prep_time + cook_time)
 
         return normalized
 
@@ -438,8 +567,7 @@ class GeminiService:
                         normalized_ingredients.append(
                             {
                                 "name": ing,
-                                "quantity": None,
-                                "unit": None,
+                                "amount": None,
                                 "preparation": None,
                                 "raw": ing,
                             }
@@ -447,7 +575,7 @@ class GeminiService:
                         continue
 
                     if not isinstance(ing, dict):
-                        normalized_ingredients.append({"name": str(ing), "quantity": None, "unit": None, "preparation": None, "raw": str(ing)})
+                        normalized_ingredients.append({"name": str(ing), "amount": None, "preparation": None, "raw": str(ing)})
                         continue
 
                     raw = ing.get("raw")
@@ -463,15 +591,24 @@ class GeminiService:
                     if ing_name is not None and not isinstance(ing_name, str):
                         ing_name = str(ing_name)
 
-                    qty = ing.get("quantity")
-                    if qty is not None and not isinstance(qty, str):
-                        qty = str(qty)
-
-                    unit = ing.get("unit")
-                    if unit == "":
-                        unit = None
-                    if unit is not None and not isinstance(unit, str):
-                        unit = str(unit)
+                    # Handle amount: combine quantity + unit, or use existing amount
+                    amount = ing.get("amount")
+                    if amount is None:
+                        # Try to combine quantity + unit from old format
+                        qty = ing.get("quantity")
+                        unit = ing.get("unit")
+                        if qty or unit:
+                            parts = []
+                            if qty:
+                                parts.append(str(qty))
+                            if unit:
+                                parts.append(str(unit))
+                            amount = " ".join(parts) if parts else None
+                    
+                    if amount is not None and not isinstance(amount, str):
+                        amount = str(amount)
+                    if amount == "":
+                        amount = None
 
                     # ingredient notes -> preparation (best fit in your schema)
                     prep = ing.get("preparation")
@@ -483,8 +620,7 @@ class GeminiService:
                     normalized_ingredients.append(
                         {
                             "name": ing_name or "",
-                            "quantity": qty,
-                            "unit": unit,
+                            "amount": amount,
                             "preparation": prep,
                             "raw": raw or (ing.get("raw") if isinstance(ing.get("raw"), str) else None) or (ing_name or ""),
                         }
