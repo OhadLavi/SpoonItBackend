@@ -16,6 +16,12 @@ from google.genai import types
 from markdownify import markdownify
 from playwright.async_api import async_playwright, TimeoutError as PWTimeoutError
 
+try:
+    import trafilatura
+    _TRAFILATURA_AVAILABLE = True
+except ImportError:
+    _TRAFILATURA_AVAILABLE = False
+
 from app.config import settings
 from app.models.recipe import Recipe
 from app.utils.exceptions import ScrapingError
@@ -315,6 +321,33 @@ class ScraperService:
             self._client = genai.Client(api_key=settings.gemini_api_key)
         return self._client
     
+    def _clean_schema_for_gemini(self, schema: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Remove fields that Gemini API doesn't accept in response_schema.
+        Specifically removes 'additionalProperties' and 'additional_properties'.
+        """
+        if not isinstance(schema, dict):
+            return schema
+        
+        cleaned = {}
+        for key, value in schema.items():
+            # Skip additionalProperties fields
+            if key in ("additionalProperties", "additional_properties"):
+                continue
+            
+            # Recursively clean nested dictionaries
+            if isinstance(value, dict):
+                cleaned[key] = self._clean_schema_for_gemini(value)
+            elif isinstance(value, list):
+                cleaned[key] = [
+                    self._clean_schema_for_gemini(item) if isinstance(item, dict) else item
+                    for item in value
+                ]
+            else:
+                cleaned[key] = value
+        
+        return cleaned
+    
     async def extract_recipe_from_url(self, url: str) -> Recipe:
         if is_social_url(url):
             logger.info(f"[social] Using headless browser for: {url}")
@@ -368,44 +401,84 @@ class ScraperService:
         logger.info(f"BrightData API Time: {timings['brightdata_api']:.2f} seconds")
         logger.info(f"Total HTML Fetch Time: {timings['html_fetch']:.2f} seconds")
         
-        # STEP 2: Parse HTML and convert to Markdown
-        logger.info("Step 2: Parsing HTML and converting to Markdown")
+        # STEP 2: Extract main content using Trafilatura (fast, article-only)
+        logger.info("Step 2: Extracting main content with Trafilatura")
         parse_start = time.time()
         
-        soup = BeautifulSoup(response.content, "html.parser")
+        html_content = response.content.decode('utf-8', errors='replace')
         
-        # Find main content (auto-detect)
-        main_element, used_selector = find_main_content(soup, None)
-        logger.info(f"Content selector used: {used_selector}")
+        # Use Trafilatura for fast, article-only extraction
+        if _TRAFILATURA_AVAILABLE:
+            try:
+                extracted_text = trafilatura.extract(
+                    html_content,
+                    include_comments=False,
+                    include_tables=False,
+                    favor_recall=False  # Fast mode - article only
+                )
+                if extracted_text and len(extracted_text.strip()) > 100:
+                    main_markdown = extracted_text
+                    logger.info(f"Trafilatura extracted {len(main_markdown)} characters")
+                else:
+                    logger.warning("Trafilatura returned empty/too short content, falling back to BeautifulSoup")
+                    raise ValueError("Trafilatura extraction failed")
+            except Exception as e:
+                logger.warning(f"Trafilatura extraction failed: {e}, falling back to BeautifulSoup")
+                # Fallback to BeautifulSoup
+                soup = BeautifulSoup(html_content, "html.parser")
+                main_element, used_selector = find_main_content(soup, None)
+                logger.info(f"Content selector used: {used_selector}")
+                if main_element is None:
+                    logger.warning("Could not find main content element, using entire body")
+                    main_element = soup.find('body') or soup
+                main_html = str(main_element)
+                main_markdown = markdownify(main_html)
+        else:
+            # Fallback if trafilatura not available
+            logger.warning("Trafilatura not available, using BeautifulSoup")
+            soup = BeautifulSoup(html_content, "html.parser")
+            main_element, used_selector = find_main_content(soup, None)
+            logger.info(f"Content selector used: {used_selector}")
+            if main_element is None:
+                logger.warning("Could not find main content element, using entire body")
+                main_element = soup.find('body') or soup
+            main_html = str(main_element)
+            main_markdown = markdownify(main_html)
         
-        if main_element is None:
-            logger.warning("Could not find main content element, using entire body")
-            main_element = soup.find('body') or soup
-        
-        main_html = str(main_element)
-        main_markdown = markdownify(main_html)
+        # Limit content size to avoid sending too much to Gemini
+        if len(main_markdown) > 50000:
+            logger.warning(f"Content too long ({len(main_markdown)} chars), truncating to 50000")
+            main_markdown = main_markdown[:50000] + "\n\n[... content truncated ...]"
         
         timings["html_parse"] = time.time() - parse_start
-        logger.info(f"Time to parse HTML and convert to Markdown: {timings['html_parse']:.2f} seconds")
+        logger.info(f"Time to extract content: {timings['html_parse']:.2f} seconds")
+        logger.info(f"Content length: {len(main_markdown)} characters")
         
         # STEP 3: Extract recipe data using Gemini API
         logger.info("Step 3: Extracting recipe data with Gemini API")
         gemini_start = time.time()
         
-        prompt = self._build_markdown_extraction_prompt(url, main_markdown)
+        # Detect language (default to Hebrew for Hebrew sites)
+        language = "he"  # Can be enhanced with actual detection if needed
+        
+        prompt = self._build_markdown_extraction_prompt(url, main_markdown, language)
         response_schema = self._get_recipe_response_schema()
         
+        # Clean schema to remove additionalProperties (Gemini doesn't accept this field)
+        cleaned_schema = self._clean_schema_for_gemini(response_schema)
+        
         config = types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=response_schema,
             temperature=0.0,
+            top_p=0.0,  # Deterministic output
+            response_mime_type="application/json",
+            response_schema=cleaned_schema,
         )
         
         logger.info(f"Sending to Gemini (_extract_with_brightdata):")
         logger.info(f"  Model: {GEMINI_MODEL}")
         logger.info(f"  Prompt: {prompt}")
-        logger.info(f"  Config: temperature={config.temperature}, response_mime_type={config.response_mime_type}")
-        logger.info(f"  Response schema: {json.dumps(response_schema, indent=2, ensure_ascii=False)}")
+        logger.info(f"  Config: temperature={config.temperature}, top_p={config.top_p}, response_mime_type={config.response_mime_type}")
+        logger.info(f"  Response schema: {json.dumps(cleaned_schema, indent=2, ensure_ascii=False)}")
         
         loop = asyncio.get_event_loop()
         try:
@@ -737,34 +810,23 @@ class ScraperService:
     # -------------------------
     # Prompts
     # -------------------------
-    def _build_markdown_extraction_prompt(self, url: str, markdown_content: str) -> str:
-        """Build prompt for extracting recipe from markdown content."""
-        return f"""Extract recipe data from the content below. Respond with JSON matching the provided schema.
+    def _build_markdown_extraction_prompt(self, url: str, markdown_content: str, language: str = "he") -> str:
+        """Build prompt for extracting recipe from markdown content. Simple parser prompt - no validation."""
+        lang_label = "Hebrew" if language == "he" else "English"
+        return f"""You are a strict JSON parser. Extract recipe data and return ONLY valid JSON matching the schema.
 
+Language: {lang_label}
 Source URL: {url}
+
+Rules:
+- If a field is missing, set it to null or empty array.
+- Do not explain.
+- Do not validate.
+- Do not add text outside JSON.
+- Return only the JSON object.
 
 CONTENT:
 {markdown_content}
-
-Critical Instructions:
-1. **Instruction Groups (MANDATORY):**
-   - Extract **ALL** instructions fully. Do not stop in the middle!
-   - Look for headers like "Preparation", "Instructions", "אופן הכנה".
-   - Verify that the instructions reach a logical conclusion (e.g., "Serve", "בתיאבון").
-   - Split long instructions into separate sentences.
-
-2. **Servings (Yield/Quantity):**
-   - Explicitly look for a quantity/yield statement.
-   - Examples to look for: "10 cookies", "4 servings", "המרכיבים ל-10".
-   - **CAUTION:** Do NOT confuse with pan size (e.g., "Size 24"). If it says "Ingredients for 10" (המרכיבים ל 10), the quantity is "10" (or "10 items"). Only if no other quantity exists, mention the pan size.
-
-3. **Notes:**
-   - Look for sections like "Tips", "Notes", "Did you know?", "Points to note" (טיפים, הערות, הידעת) and extract them into the `notes` list.
-
-4. **Ingredients:**
-   - Extract **ALL** ingredients appearing on the page.
-
-Do not translate (unless it's to English if requested, but keep original text mostly), do not normalize, do not invent.
 """
 
 
