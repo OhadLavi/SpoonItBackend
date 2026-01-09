@@ -96,17 +96,26 @@ class GeminiService:
     async def generate_recipe_from_ingredients(self, ingredients: List[str]) -> Recipe:
         prompt = self._build_generation_prompt(ingredients)
         try:
+            schema = self._clean_schema_for_gemini(Recipe.model_json_schema())
+            config = types.GenerateContentConfig(
+                temperature=settings.gemini_temperature,
+                response_mime_type="application/json",
+                response_schema=schema,
+            )
+            
+            logger.info(f"Sending to Gemini (generate_recipe_from_ingredients):")
+            logger.info(f"  Model: {settings.gemini_model}")
+            logger.info(f"  Prompt: {prompt}")
+            logger.info(f"  Config: temperature={config.temperature}, response_mime_type={config.response_mime_type}")
+            logger.info(f"  Response schema: {json.dumps(schema, indent=2, ensure_ascii=False)}")
+            
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
                 None,
                 lambda: self.client.models.generate_content(
                     model=settings.gemini_model,
                     contents=prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=settings.gemini_temperature,
-                        response_mime_type="application/json",
-                        response_schema=self._clean_schema_for_gemini(Recipe.model_json_schema()),
-                    ),
+                    config=config,
                 ),
             )
             if response is None or response.text is None or not response.text.strip():
@@ -123,17 +132,26 @@ class GeminiService:
     async def generate_recipe_from_text(self, user_prompt: str) -> Recipe:
         prompt = self._build_text_generation_prompt(user_prompt)
         try:
+            schema = self._clean_schema_for_gemini(Recipe.model_json_schema())
+            config = types.GenerateContentConfig(
+                temperature=settings.gemini_temperature,
+                response_mime_type="application/json",
+                response_schema=schema,
+            )
+            
+            logger.info(f"Sending to Gemini (generate_recipe_from_text):")
+            logger.info(f"  Model: {settings.gemini_model}")
+            logger.info(f"  Prompt: {prompt}")
+            logger.info(f"  Config: temperature={config.temperature}, response_mime_type={config.response_mime_type}")
+            logger.info(f"  Response schema: {json.dumps(schema, indent=2, ensure_ascii=False)}")
+            
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
                 None,
                 lambda: self.client.models.generate_content(
                     model=settings.gemini_model,
                     contents=prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=settings.gemini_temperature,
-                        response_mime_type="application/json",
-                        response_schema=self._clean_schema_for_gemini(Recipe.model_json_schema()),
-                    ),
+                    config=config,
                 ),
             )
             if response is None or response.text is None or not response.text.strip():
@@ -192,6 +210,19 @@ class GeminiService:
         loop = asyncio.get_event_loop()
         model_for_ocr = getattr(settings, "gemini_model_ocr", None) or "gemini-2.5-pro"
 
+        config = types.GenerateContentConfig(
+            temperature=0.0,
+            response_mime_type="application/json",
+            response_schema=transcript_schema,
+        )
+        
+        logger.info(f"Sending to Gemini (_transcribe_recipe_text_from_image):")
+        logger.info(f"  Model: {model_for_ocr}")
+        logger.info(f"  Prompt: {prompt}")
+        logger.info(f"  Image: mime_type={mime_type}, data_length={len(image_base64)} chars (base64)")
+        logger.info(f"  Config: temperature={config.temperature}, response_mime_type={config.response_mime_type}")
+        logger.info(f"  Response schema: {json.dumps(transcript_schema, indent=2, ensure_ascii=False)}")
+
         response = await loop.run_in_executor(
             None,
             lambda: self.client.models.generate_content(
@@ -200,11 +231,7 @@ class GeminiService:
                     prompt,
                     {"inline_data": {"mime_type": mime_type, "data": image_base64}},
                 ],
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    response_mime_type="application/json",
-                    response_schema=transcript_schema,
-                ),
+                config=config,
             ),
         )
 
@@ -261,17 +288,26 @@ class GeminiService:
 החזר JSON בלבד.
 """.strip()
 
+        schema = self._clean_schema_for_gemini(Recipe.model_json_schema())
+        config = types.GenerateContentConfig(
+            temperature=0.0,
+            response_mime_type="application/json",
+            response_schema=schema,
+        )
+        
+        logger.info(f"Sending to Gemini (_structure_recipe_from_transcript):")
+        logger.info(f"  Model: {settings.gemini_model}")
+        logger.info(f"  Prompt: {prompt}")
+        logger.info(f"  Config: temperature={config.temperature}, response_mime_type={config.response_mime_type}")
+        logger.info(f"  Response schema: {json.dumps(schema, indent=2, ensure_ascii=False)}")
+        
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None,
             lambda: self.client.models.generate_content(
                 model=settings.gemini_model,
                 contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    response_mime_type="application/json",
-                    response_schema=self._clean_schema_for_gemini(Recipe.model_json_schema()),
-                ),
+                config=config,
             ),
         )
 
