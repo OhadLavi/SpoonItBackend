@@ -395,6 +395,18 @@ class ScraperService:
         prompt = self._build_markdown_extraction_prompt(url, main_markdown)
         response_schema = self._get_recipe_response_schema()
         
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=response_schema,
+            temperature=0.0,
+        )
+        
+        logger.info(f"Sending to Gemini (_extract_with_brightdata):")
+        logger.info(f"  Model: {GEMINI_MODEL}")
+        logger.info(f"  Prompt: {prompt}")
+        logger.info(f"  Config: temperature={config.temperature}, response_mime_type={config.response_mime_type}")
+        logger.info(f"  Response schema: {json.dumps(response_schema, indent=2, ensure_ascii=False)}")
+        
         loop = asyncio.get_event_loop()
         try:
             gemini_response = await loop.run_in_executor(
@@ -402,11 +414,7 @@ class ScraperService:
                 lambda: self.client.models.generate_content(
                     model=GEMINI_MODEL,
                     contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=response_schema,
-                        temperature=0.0,
-                    ),
+                    config=config,
                 ),
             )
         except Exception as e:
@@ -488,13 +496,20 @@ class ScraperService:
 
         prompt = self._build_text_prompt(url, text)
 
+        config = types.GenerateContentConfig(
+            response_mime_type="text/plain",
+            temperature=0.0,
+        )
+        
+        logger.info(f"Sending to Gemini (_extract_social):")
+        logger.info(f"  Model: {GEMINI_MODEL}")
+        logger.info(f"  Prompt: {prompt}")
+        logger.info(f"  Config: temperature={config.temperature}, response_mime_type={config.response_mime_type}")
+
         response = self.client.models.generate_content(
             model=GEMINI_MODEL,
             contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="text/plain",
-                temperature=0.0,
-            ),
+            config=config,
         )
 
         return self._parse_recipe_response(response, url)
