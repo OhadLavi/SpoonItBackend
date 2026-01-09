@@ -401,11 +401,28 @@ class ScraperService:
         logger.info(f"BrightData API Time: {timings['brightdata_api']:.2f} seconds")
         logger.info(f"Total HTML Fetch Time: {timings['html_fetch']:.2f} seconds")
         
+        # Validate response content
+        if not response.content:
+            logger.error("BrightData API returned empty response content")
+            raise ScrapingError("BrightData API returned empty HTML content")
+        
+        logger.info(f"BrightData response size: {len(response.content)} bytes")
+        logger.debug(f"BrightData response preview (first 500 bytes): {response.content[:500]}")
+        
         # STEP 2: Extract main content using Trafilatura (fast, article-only)
         logger.info("Step 2: Extracting main content with Trafilatura")
         parse_start = time.time()
         
-        html_content = response.content.decode('utf-8', errors='replace')
+        # Try to decode HTML content
+        try:
+            html_content = response.content.decode('utf-8', errors='replace')
+            logger.info(f"Decoded HTML content length: {len(html_content)} characters")
+            if len(html_content.strip()) < 100:
+                logger.warning(f"HTML content is very short ({len(html_content)} chars), might be empty or error page")
+                logger.debug(f"HTML content preview: {html_content[:1000]}")
+        except Exception as e:
+            logger.error(f"Failed to decode HTML content: {e}")
+            raise ScrapingError(f"Failed to decode HTML content from BrightData: {e}") from e
         
         # Use Trafilatura for fast, article-only extraction
         main_markdown = None
@@ -428,15 +445,54 @@ class ScraperService:
         # Fallback to BeautifulSoup if Trafilatura didn't work
         if not main_markdown or len(main_markdown.strip()) < 100:
             logger.info("Using BeautifulSoup for content extraction")
-            soup = BeautifulSoup(html_content, "html.parser")
-            main_element, used_selector = find_main_content(soup, None)
-            logger.info(f"Content selector used: {used_selector}")
-            if main_element is None:
-                logger.warning("Could not find main content element, using entire body")
-                main_element = soup.find('body') or soup
-            main_html = str(main_element)
-            main_markdown = markdownify(main_html)
-            logger.info(f"BeautifulSoup extracted {len(main_markdown)} characters")
+            
+            # Validate HTML content before parsing
+            if not html_content or len(html_content.strip()) < 50:
+                logger.error(f"HTML content is too short or empty: {len(html_content) if html_content else 0} characters")
+                logger.error(f"HTML content preview: {html_content[:500] if html_content else 'None'}")
+                raise ScrapingError(f"HTML content from BrightData is empty or too short ({len(html_content) if html_content else 0} chars). Response might be an error page or blocked.")
+            
+            try:
+                soup = BeautifulSoup(html_content, "html.parser")
+                
+                # Check if soup parsed successfully
+                if not soup:
+                    logger.error("BeautifulSoup failed to parse HTML - soup is None")
+                    raise ScrapingError("Failed to parse HTML with BeautifulSoup")
+                
+                # Try to find main content
+                main_element, used_selector = find_main_content(soup, None)
+                logger.info(f"Content selector used: {used_selector}")
+                
+                if main_element is None:
+                    logger.warning("Could not find main content element, using entire body")
+                    main_element = soup.find('body') or soup
+                
+                # If still None, use the entire soup
+                if main_element is None:
+                    logger.warning("No body element found, using entire soup")
+                    main_element = soup
+                
+                # Try markdownify first
+                main_html = str(main_element)
+                main_markdown = markdownify(main_html)
+                logger.info(f"BeautifulSoup markdownify extracted {len(main_markdown)} characters")
+                
+                # If markdownify resulted in empty content, try direct text extraction
+                if not main_markdown or len(main_markdown.strip()) < 50:
+                    logger.warning("Markdown conversion resulted in empty content, trying direct text extraction")
+                    main_markdown = main_element.get_text(separator='\n', strip=True)
+                    logger.info(f"BeautifulSoup direct text extraction got {len(main_markdown)} characters")
+                    
+                    # If still empty, log the HTML structure for debugging
+                    if not main_markdown or len(main_markdown.strip()) < 50:
+                        logger.error(f"Both markdownify and text extraction failed. HTML element preview: {main_html[:500]}")
+                        logger.error(f"Element type: {type(main_element)}, has text: {bool(main_element.get_text()) if hasattr(main_element, 'get_text') else 'N/A'}")
+                        raise ScrapingError(f"Failed to extract any text content from HTML. Element appears to be empty.")
+                    
+            except Exception as e:
+                logger.error(f"BeautifulSoup parsing/extraction failed: {e}", exc_info=True)
+                raise ScrapingError(f"Failed to extract content from HTML: {e}") from e
         
         # Validate we have content
         if not main_markdown or len(main_markdown.strip()) < 50:
