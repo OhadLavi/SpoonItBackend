@@ -408,6 +408,7 @@ class ScraperService:
         html_content = response.content.decode('utf-8', errors='replace')
         
         # Use Trafilatura for fast, article-only extraction
+        main_markdown = None
         if _TRAFILATURA_AVAILABLE:
             try:
                 extracted_text = trafilatura.extract(
@@ -420,22 +421,13 @@ class ScraperService:
                     main_markdown = extracted_text
                     logger.info(f"Trafilatura extracted {len(main_markdown)} characters")
                 else:
-                    logger.warning("Trafilatura returned empty/too short content, falling back to BeautifulSoup")
-                    raise ValueError("Trafilatura extraction failed")
+                    logger.warning(f"Trafilatura returned empty/too short content (length: {len(extracted_text) if extracted_text else 0}), falling back to BeautifulSoup")
             except Exception as e:
                 logger.warning(f"Trafilatura extraction failed: {e}, falling back to BeautifulSoup")
-                # Fallback to BeautifulSoup
-                soup = BeautifulSoup(html_content, "html.parser")
-                main_element, used_selector = find_main_content(soup, None)
-                logger.info(f"Content selector used: {used_selector}")
-                if main_element is None:
-                    logger.warning("Could not find main content element, using entire body")
-                    main_element = soup.find('body') or soup
-                main_html = str(main_element)
-                main_markdown = markdownify(main_html)
-        else:
-            # Fallback if trafilatura not available
-            logger.warning("Trafilatura not available, using BeautifulSoup")
+        
+        # Fallback to BeautifulSoup if Trafilatura didn't work
+        if not main_markdown or len(main_markdown.strip()) < 100:
+            logger.info("Using BeautifulSoup for content extraction")
             soup = BeautifulSoup(html_content, "html.parser")
             main_element, used_selector = find_main_content(soup, None)
             logger.info(f"Content selector used: {used_selector}")
@@ -444,6 +436,12 @@ class ScraperService:
                 main_element = soup.find('body') or soup
             main_html = str(main_element)
             main_markdown = markdownify(main_html)
+            logger.info(f"BeautifulSoup extracted {len(main_markdown)} characters")
+        
+        # Validate we have content
+        if not main_markdown or len(main_markdown.strip()) < 50:
+            logger.error(f"Content extraction failed - only got {len(main_markdown) if main_markdown else 0} characters")
+            raise ScrapingError("Failed to extract meaningful content from the page")
         
         # Limit content size to avoid sending too much to Gemini
         if len(main_markdown) > 50000:
@@ -452,16 +450,32 @@ class ScraperService:
         
         timings["html_parse"] = time.time() - parse_start
         logger.info(f"Time to extract content: {timings['html_parse']:.2f} seconds")
-        logger.info(f"Content length: {len(main_markdown)} characters")
+        logger.info(f"Final content length: {len(main_markdown)} characters")
+        logger.debug(f"Content preview (first 500 chars): {main_markdown[:500]}")
         
         # STEP 3: Extract recipe data using Gemini API
         logger.info("Step 3: Extracting recipe data with Gemini API")
         gemini_start = time.time()
         
+        # Validate content before sending to Gemini
+        if not main_markdown or not main_markdown.strip():
+            logger.error(f"Content validation failed: main_markdown is {type(main_markdown)}, length: {len(main_markdown) if main_markdown else 0}")
+            raise ScrapingError("No content extracted from the page - cannot extract recipe")
+        
         # Detect language (default to Hebrew for Hebrew sites)
         language = "he"  # Can be enhanced with actual detection if needed
         
+        logger.info(f"Building prompt with content length: {len(main_markdown)} characters")
+        logger.info(f"Content preview (first 200 chars): {main_markdown[:200]}")
         prompt = self._build_markdown_extraction_prompt(url, main_markdown, language)
+        
+        # Verify the prompt contains the content
+        if "CONTENT:" in prompt and len(prompt.split("CONTENT:")[1].strip()) < 10:
+            logger.error(f"WARNING: Prompt built but CONTENT section appears empty! Prompt length: {len(prompt)}")
+            logger.error(f"main_markdown type: {type(main_markdown)}, length: {len(main_markdown) if main_markdown else 0}")
+        
+        # Log a preview of what's being sent (first 1000 chars of prompt)
+        logger.debug(f"Full prompt preview (first 1000 chars): {prompt[:1000]}")
         response_schema = self._get_recipe_response_schema()
         
         # Clean schema to remove additionalProperties (Gemini doesn't accept this field)
@@ -812,11 +826,14 @@ class ScraperService:
     # -------------------------
     def _build_markdown_extraction_prompt(self, url: str, markdown_content: str, language: str = "he") -> str:
         """Build prompt for extracting recipe from markdown content. Simple parser prompt - no validation."""
+        # Validate content is provided
+        if not markdown_content or not markdown_content.strip():
+            raise ValueError(f"Cannot build prompt: markdown_content is empty (type: {type(markdown_content)}, length: {len(markdown_content) if markdown_content else 0})")
+        
         lang_label = "Hebrew" if language == "he" else "English"
         return f"""You are a strict JSON parser. Extract recipe data and return ONLY valid JSON matching the schema.
 
 Language: {lang_label}
-Source URL: {url}
 
 Rules:
 - If a field is missing, set it to null or empty array.
