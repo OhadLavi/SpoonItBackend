@@ -401,13 +401,32 @@ class ScraperService:
         logger.info(f"BrightData API Time: {timings['brightdata_api']:.2f} seconds")
         logger.info(f"Total HTML Fetch Time: {timings['html_fetch']:.2f} seconds")
         
+        # Log response details
+        logger.info(f"BrightData response status code: {response.status_code}")
+        logger.info(f"BrightData response headers: {dict(response.headers)}")
+        logger.info(f"BrightData response size: {len(response.content)} bytes")
+        
         # Validate response content
         if not response.content:
             logger.error("BrightData API returned empty response content")
             raise ScrapingError("BrightData API returned empty HTML content")
         
-        logger.info(f"BrightData response size: {len(response.content)} bytes")
-        logger.debug(f"BrightData response preview (first 500 bytes): {response.content[:500]}")
+        # Log response content (first 2000 chars for debugging)
+        try:
+            response_preview = response.content[:2000].decode('utf-8', errors='replace')
+            logger.info(f"BrightData response preview (first 2000 chars):\n{response_preview}")
+        except Exception as e:
+            logger.warning(f"Could not decode response preview: {e}")
+            logger.info(f"BrightData response preview (first 500 bytes, raw): {response.content[:500]}")
+        
+        # Log full response if it's small enough (less than 10KB)
+        if len(response.content) < 10000:
+            try:
+                full_response = response.content.decode('utf-8', errors='replace')
+                logger.info(f"BrightData full response ({len(full_response)} chars):\n{full_response}")
+            except Exception as e:
+                logger.warning(f"Could not decode full response: {e}")
+                logger.info(f"BrightData full response (raw bytes): {response.content}")
         
         # STEP 2: Extract main content using Trafilatura (fast, article-only)
         logger.info("Step 2: Extracting main content with Trafilatura")
