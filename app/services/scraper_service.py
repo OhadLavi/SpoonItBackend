@@ -650,6 +650,9 @@ class ScraperService:
         recipe_data = self._normalize_recipe_data(recipe_data)
         recipe_data["source"] = url
         
+        # Remove ingredients field before creating Recipe (it's computed, not stored)
+        recipe_data.pop("ingredients", None)
+        
         return Recipe(**recipe_data)
 
 
@@ -792,6 +795,9 @@ class ScraperService:
         data = self._normalize_recipe_data(data)
         
         data["source"] = url
+        # Remove ingredients field before creating Recipe (it's computed, not stored)
+        data.pop("ingredients", None)
+        
         return Recipe(**data)
     
     def _normalize_recipe_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -916,25 +922,74 @@ class ScraperService:
         elif "ingredientGroups" not in normalized:
             normalized["ingredientGroups"] = []
         
-        # nutrition: convert string values to numbers or None
+        # nutrition: normalize and filter to only allowed fields
         if "nutrition" in normalized and isinstance(normalized["nutrition"], dict):
             nutrition = normalized["nutrition"]
-            for field in ["calories", "protein_g", "fat_g", "carbs_g"]:
-                if field in nutrition:
-                    value = nutrition[field]
-                    if isinstance(value, str):
-                        # Try to parse number, or set to None
-                        try:
-                            # Remove non-numeric characters except digits and decimal point
-                            cleaned = ''.join(c for c in value if c.isdigit() or c == '.')
-                            if cleaned:
-                                nutrition[field] = float(cleaned)
-                            else:
-                                nutrition[field] = None
-                        except (ValueError, TypeError):
-                            nutrition[field] = None
-                    elif not isinstance(value, (int, float)) and value is not None:
-                        nutrition[field] = None
+            # Map variant field names to correct schema fields and filter out extra fields
+            normalized_nutrition = {}
+            
+            # calories
+            calories = nutrition.get("calories")
+            if isinstance(calories, str):
+                try:
+                    cleaned = ''.join(c for c in calories if c.isdigit() or c == '.')
+                    normalized_nutrition["calories"] = float(cleaned) if cleaned else None
+                except (ValueError, TypeError):
+                    normalized_nutrition["calories"] = None
+            elif isinstance(calories, (int, float)):
+                normalized_nutrition["calories"] = float(calories) if calories >= 0 else None
+            else:
+                normalized_nutrition["calories"] = None
+            
+            # protein_g (map from protein or protein_g)
+            protein = nutrition.get("protein_g") or nutrition.get("protein")
+            if isinstance(protein, str):
+                try:
+                    cleaned = ''.join(c for c in protein if c.isdigit() or c == '.')
+                    normalized_nutrition["protein_g"] = float(cleaned) if cleaned else None
+                except (ValueError, TypeError):
+                    normalized_nutrition["protein_g"] = None
+            elif isinstance(protein, (int, float)):
+                normalized_nutrition["protein_g"] = float(protein) if protein >= 0 else None
+            else:
+                normalized_nutrition["protein_g"] = None
+            
+            # fat_g (map from fat or fat_g)
+            fat = nutrition.get("fat_g") or nutrition.get("fat")
+            if isinstance(fat, str):
+                try:
+                    cleaned = ''.join(c for c in fat if c.isdigit() or c == '.')
+                    normalized_nutrition["fat_g"] = float(cleaned) if cleaned else None
+                except (ValueError, TypeError):
+                    normalized_nutrition["fat_g"] = None
+            elif isinstance(fat, (int, float)):
+                normalized_nutrition["fat_g"] = float(fat) if fat >= 0 else None
+            else:
+                normalized_nutrition["fat_g"] = None
+            
+            # carbs_g (map from carbs, carbohydrates, or carbs_g)
+            carbs = nutrition.get("carbs_g") or nutrition.get("carbs") or nutrition.get("carbohydrates")
+            if isinstance(carbs, str):
+                try:
+                    cleaned = ''.join(c for c in carbs if c.isdigit() or c == '.')
+                    normalized_nutrition["carbs_g"] = float(cleaned) if cleaned else None
+                except (ValueError, TypeError):
+                    normalized_nutrition["carbs_g"] = None
+            elif isinstance(carbs, (int, float)):
+                normalized_nutrition["carbs_g"] = float(carbs) if carbs >= 0 else None
+            else:
+                normalized_nutrition["carbs_g"] = None
+            
+            # per
+            normalized_nutrition["per"] = nutrition.get("per") or "מנה"
+            
+            # Only keep allowed fields (remove extra fields like saturated_fat, sugar, fiber, sodium, etc.)
+            normalized["nutrition"] = normalized_nutrition
+        elif "nutrition" not in normalized:
+            normalized["nutrition"] = None
+        
+        # Remove ingredients field (it's computed, not stored)
+        normalized.pop("ingredients", None)
         
         # Ensure required fields exist
         if "ingredientGroups" not in normalized:

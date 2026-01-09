@@ -528,6 +528,9 @@ class GeminiService:
             if isinstance(prep_time, (int, float)) and isinstance(cook_time, (int, float)) and (prep_time or cook_time):
                 normalized["totalTimeMinutes"] = int(prep_time + cook_time)
 
+        # Remove ingredients field (it's computed, not stored)
+        normalized.pop("ingredients", None)
+
         return normalized
 
     def _ensure_string_list(self, v: Any) -> List[str]:
@@ -791,37 +794,55 @@ class GeminiService:
 
         return False
 
-    def _ensure_nutrition_object(self, nutrition: Any) -> Dict[str, Any]:
+    def _ensure_nutrition_object(self, nutrition: Any) -> Optional[Dict[str, Any]]:
         """
         Normalize nutrition to your schema:
           calories, protein_g, fat_g, carbs_g, per
         Accepts variants like protein/carbohydrates/fat.
+        Only returns allowed fields (filters out extra fields like saturated_fat, sugar, etc.)
         """
-        def _f(x: Any) -> float:
+        def _f(x: Any) -> Optional[float]:
+            if x is None:
+                return None
+            if isinstance(x, str):
+                try:
+                    cleaned = ''.join(c for c in x if c.isdigit() or c == '.')
+                    return float(cleaned) if cleaned else None
+                except (ValueError, TypeError):
+                    return None
             try:
-                return float(x)
-            except Exception:
-                return 0.0
+                val = float(x)
+                return val if val >= 0 else None
+            except (ValueError, TypeError):
+                return None
 
         if not isinstance(nutrition, dict):
-            return {"calories": 0, "protein_g": 0, "fat_g": 0, "carbs_g": 0, "per": "מנה"}
+            return None
 
-        calories = nutrition.get("calories", 0)
-
-        # variants
-        protein = nutrition.get("protein_g", nutrition.get("protein", 0))
-        fat = nutrition.get("fat_g", nutrition.get("fat", 0))
-        carbs = nutrition.get("carbs_g", nutrition.get("carbohydrates", nutrition.get("carbs", 0)))
-
-        per = nutrition.get("per") or "מנה"
-
-        return {
-            "calories": _f(calories),
-            "protein_g": _f(protein),
-            "fat_g": _f(fat),
-            "carbs_g": _f(carbs),
-            "per": per,
-        }
+        # Only extract and return allowed fields
+        normalized = {}
+        
+        # calories
+        normalized["calories"] = _f(nutrition.get("calories"))
+        
+        # protein_g (map from protein or protein_g)
+        normalized["protein_g"] = _f(nutrition.get("protein_g") or nutrition.get("protein"))
+        
+        # fat_g (map from fat or fat_g)
+        normalized["fat_g"] = _f(nutrition.get("fat_g") or nutrition.get("fat"))
+        
+        # carbs_g (map from carbs, carbohydrates, or carbs_g)
+        normalized["carbs_g"] = _f(nutrition.get("carbs_g") or nutrition.get("carbs") or nutrition.get("carbohydrates"))
+        
+        # per
+        per = nutrition.get("per")
+        normalized["per"] = per if isinstance(per, str) else "מנה"
+        
+        # Return None if all values are None (instead of empty dict)
+        if all(v is None for k, v in normalized.items() if k != "per"):
+            return None
+        
+        return normalized
 
     # --------------------------
     # Image preprocessing
