@@ -526,7 +526,7 @@ class ScraperService:
         timings["html_parse"] = time.time() - parse_start
         logger.info(f"Time to extract content: {timings['html_parse']:.2f} seconds")
         logger.info(f"Final content length: {len(main_markdown)} characters")
-        logger.debug(f"Content preview (first 500 chars): {main_markdown[:500]}")
+        logger.debug(f"Content preview: {main_markdown}")
         
         # Extract website title from HTML and prepend to content
         page_title = None
@@ -564,7 +564,7 @@ class ScraperService:
         language = "he"  # Can be enhanced with actual detection if needed
         
         logger.info(f"Building prompt with content length: {len(main_markdown)} characters")
-        logger.info(f"Content preview (first 200 chars): {main_markdown[:200]}")
+        logger.info(f"Content preview: {main_markdown}")
         prompt = self._build_markdown_extraction_prompt(url, main_markdown, language)
         
         # Verify the prompt contains the content
@@ -626,7 +626,7 @@ class ScraperService:
             recipe_data = json.loads(json_text)
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON from Gemini response: {e}")
-            logger.error(f"Raw response text: {recipe_raw_string[:500]}...")  # Log first 500 chars
+            logger.error(f"Raw response text: {recipe_raw_string}...")
             raise ScrapingError(f"Failed to parse recipe JSON: {e}") from e
         
         timings["json_parse"] = time.time() - parse_json_start
