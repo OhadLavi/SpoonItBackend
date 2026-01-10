@@ -1227,25 +1227,36 @@ CONTENT:
             for selector in ingredient_selectors:
                 try:
                     elements = soup.select(selector)
+                    if not elements:
+                        continue
+                    
+                    # Check if elements contain lists (ul/ol with li) or are individual ingredient items
+                    all_ingredients = []
+                    
                     for elem in elements:
-                        # Get all list items or direct text
+                        # First check if this element contains a list
                         items = elem.find_all('li')
                         if items:
-                            ingredient_text = "\n".join(f"• {li.get_text(strip=True)}" for li in items if li.get_text(strip=True))
-                            if ingredient_text and len(ingredient_text) > 10:
-                                extracted_parts.append(f"מצרכים:\n{ingredient_text}")
-                                logger.debug(f"Found ingredients via selector '{selector}': {len(items)} items")
-                                break  # Found ingredients, don't duplicate
+                            for li in items:
+                                text = li.get_text(strip=True)
+                                if text:
+                                    all_ingredients.append(f"• {text}")
                         else:
-                            # No list items, try direct text
-                            text = elem.get_text(separator='\n', strip=True)
-                            if text and len(text) > 20:
-                                extracted_parts.append(f"מצרכים:\n{text}")
-                                break
-                except Exception:
+                            # No list items - this element itself might be an ingredient
+                            text = elem.get_text(strip=True)
+                            if text and len(text) > 2:
+                                all_ingredients.append(f"• {text}")
+                    
+                    # Only use if we found a reasonable number of ingredients
+                    if len(all_ingredients) >= 3:
+                        ingredient_text = "\n".join(all_ingredients)
+                        extracted_parts.append(f"מצרכים:\n{ingredient_text}")
+                        logger.debug(f"Found ingredients via selector '{selector}': {len(all_ingredients)} items")
+                        break  # Found ingredients, stop trying other selectors
+                        
+                except Exception as e:
+                    logger.debug(f"Selector '{selector}' failed: {e}")
                     continue
-                if extracted_parts:
-                    break  # Found ingredients via one selector, stop
             
             # Generic selectors for recipe instructions (priority order)
             instruction_selectors = [
@@ -1266,21 +1277,35 @@ CONTENT:
             for selector in instruction_selectors:
                 try:
                     elements = soup.select(selector)
+                    if not elements:
+                        continue
+                    
+                    all_steps = []
+                    
                     for elem in elements:
-                        # Get numbered steps or paragraphs
+                        # Check if this element contains list items or paragraphs
                         items = elem.find_all(['li', 'p'])
                         if items:
-                            steps = [item.get_text(strip=True) for item in items if item.get_text(strip=True) and len(item.get_text(strip=True)) > 5]
-                            if steps:
-                                instruction_text = "\n".join(f"{i+1}. {step}" for i, step in enumerate(steps))
-                                if len(instruction_text) > 20:
-                                    extracted_parts.append(f"אופן ההכנה:\n{instruction_text}")
-                                    logger.debug(f"Found instructions via selector '{selector}': {len(steps)} steps")
-                                    break
-                except Exception:
+                            for item in items:
+                                text = item.get_text(strip=True)
+                                if text and len(text) > 5:
+                                    all_steps.append(text)
+                        else:
+                            # This element itself might be an instruction step
+                            text = elem.get_text(strip=True)
+                            if text and len(text) > 10:
+                                all_steps.append(text)
+                    
+                    # Only use if we found a reasonable number of steps
+                    if len(all_steps) >= 2:
+                        instruction_text = "\n".join(f"{i+1}. {step}" for i, step in enumerate(all_steps))
+                        extracted_parts.append(f"אופן ההכנה:\n{instruction_text}")
+                        logger.debug(f"Found instructions via selector '{selector}': {len(all_steps)} steps")
+                        break  # Found instructions, stop trying other selectors
+                        
+                except Exception as e:
+                    logger.debug(f"Instruction selector '{selector}' failed: {e}")
                     continue
-                if len(extracted_parts) > 1:  # Have both ingredients and instructions
-                    break
             
             result = "\n\n".join(extracted_parts)
             return result
