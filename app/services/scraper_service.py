@@ -411,13 +411,13 @@ class ScraperService:
             logger.error("BrightData API returned empty response content")
             raise ScrapingError("BrightData API returned empty HTML content")
         
-        # Log response content (first 2000 chars for debugging)
+        # Log response content
         try:
-            response_preview = response.content[:2000].decode('utf-8', errors='replace')
-            logger.info(f"BrightData response preview (first 2000 chars):\n{response_preview}")
+            response_preview = response.content.decode('utf-8', errors='replace')
+            logger.info(f"BrightData response preview:\n{response_preview}")
         except Exception as e:
             logger.warning(f"Could not decode response preview: {e}")
-            logger.info(f"BrightData response preview (first 500 bytes, raw): {response.content[:500]}")
+            logger.info(f"BrightData response preview: {response.content}")
         
         # Log full response if it's small enough (less than 10KB)
         if len(response.content) < 10000:
@@ -591,8 +591,8 @@ class ScraperService:
             logger.error(f"WARNING: Prompt built but CONTENT section appears empty! Prompt length: {len(prompt)}")
             logger.error(f"main_markdown type: {type(main_markdown)}, length: {len(main_markdown) if main_markdown else 0}")
         
-        # Log a preview of what's being sent (first 1000 chars of prompt)
-        logger.debug(f"Full prompt preview (first 1000 chars): {prompt[:1000]}")
+        # Log a preview of what's being sent
+        logger.debug(f"Full prompt preview: {prompt}")
         response_schema = self._get_recipe_response_schema()
         
         # Clean schema to remove additionalProperties (Gemini doesn't accept this field)
