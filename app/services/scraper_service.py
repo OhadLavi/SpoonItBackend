@@ -443,6 +443,12 @@ class ScraperService:
             logger.error(f"Failed to decode HTML content: {e}")
             raise ScrapingError(f"Failed to decode HTML content from BrightData: {e}") from e
         
+        # First, extract recipe-specific structured content (ingredients, instructions)
+        # Trafilatura often misses these as they're in structured divs, not "article" text
+        recipe_structured_content = self._extract_recipe_structured_content(html_content)
+        if recipe_structured_content:
+            logger.info(f"Extracted recipe structured content: {len(recipe_structured_content)} chars")
+        
         # Use Trafilatura for fast, article-only extraction
         main_markdown = None
         if _TRAFILATURA_AVAILABLE:
@@ -450,8 +456,8 @@ class ScraperService:
                 extracted_text = trafilatura.extract(
                     html_content,
                     include_comments=False,
-                    include_tables=False,
-                    favor_recall=False  # Fast mode - article only
+                    include_tables=True,  # Include tables - recipes often use them
+                    favor_recall=True  # More inclusive - capture more content
                 )
                 if extracted_text and len(extracted_text.strip()) > 100:
                     main_markdown = extracted_text
@@ -517,6 +523,19 @@ class ScraperService:
         if not main_markdown or len(main_markdown.strip()) < 50:
             logger.error(f"Content extraction failed - only got {len(main_markdown) if main_markdown else 0} characters")
             raise ScrapingError("Failed to extract meaningful content from the page")
+        
+        # Combine main content with recipe structured content if both exist
+        # This ensures ingredients/instructions from structured HTML elements aren't lost
+        if recipe_structured_content:
+            # Check if the structured content is already in main_markdown
+            # If not, append it to ensure Gemini sees the ingredients
+            if main_markdown and recipe_structured_content not in main_markdown:
+                # Check if key parts are missing (e.g., specific ingredient lines)
+                sample_lines = recipe_structured_content.split('\n')[:3]
+                missing_content = any(line.strip() and line.strip() not in main_markdown for line in sample_lines if len(line.strip()) > 5)
+                if missing_content:
+                    logger.info("Adding structured recipe content to main content (ingredients/instructions may be missing)")
+                    main_markdown = f"{main_markdown}\n\n--- Recipe Structured Data ---\n{recipe_structured_content}"
         
         # Limit content size to avoid sending too much to Gemini
         if len(main_markdown) > 50000:
@@ -1124,10 +1143,95 @@ CRITICAL RULES:
 CONTENT:
 {markdown_content}
 """
-
-
-
-
+    def _extract_recipe_structured_content(self, html_content: str) -> str:
+        """
+        Extract recipe-specific structured content (ingredients, instructions) from HTML.
+        Trafilatura often misses these as they're in structured divs, not "article" text.
+        """
+        try:
+            soup = BeautifulSoup(html_content, "html.parser")
+            extracted_parts = []
+            
+            # Common selectors for recipe ingredients
+            ingredient_selectors = [
+                # Class-based selectors
+                '[class*="ingredient"]',
+                '[class*="Ingredient"]',
+                '.prod_ing',
+                '.recipe-ingredients',
+                '.ingredients-list',
+                '.wprm-recipe-ingredients',
+                '.tasty-recipes-ingredients',
+                # ID-based selectors  
+                '#ingredients',
+                '[id*="ingredient"]',
+                # Schema.org
+                '[itemprop="recipeIngredient"]',
+                '[itemprop="ingredients"]',
+            ]
+            
+            for selector in ingredient_selectors:
+                try:
+                    elements = soup.select(selector)
+                    for elem in elements:
+                        # Get all list items or direct text
+                        items = elem.find_all('li')
+                        if items:
+                            ingredient_text = "\n".join(f"• {li.get_text(strip=True)}" for li in items if li.get_text(strip=True))
+                            if ingredient_text and len(ingredient_text) > 10:
+                                extracted_parts.append(f"מצרכים:\n{ingredient_text}")
+                                logger.debug(f"Found ingredients via selector '{selector}': {len(items)} items")
+                                break  # Found ingredients, don't duplicate
+                        else:
+                            # No list items, try direct text
+                            text = elem.get_text(separator='\n', strip=True)
+                            if text and len(text) > 20:
+                                extracted_parts.append(f"מצרכים:\n{text}")
+                                break
+                except Exception:
+                    continue
+                if extracted_parts:
+                    break  # Found ingredients via one selector, stop
+            
+            # Common selectors for recipe instructions
+            instruction_selectors = [
+                '[class*="instruction"]',
+                '[class*="direction"]',
+                '[class*="preparation"]',
+                '.prod_con',
+                '.recipe-instructions',
+                '.wprm-recipe-instructions',
+                '.tasty-recipes-instructions',
+                '[itemprop="recipeInstructions"]',
+                # Hebrew selectors
+                '[class*="הכנה"]',
+            ]
+            
+            for selector in instruction_selectors:
+                try:
+                    elements = soup.select(selector)
+                    for elem in elements:
+                        # Get numbered steps or paragraphs
+                        items = elem.find_all(['li', 'p'])
+                        if items:
+                            steps = [item.get_text(strip=True) for item in items if item.get_text(strip=True) and len(item.get_text(strip=True)) > 5]
+                            if steps:
+                                instruction_text = "\n".join(f"{i+1}. {step}" for i, step in enumerate(steps))
+                                if len(instruction_text) > 20:
+                                    extracted_parts.append(f"אופן ההכנה:\n{instruction_text}")
+                                    logger.debug(f"Found instructions via selector '{selector}': {len(steps)} steps")
+                                    break
+                except Exception:
+                    continue
+                if len(extracted_parts) > 1:  # Have both ingredients and instructions
+                    break
+            
+            result = "\n\n".join(extracted_parts)
+            return result
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract recipe structured content: {e}")
+            return ""
 
     def _get_recipe_response_schema(self) -> Dict[str, Any]:
         """Get the recipe JSON schema from Pydantic model for Gemini responseSchema."""
