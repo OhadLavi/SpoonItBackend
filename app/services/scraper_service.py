@@ -653,7 +653,17 @@ class ScraperService:
         # Remove ingredients field before creating Recipe (it's computed, not stored)
         recipe_data.pop("ingredients", None)
         
-        return Recipe(**recipe_data)
+        # Log the final normalized data being sent to Recipe
+        logger.info(f"=== FINAL NORMALIZED DATA FOR RECIPE ===")
+        logger.info(f"Final data: {json.dumps(recipe_data, indent=2, ensure_ascii=False, default=str)}")
+        
+        recipe = Recipe(**recipe_data)
+        
+        # Log the final Recipe JSON being returned to frontend
+        logger.info(f"=== RECIPE JSON RETURNED TO FRONTEND ===")
+        logger.info(f"Recipe JSON: {recipe.model_dump_json(indent=2, by_alias=True)}")
+        
+        return recipe
 
 
     # -------------------------
@@ -684,15 +694,22 @@ class ScraperService:
 
         prompt = self._build_text_prompt(url, text)
 
+        # Use the same schema enforcement as _extract_with_brightdata
+        response_schema = self._get_recipe_response_schema()
+        cleaned_schema = self._clean_schema_for_gemini(response_schema)
+        
         config = types.GenerateContentConfig(
-            response_mime_type="text/plain",
             temperature=0.0,
+            top_p=0.0,
+            response_mime_type="application/json",
+            response_schema=cleaned_schema,
         )
         
         logger.info(f"Sending to Gemini (_extract_social):")
         logger.info(f"  Model: {GEMINI_MODEL}")
         logger.info(f"  Prompt: {prompt}")
-        logger.info(f"  Config: temperature={config.temperature}, response_mime_type={config.response_mime_type}")
+        logger.info(f"  Config: temperature={config.temperature}, top_p={config.top_p}, response_mime_type={config.response_mime_type}")
+        logger.info(f"  Response schema: {json.dumps(cleaned_schema, indent=2, ensure_ascii=False)}")
 
         response = self.client.models.generate_content(
             model=GEMINI_MODEL,
@@ -798,7 +815,17 @@ class ScraperService:
         # Remove ingredients field before creating Recipe (it's computed, not stored)
         data.pop("ingredients", None)
         
-        return Recipe(**data)
+        # Log the final normalized data being sent to Recipe
+        logger.info(f"=== FINAL NORMALIZED DATA FOR RECIPE ===")
+        logger.info(f"Final data: {json.dumps(data, indent=2, ensure_ascii=False, default=str)}")
+        
+        recipe = Recipe(**data)
+        
+        # Log the final Recipe JSON being returned to frontend
+        logger.info(f"=== RECIPE JSON RETURNED TO FRONTEND ===")
+        logger.info(f"Recipe JSON: {recipe.model_dump_json(indent=2, by_alias=True)}")
+        
+        return recipe
     
     def _normalize_recipe_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize recipe data from Gemini to match Recipe model."""
@@ -847,34 +874,42 @@ class ScraperService:
                 # Unknown format, set to None
                 normalized["servings"] = None
         
-        # ingredients: ensure it's a list of strings (for backward compatibility)
-        if "ingredients" in normalized:
-            if isinstance(normalized["ingredients"], list):
-                # Convert objects to strings if needed
-                flat_ingredients = []
+        # Convert flat ingredients list to ingredientGroups if ingredientGroups is missing/empty
+        if "ingredients" in normalized and isinstance(normalized["ingredients"], list) and len(normalized["ingredients"]) > 0:
+            # Check if ingredientGroups is missing or empty
+            if "ingredientGroups" not in normalized or not normalized["ingredientGroups"]:
+                logger.info("Converting flat 'ingredients' list to 'ingredientGroups'")
+                # Create a single group from the flat ingredients list
+                converted_ingredients = []
                 for ing in normalized["ingredients"]:
                     if isinstance(ing, str):
-                        flat_ingredients.append(ing)
+                        converted_ingredients.append({"name": ing, "amount": None, "preparation": None, "raw": ing})
                     elif isinstance(ing, dict):
-                        # Convert object format to string
-                        parts = []
-                        # Handle both old format (quantity+unit) and new format (amount)
-                        if "amount" in ing and ing["amount"]:
-                            parts.append(str(ing["amount"]))
-                        elif "quantity" in ing and ing["quantity"]:
-                            parts.append(str(ing["quantity"]))
-                        if "unit" in ing and ing["unit"] and "amount" not in ing:
-                            parts.append(ing["unit"])
-                        if "name" in ing and ing["name"]:
-                            parts.append(ing["name"])
-                        flat_ingredients.append(" ".join(parts) if parts else str(ing))
+                        # Extract amount from raw if possible
+                        raw = ing.get("raw", "")
+                        name = ing.get("name", "")
+                        amount = ing.get("amount")
+                        if amount is None:
+                            qty = ing.get("quantity")
+                            unit = ing.get("unit")
+                            if qty or unit:
+                                parts = []
+                                if qty:
+                                    parts.append(str(qty))
+                                if unit:
+                                    parts.append(str(unit))
+                                amount = " ".join(parts) if parts else None
+                        converted_ingredients.append({
+                            "name": name or raw or str(ing),
+                            "amount": amount,
+                            "preparation": ing.get("preparation"),
+                            "raw": raw or name or str(ing)
+                        })
                     else:
-                        flat_ingredients.append(str(ing))
-                normalized["ingredients"] = flat_ingredients
-            else:
-                normalized["ingredients"] = []
-        else:
-            normalized["ingredients"] = []
+                        converted_ingredients.append({"name": str(ing), "amount": None, "preparation": None, "raw": str(ing)})
+                
+                normalized["ingredientGroups"] = [{"name": None, "ingredients": converted_ingredients}]
+                logger.info(f"Created ingredientGroups with {len(converted_ingredients)} ingredients")
         
         # ingredientGroups: normalize to new structured format, preserve if already structured
         if "ingredientGroups" in normalized and isinstance(normalized["ingredientGroups"], list):
@@ -1079,12 +1114,12 @@ class ScraperService:
 
 Language: {lang_label}
 
-Rules:
+CRITICAL RULES:
+- ingredientGroups is REQUIRED. Put ALL ingredients inside ingredientGroups (array of groups). Do NOT return a flat "ingredients" array.
+- Each ingredient group: {{"name": null or "group name", "ingredients": [{{"amount": "quantity+unit or null", "name": "ingredient name", "preparation": null, "raw": "original text"}}]}}
+- instructionGroups is REQUIRED for instructions.
 - If a field is missing, set it to null or empty array.
-- Do not explain.
-- Do not validate.
-- Do not add text outside JSON.
-- Return only the JSON object.
+- Do not explain. Return only the JSON object.
 
 CONTENT:
 {markdown_content}
@@ -1099,10 +1134,25 @@ CONTENT:
         # Get the JSON schema from the Recipe Pydantic model
         schema = Recipe.model_json_schema()
         
-        # Convert to the format expected by Gemini's responseSchema
-        # Remove Pydantic-specific fields and simplify
+        # Store $defs for resolving references
+        defs = schema.get("$defs", {})
+        
+        def resolve_ref(ref: str) -> Dict[str, Any]:
+            """Resolve a $ref to its definition."""
+            # ref looks like "#/$defs/IngredientGroup"
+            if ref.startswith("#/$defs/"):
+                def_name = ref[len("#/$defs/"):]
+                if def_name in defs:
+                    return defs[def_name]
+            return {}
+        
         def clean_schema(s: Dict[str, Any]) -> Dict[str, Any]:
-            """Clean Pydantic JSON schema for Gemini responseSchema format."""
+            """Clean Pydantic JSON schema for Gemini responseSchema format, resolving $refs."""
+            # If this is a $ref, resolve it first
+            if "$ref" in s:
+                resolved = resolve_ref(s["$ref"])
+                return clean_schema(resolved)
+            
             result: Dict[str, Any] = {}
             
             # Copy type
@@ -1118,6 +1168,7 @@ CONTENT:
                         # Remove Pydantic-specific fields
                         cleaned.pop("title", None)
                         cleaned.pop("description", None)
+                        cleaned.pop("examples", None)
                         result["properties"][key] = cleaned
                     else:
                         result["properties"][key] = value
@@ -1142,7 +1193,7 @@ CONTENT:
                     if isinstance(s["anyOf"][0], dict):
                         result.update(clean_schema(s["anyOf"][0]))
             
-            # Copy required fields (but filter out optional ones)
+            # Copy required fields
             if "required" in s:
                 result["required"] = s["required"]
             
@@ -1153,6 +1204,7 @@ CONTENT:
         cleaned.pop("title", None)
         cleaned.pop("description", None)
         cleaned.pop("$defs", None)
+        cleaned.pop("example", None)
         
         return cleaned
 
@@ -1162,22 +1214,18 @@ CONTENT:
 
 
     def _build_text_prompt(self, url: str, text: str) -> str:
-        return f"""
-We have text extracted from a website (or social network).
+        return f"""You are a strict JSON parser. Extract recipe data and return ONLY valid JSON.
 
-Source URL: {url}
-
+CONTENT:
 {text}
 
-Extract a recipe and return JSON ONLY in the Recipe format.
-
-Important:
-- instructionGroups: **MANDATORY** - Extract all instructions. Look for headers like "Instructions", "Preparation", "אופן הכנה". If instructions are in one paragraph, split them into separate sentences. Each sentence = one instruction. If no headers, put everything under "Preparation".
-- servings: object with {{"amount": "string or null", "unit": "string or null", "raw": "string or null"}}. Example: {{"amount": "4", "unit": "מנות", "raw": "4 מנות"}}.
-- ingredientGroups: [{{"name": null, "ingredients": [{{"amount": "quantity+unit combined (e.g., '1 כוס' or '250 מ״ל') or null", "name": "ingredient name (required)", "preparation": "preparation notes or null", "raw": "original text or null"}}]}}]
-- ingredients: Flat list of strings ["ingredient 1", "ingredient 2"]
-- nutrition: Numbers only (not "not specified"). If unknown: null or 0.
-
-Do not invent, do not change, nutrition information is mandatory if available.
+Rules:
+- Return ONLY the JSON object, no explanation.
+- ingredientGroups is REQUIRED. Put ALL ingredients inside ingredientGroups (array of groups). Do NOT return a flat "ingredients" array.
+- Each ingredient group: {{"name": null, "ingredients": [{{"amount": "quantity+unit (e.g., '1 כוס', '250 מ״ל') or null", "name": "ingredient name (required)", "preparation": null, "raw": "original text"}}]}}
+- instructionGroups is REQUIRED. Extract all instructions. Each group: {{"name": null, "instructions": ["step 1", "step 2"]}}
+- servings: {{"amount": "string or null", "unit": "string or null", "raw": "string or null"}}
+- nutrition: {{"calories": number or null, "proteinG": number or null, "fatG": number or null, "carbsG": number or null, "per": "string or null"}}
+- If a field is missing, set it to null.
 """
 

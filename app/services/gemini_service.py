@@ -45,30 +45,58 @@ class GeminiService:
 
     def _clean_schema_for_gemini(self, schema: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Remove fields that Gemini API doesn't accept in response_schema.
-        Specifically removes 'additionalProperties' and 'additional_properties'.
+        Clean Pydantic JSON schema for Gemini responseSchema format.
+        - Resolves $ref references to their definitions (Gemini doesn't support $ref well)
+        - Removes 'additionalProperties' (Gemini rejects this field)
+        - Removes Pydantic metadata fields
         """
-        if not isinstance(schema, dict):
-            return schema
+        # Store $defs for resolving references
+        defs = schema.get("$defs", {})
         
-        cleaned = {}
-        for key, value in schema.items():
-            # Skip additionalProperties fields
-            if key in ("additionalProperties", "additional_properties"):
-                continue
+        def resolve_ref(ref: str) -> Dict[str, Any]:
+            """Resolve a $ref to its definition."""
+            if ref.startswith("#/$defs/"):
+                def_name = ref[len("#/$defs/"):]
+                if def_name in defs:
+                    return defs[def_name]
+            return {}
+        
+        def clean(s: Dict[str, Any]) -> Dict[str, Any]:
+            if not isinstance(s, dict):
+                return s
             
-            # Recursively clean nested dictionaries
-            if isinstance(value, dict):
-                cleaned[key] = self._clean_schema_for_gemini(value)
-            elif isinstance(value, list):
-                cleaned[key] = [
-                    self._clean_schema_for_gemini(item) if isinstance(item, dict) else item
-                    for item in value
-                ]
-            else:
-                cleaned[key] = value
+            # If this is a $ref, resolve it first
+            if "$ref" in s:
+                resolved = resolve_ref(s["$ref"])
+                return clean(resolved)
+            
+            result: Dict[str, Any] = {}
+            
+            for key, value in s.items():
+                # Skip fields Gemini doesn't accept or Pydantic metadata
+                if key in ("additionalProperties", "additional_properties", "title", 
+                          "description", "examples", "example", "$defs"):
+                    continue
+                
+                # Recursively clean nested dicts
+                if isinstance(value, dict):
+                    result[key] = clean(value)
+                elif isinstance(value, list):
+                    result[key] = [clean(item) if isinstance(item, dict) else item for item in value]
+                else:
+                    result[key] = value
+            
+            # Handle anyOf for Optional fields - extract the non-null type
+            if "anyOf" in result:
+                any_of = result.pop("anyOf")
+                for option in any_of:
+                    if isinstance(option, dict) and option.get("type") != "null":
+                        result.update(option)
+                        break
+            
+            return result
         
-        return cleaned
+        return clean(schema)
 
     # --------------------------
     # Public API
@@ -505,6 +533,41 @@ class GeminiService:
             else:
                 # Unknown format, set to None
                 normalized["servings"] = None
+
+        # Convert flat ingredients list to ingredientGroups if ingredientGroups is missing/empty
+        if "ingredients" in normalized and isinstance(normalized["ingredients"], list) and len(normalized["ingredients"]) > 0:
+            ingredient_groups = normalized.get("ingredientGroups")
+            if not ingredient_groups or (isinstance(ingredient_groups, list) and len(ingredient_groups) == 0):
+                logger.info("Converting flat 'ingredients' list to 'ingredientGroups'")
+                converted_ingredients = []
+                for ing in normalized["ingredients"]:
+                    if isinstance(ing, str):
+                        converted_ingredients.append({"name": ing, "amount": None, "preparation": None, "raw": ing})
+                    elif isinstance(ing, dict):
+                        raw = ing.get("raw", "")
+                        name = ing.get("name", "")
+                        amount = ing.get("amount")
+                        if amount is None:
+                            qty = ing.get("quantity")
+                            unit = ing.get("unit")
+                            if qty or unit:
+                                parts = []
+                                if qty:
+                                    parts.append(str(qty))
+                                if unit:
+                                    parts.append(str(unit))
+                                amount = " ".join(parts) if parts else None
+                        converted_ingredients.append({
+                            "name": name or raw or str(ing),
+                            "amount": amount,
+                            "preparation": ing.get("preparation"),
+                            "raw": raw or name or str(ing)
+                        })
+                    else:
+                        converted_ingredients.append({"name": str(ing), "amount": None, "preparation": None, "raw": str(ing)})
+                
+                normalized["ingredientGroups"] = [{"name": None, "ingredients": converted_ingredients}]
+                logger.info(f"Created ingredientGroups with {len(converted_ingredients)} ingredients")
 
         # Normalize ingredientGroups schema
         normalized["ingredientGroups"] = self._normalize_ingredient_groups(normalized.get("ingredientGroups"))
