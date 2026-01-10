@@ -1188,9 +1188,12 @@ class ScraperService:
 Language: {lang_label}
 
 CRITICAL RULES:
-- ingredientGroups is REQUIRED. Put ALL ingredients inside ingredientGroups (array of groups). Do NOT return a flat "ingredients" array.
-- Each ingredient group: {{"name": null or "group name", "ingredients": [{{"amount": "quantity+unit or null", "name": "ingredient name", "preparation": null, "raw": "original text"}}]}}
-- instructionGroups is REQUIRED for instructions.
+- ingredientGroups is REQUIRED. Put ALL ingredients inside ingredientGroups array.
+- IMPORTANT: Only use group names if they EXPLICITLY appear in the source (e.g., "לבצק:", "לקרם:", "For the sauce:"). If the recipe has a flat list with no group headers, use ONE group with name: null.
+- Do NOT invent or generate group names. If no group names exist in the source, set name to null.
+- Each ingredient group: {{"name": null, "ingredients": [{{"amount": "quantity+unit or null", "name": "ingredient name", "preparation": null, "raw": "original text"}}]}}
+- instructionGroups is REQUIRED for instructions. Same rule: only use group names if they appear in the source.
+- images: Only include actual image URLs ending in .jpg, .jpeg, .png, .webp. Do NOT include non-image URLs.
 - If a field is missing, set it to null or empty array.
 - Do not explain. Return only the JSON object.
 
@@ -1332,15 +1335,27 @@ CONTENT:
             image_urls = []
             seen_urls = set()
             
-            # Patterns to skip (icons, avatars, tracking pixels, social buttons)
+            # Patterns to skip (icons, avatars, tracking pixels, social buttons, plugins)
             skip_patterns = [
-                'avatar', 'icon', 'logo', 'sprite', 
+                # Icons and UI elements
+                'avatar', 'icon', 'logo', 'sprite', 'thumb',
                 'gravatar', 'placeholder', 'loading', 'spinner',
-                'facebook', 'twitter', 'instagram', 'pinterest', 'whatsapp',
-                'share', 'button', 'badge', 'widget',
-                '1x1', 'pixel', 'blank', 'spacer', 'transparent',
-                'ad-', 'ads/', 'advert', 'banner',
-                'emoji', 'smiley', 'star-rating',
+                # Social media
+                'facebook', 'twitter', 'instagram', 'pinterest', 'whatsapp', 'linkedin', 'tiktok',
+                'share', 'button', 'badge', 'widget', 'social',
+                # Tracking and ads
+                '1x1', 'pixel', 'blank', 'spacer', 'transparent', 'tracking',
+                'ad-', 'ads/', 'advert', 'banner', 'promo',
+                # Emojis and ratings
+                'emoji', 'smiley', 'star-rating', 'rating',
+                # WordPress plugins and themes (generic paths)
+                '/plugins/', '/themes/', '/cache/',
+                # Common non-content paths
+                '/assets/', '/static/', '/js/', '/css/',
+                'accessibility', 'nagish', 'a11y',
+                # Generic UI images
+                'arrow', 'close', 'menu', 'search', 'cart', 'user',
+                'play', 'pause', 'video-', 'audio-',
             ]
             
             for source, url in found_images:
@@ -1479,11 +1494,14 @@ CONTENT:
 
 Rules:
 - Return ONLY the JSON object, no explanation.
-- ingredientGroups is REQUIRED. Put ALL ingredients inside ingredientGroups (array of groups). Do NOT return a flat "ingredients" array.
-- Each ingredient group: {{"name": null, "ingredients": [{{"amount": "quantity+unit (e.g., '1 כוס', '250 מ״ל') or null", "name": "ingredient name (required)", "preparation": null, "raw": "original text"}}]}}
-- instructionGroups is REQUIRED. Extract all instructions. Each group: {{"name": null, "instructions": ["step 1", "step 2"]}}
+- ingredientGroups is REQUIRED. Put ALL ingredients inside ingredientGroups array.
+- IMPORTANT: Only use group names if they EXPLICITLY appear in the source (e.g., "לבצק:", "לקרם:"). If no group headers exist, use ONE group with name: null.
+- Do NOT invent or generate group names. If no groups in source, set name to null.
+- Each ingredient group: {{"name": null, "ingredients": [{{"amount": "quantity+unit or null", "name": "ingredient name", "preparation": null, "raw": "original text"}}]}}
+- instructionGroups is REQUIRED. Same rule: only use group names if they appear in the source.
 - servings: {{"amount": "string or null", "unit": "string or null", "raw": "string or null"}}
 - nutrition: {{"calories": number or null, "proteinG": number or null, "fatG": number or null, "carbsG": number or null, "per": "string or null"}}
+- images: Only actual image URLs (.jpg, .jpeg, .png, .gif, .webp). No non-image URLs.
 - If a field is missing, set it to null.
 """
 
