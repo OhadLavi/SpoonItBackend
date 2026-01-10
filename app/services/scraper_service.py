@@ -991,23 +991,73 @@ class ScraperService:
         # Remove ingredients field (it's computed, not stored)
         normalized.pop("ingredients", None)
         
+        # Remove extra fields not in Recipe model
+        normalized.pop("description", None)
+        normalized.pop("source_url", None)
+        if "source_url" in normalized:
+            normalized["source"] = normalized.pop("source_url")
+        
         # Ensure required fields exist
         if "ingredientGroups" not in normalized:
             normalized["ingredientGroups"] = []
         if "instructionGroups" not in normalized:
             normalized["instructionGroups"] = []
         elif isinstance(normalized["instructionGroups"], list):
-            # Ensure instructionGroups is not empty - if empty, create default
-            if not normalized["instructionGroups"]:
-                normalized["instructionGroups"] = [{"name": "הוראות הכנה", "instructions": []}]
-            # Ensure each group has instructions list
+            # Normalize instructionGroups: handle both formats
+            # Format 1: [{"name": "...", "instructions": [...]}]
+            # Format 2: [{"instruction": "...", "step": 1}, ...] (wrong format from Gemini)
+            normalized_instruction_groups = []
             for group in normalized["instructionGroups"]:
                 if isinstance(group, dict):
-                    if "instructions" not in group or not isinstance(group["instructions"], list):
-                        group["instructions"] = []
-                    # Ensure name exists
-                    if "name" not in group or not group["name"]:
-                        group["name"] = "הוראות הכנה"
+                    # Check if it's the wrong format (has "instruction" and "step")
+                    if "instruction" in group and "step" in group:
+                        # Convert wrong format to correct format
+                        instruction_text = group.get("instruction")
+                        if instruction_text:
+                            # Add to a single group with all instructions
+                            if not normalized_instruction_groups:
+                                normalized_instruction_groups.append({"name": "הוראות הכנה", "instructions": []})
+                            normalized_instruction_groups[0]["instructions"].append(str(instruction_text))
+                    elif "instructions" in group:
+                        # Correct format - ensure it's a list
+                        instructions = group.get("instructions", [])
+                        if not isinstance(instructions, list):
+                            instructions = [instructions] if instructions else []
+                        # Remove extra fields like "step", "instruction"
+                        clean_group = {
+                            "name": group.get("name"),
+                            "instructions": [str(inst) for inst in instructions if inst]
+                        }
+                        normalized_instruction_groups.append(clean_group)
+                    elif "instruction" in group:
+                        # Single instruction without step
+                        instruction_text = group.get("instruction")
+                        if instruction_text:
+                            if not normalized_instruction_groups:
+                                normalized_instruction_groups.append({"name": "הוראות הכנה", "instructions": []})
+                            normalized_instruction_groups[0]["instructions"].append(str(instruction_text))
+            
+            # If we have normalized groups, use them; otherwise keep original structure
+            if normalized_instruction_groups:
+                normalized["instructionGroups"] = normalized_instruction_groups
+            else:
+                # Ensure instructionGroups is not empty - if empty, create default
+                if not normalized["instructionGroups"]:
+                    normalized["instructionGroups"] = [{"name": "הוראות הכנה", "instructions": []}]
+                # Ensure each group has instructions list
+                for group in normalized["instructionGroups"]:
+                    if isinstance(group, dict):
+                        if "instructions" not in group or not isinstance(group["instructions"], list):
+                            group["instructions"] = []
+                        # Ensure name exists
+                        if "name" not in group or not group["name"]:
+                            group["name"] = "הוראות הכנה"
+                        # Remove extra fields
+                        allowed_keys = {"name", "instructions"}
+                        group_keys = list(group.keys())
+                        for key in group_keys:
+                            if key not in allowed_keys:
+                                group.pop(key)
         if "notes" not in normalized:
             normalized["notes"] = []
         if "images" not in normalized:

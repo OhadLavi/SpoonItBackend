@@ -520,6 +520,48 @@ class GeminiService:
         # Ensure nutrition is never null + normalize key variants
         normalized["nutrition"] = self._ensure_nutrition_object(normalized.get("nutrition"))
 
+        # Remove extra fields not in Recipe model
+        normalized.pop("description", None)
+        normalized.pop("source_url", None)
+        if "source_url" in normalized:
+            normalized["source"] = normalized.pop("source_url")
+
+        # Normalize instructionGroups: handle wrong format (instruction + step)
+        if "instructionGroups" in normalized and isinstance(normalized["instructionGroups"], list):
+            normalized_instruction_groups = []
+            for group in normalized["instructionGroups"]:
+                if isinstance(group, dict):
+                    # Check if it's the wrong format (has "instruction" and "step")
+                    if "instruction" in group and "step" in group:
+                        # Convert wrong format to correct format
+                        instruction_text = group.get("instruction")
+                        if instruction_text:
+                            # Add to a single group with all instructions
+                            if not normalized_instruction_groups:
+                                normalized_instruction_groups.append({"name": "הוראות הכנה", "instructions": []})
+                            normalized_instruction_groups[0]["instructions"].append(str(instruction_text))
+                    elif "instructions" in group:
+                        # Correct format - ensure it's a list
+                        instructions = group.get("instructions", [])
+                        if not isinstance(instructions, list):
+                            instructions = [instructions] if instructions else []
+                        # Remove extra fields like "step", "instruction"
+                        clean_group = {
+                            "name": group.get("name"),
+                            "instructions": [str(inst) for inst in instructions if inst]
+                        }
+                        normalized_instruction_groups.append(clean_group)
+                    elif "instruction" in group:
+                        # Single instruction without step
+                        instruction_text = group.get("instruction")
+                        if instruction_text:
+                            if not normalized_instruction_groups:
+                                normalized_instruction_groups.append({"name": "הוראות הכנה", "instructions": []})
+                            normalized_instruction_groups[0]["instructions"].append(str(instruction_text))
+            
+            if normalized_instruction_groups:
+                normalized["instructionGroups"] = normalized_instruction_groups
+
         # Compute total time if missing and parts exist (handle both camelCase and snake_case)
         total_time = normalized.get("totalTimeMinutes") or normalized.get("total_time_minutes")
         if total_time is None:
