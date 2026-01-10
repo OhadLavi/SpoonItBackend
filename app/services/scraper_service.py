@@ -669,6 +669,24 @@ class ScraperService:
         recipe_data = self._normalize_recipe_data(recipe_data)
         recipe_data["source"] = url
         
+        # Fallback: Use page title if Gemini didn't extract a title
+        if not recipe_data.get("title") and page_title:
+            # Clean the page title (often has " | site name" suffix)
+            clean_title = page_title.split("|")[0].strip()
+            if clean_title:
+                recipe_data["title"] = clean_title
+                logger.info(f"Using page title as recipe title: {clean_title}")
+        
+        # Validate that this is actually a recipe (has ingredients or instructions)
+        has_ingredients = bool(recipe_data.get("ingredientGroups") and 
+                               any(g.get("ingredients") for g in recipe_data.get("ingredientGroups", [])))
+        has_instructions = bool(recipe_data.get("instructionGroups") and 
+                                any(g.get("instructions") for g in recipe_data.get("instructionGroups", [])))
+        
+        if not has_ingredients and not has_instructions:
+            logger.warning(f"URL does not appear to contain a valid recipe: {url}")
+            raise ScrapingError("This URL does not appear to contain a recipe. No ingredients or instructions found.")
+        
         # Remove ingredients field before creating Recipe (it's computed, not stored)
         recipe_data.pop("ingredients", None)
         
@@ -831,6 +849,17 @@ class ScraperService:
         data = self._normalize_recipe_data(data)
         
         data["source"] = url
+        
+        # Validate that this is actually a recipe (has ingredients or instructions)
+        has_ingredients = bool(data.get("ingredientGroups") and 
+                               any(g.get("ingredients") for g in data.get("ingredientGroups", [])))
+        has_instructions = bool(data.get("instructionGroups") and 
+                                any(g.get("instructions") for g in data.get("instructionGroups", [])))
+        
+        if not has_ingredients and not has_instructions:
+            logger.warning(f"URL does not appear to contain a valid recipe: {url}")
+            raise ScrapingError("This URL does not appear to contain a recipe. No ingredients or instructions found.")
+        
         # Remove ingredients field before creating Recipe (it's computed, not stored)
         data.pop("ingredients", None)
         
