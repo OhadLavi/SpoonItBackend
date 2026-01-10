@@ -6,7 +6,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
@@ -687,6 +687,13 @@ class ScraperService:
             logger.warning(f"URL does not appear to contain a valid recipe: {url}")
             raise ScrapingError("This URL does not appear to contain a recipe. No ingredients or instructions found.")
         
+        # Extract images from HTML if Gemini didn't find valid ones
+        if not recipe_data.get("images"):
+            extracted_images = self._extract_recipe_images(html_content)
+            if extracted_images:
+                recipe_data["images"] = extracted_images
+                logger.info(f"Added {len(extracted_images)} images extracted from HTML")
+        
         # Remove ingredients field before creating Recipe (it's computed, not stored)
         recipe_data.pop("ingredients", None)
         
@@ -1146,6 +1153,24 @@ class ScraperService:
         if "images" not in normalized:
             normalized["images"] = []
         
+        # Filter images to only include valid image URLs
+        if normalized.get("images"):
+            valid_images = []
+            image_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif')
+            for img_url in normalized["images"]:
+                if isinstance(img_url, str) and img_url.strip():
+                    url_lower = img_url.lower()
+                    # Check if URL ends with image extension (ignore query params)
+                    base_url = url_lower.split('?')[0]
+                    if any(base_url.endswith(ext) for ext in image_extensions):
+                        valid_images.append(img_url.strip())
+                    # Also accept URLs with image extensions anywhere in path (e.g., /image.jpg?v=1)
+                    elif any(ext in url_lower for ext in image_extensions):
+                        valid_images.append(img_url.strip())
+            normalized["images"] = valid_images
+            if len(valid_images) != len(normalized.get("images", [])):
+                logger.info(f"Filtered images: kept {len(valid_images)} valid image URLs")
+        
         return normalized
 
     # -------------------------
@@ -1175,28 +1200,25 @@ CONTENT:
     def _extract_recipe_structured_content(self, html_content: str) -> str:
         """
         Extract recipe-specific structured content (ingredients, instructions) from HTML.
-        Trafilatura often misses these as they're in structured divs, not "article" text.
+        Uses generic patterns - Schema.org, common class/id patterns, and list structures.
         """
         try:
             soup = BeautifulSoup(html_content, "html.parser")
             extracted_parts = []
             
-            # Common selectors for recipe ingredients
+            # Generic selectors for recipe ingredients (priority order)
             ingredient_selectors = [
-                # Class-based selectors
-                '[class*="ingredient"]',
-                '[class*="Ingredient"]',
-                '.prod_ing',
-                '.recipe-ingredients',
-                '.ingredients-list',
-                '.wprm-recipe-ingredients',
-                '.tasty-recipes-ingredients',
-                # ID-based selectors  
-                '#ingredients',
-                '[id*="ingredient"]',
-                # Schema.org
+                # Schema.org (most reliable - standard markup)
                 '[itemprop="recipeIngredient"]',
                 '[itemprop="ingredients"]',
+                # Generic class patterns (case-insensitive via CSS)
+                '[class*="ingredient" i]',
+                '[class*="Ingredient"]',
+                # Generic ID patterns
+                '#ingredients',
+                '[id*="ingredient" i]',
+                # Common generic patterns
+                '[class*="recipe"] ul',  # Lists inside recipe containers
             ]
             
             for selector in ingredient_selectors:
@@ -1222,18 +1244,20 @@ CONTENT:
                 if extracted_parts:
                     break  # Found ingredients via one selector, stop
             
-            # Common selectors for recipe instructions
+            # Generic selectors for recipe instructions (priority order)
             instruction_selectors = [
-                '[class*="instruction"]',
-                '[class*="direction"]',
-                '[class*="preparation"]',
-                '.prod_con',
-                '.recipe-instructions',
-                '.wprm-recipe-instructions',
-                '.tasty-recipes-instructions',
+                # Schema.org (most reliable)
                 '[itemprop="recipeInstructions"]',
-                # Hebrew selectors
-                '[class*="הכנה"]',
+                # Generic class patterns
+                '[class*="instruction" i]',
+                '[class*="direction" i]',
+                '[class*="preparation" i]',
+                '[class*="method" i]',
+                '[class*="step" i]',
+                # Generic ID patterns
+                '#instructions',
+                '#directions',
+                '[id*="instruction" i]',
             ]
             
             for selector in instruction_selectors:
@@ -1261,6 +1285,107 @@ CONTENT:
         except Exception as e:
             logger.warning(f"Failed to extract recipe structured content: {e}")
             return ""
+
+    def _extract_recipe_images(self, html_content: str) -> List[str]:
+        """
+        Extract recipe-related image URLs from HTML using generic approaches.
+        Filters out icons, ads, and non-recipe images.
+        """
+        try:
+            soup = BeautifulSoup(html_content, "html.parser")
+            image_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif')
+            found_images = []
+            
+            # 1. OpenGraph image (most reliable - sites set this as their main image)
+            og_image = soup.find('meta', property='og:image')
+            if og_image and og_image.get('content'):
+                found_images.append(('og', og_image.get('content')))
+            
+            # 2. Schema.org image (standard recipe markup)
+            for elem in soup.select('[itemprop="image"]'):
+                url = elem.get('src') or elem.get('content') or elem.get('href')
+                if url:
+                    found_images.append(('schema', url))
+            
+            # 3. All images in the page, then filter
+            for img in soup.find_all('img'):
+                url = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
+                if not url:
+                    continue
+                
+                # Try to get image dimensions to filter out small icons
+                width = img.get('width', '')
+                height = img.get('height', '')
+                
+                # Skip tiny images (likely icons)
+                try:
+                    if width and int(str(width).replace('px', '')) < 100:
+                        continue
+                    if height and int(str(height).replace('px', '')) < 100:
+                        continue
+                except (ValueError, TypeError):
+                    pass
+                
+                found_images.append(('img', url))
+            
+            # Filter and deduplicate
+            image_urls = []
+            seen_urls = set()
+            
+            # Patterns to skip (icons, avatars, tracking pixels, social buttons)
+            skip_patterns = [
+                'avatar', 'icon', 'logo', 'sprite', 
+                'gravatar', 'placeholder', 'loading', 'spinner',
+                'facebook', 'twitter', 'instagram', 'pinterest', 'whatsapp',
+                'share', 'button', 'badge', 'widget',
+                '1x1', 'pixel', 'blank', 'spacer', 'transparent',
+                'ad-', 'ads/', 'advert', 'banner',
+                'emoji', 'smiley', 'star-rating',
+            ]
+            
+            for source, url in found_images:
+                if not url or not isinstance(url, str):
+                    continue
+                    
+                url = url.strip()
+                url_lower = url.lower()
+                
+                # Skip if already seen
+                if url_lower in seen_urls:
+                    continue
+                
+                # Skip non-image URLs
+                base_url = url_lower.split('?')[0]
+                if not any(base_url.endswith(ext) for ext in image_extensions):
+                    # Also check if extension is in the URL (for CDN URLs with query params)
+                    if not any(ext in url_lower for ext in image_extensions):
+                        continue
+                
+                # Skip patterns that indicate non-recipe images
+                if any(pattern in url_lower for pattern in skip_patterns):
+                    continue
+                
+                # Skip very small dimension indicators in filename
+                if any(dim in url_lower for dim in ['-50x', '-32x', '-16x', '-24x', 'x50.', 'x32.', 'x16.', 'x24.']):
+                    continue
+                
+                # Make absolute URL
+                if url.startswith('//'):
+                    url = 'https:' + url
+                elif url.startswith('/'):
+                    continue  # Skip relative URLs without domain
+                
+                seen_urls.add(url_lower)
+                image_urls.append(url)
+            
+            # Limit to first 5 images
+            image_urls = image_urls[:5]
+            logger.info(f"Extracted {len(image_urls)} recipe images from HTML")
+            return image_urls
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract recipe images: {e}")
+            return []
 
     def _get_recipe_response_schema(self) -> Dict[str, Any]:
         """Get the recipe JSON schema from Pydantic model for Gemini responseSchema."""
