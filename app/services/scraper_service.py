@@ -1212,7 +1212,7 @@ CRITICAL RULES:
 - Do NOT invent or generate group names. If no group names exist in the source, set name to null.
 - Each ingredient group: {{"name": null, "ingredients": [{{"amount": "quantity+unit or null", "name": "ingredient name", "preparation": null, "raw": "original text"}}]}}
 - instructionGroups is REQUIRED for instructions. Same rule: only use group names if they appear in the source.
-- images: Only include actual image URLs ending in .jpg, .jpeg, .png, .webp. Do NOT include non-image URLs.
+- images: Always set to empty array []. Images are extracted separately and should not be included in the response.
 - If a field is missing, set it to null or empty array.
 - Do not explain. Return only the JSON object.
 
@@ -1643,7 +1643,7 @@ Rules:
 - instructionGroups is REQUIRED. Same rule: only use group names if they appear in the source.
 - servings: {{"amount": "string or null", "unit": "string or null", "raw": "string or null"}}
 - nutrition: {{"calories": number or null, "proteinG": number or null, "fatG": number or null, "carbsG": number or null, "per": "string or null"}}
-- images: Only actual image URLs (.jpg, .jpeg, .png, .gif, .webp). No non-image URLs.
+- images: Always set to empty array []. Images are extracted separately and should not be included in the response.
 - If a field is missing, set it to null.
 """
 

@@ -16,6 +16,12 @@ import requests
 from PIL import Image
 from io import BytesIO
 
+try:
+    import imagehash
+    _IMAGEHASH_AVAILABLE = True
+except ImportError:
+    _IMAGEHASH_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # Model configuration
@@ -168,8 +174,8 @@ class FoodDetector:
                 weight = 1.0 - (i * 0.15)  # Decrease weight for lower positions
                 food_score += probabilities[class_id] * weight
         
-        # Return True if food score exceeds threshold
-        threshold = 0.15  # Relatively low threshold since we're filtering candidates
+        # Return True if food score exceeds threshold (increased for better accuracy)
+        threshold = 0.25  # Higher threshold to reduce false positives
         return food_score > threshold, food_score
     
     async def detect_food_in_image(self, image_data: bytes) -> Tuple[bool, float]:
@@ -225,28 +231,98 @@ class FoodDetector:
         exp_x = np.exp(x - np.max(x))
         return exp_x / exp_x.sum()
     
+    def _calculate_image_hash(self, image_data: bytes) -> Optional[str]:
+        """Calculate perceptual hash for image deduplication."""
+        if not _IMAGEHASH_AVAILABLE:
+            return None
+        try:
+            image = Image.open(BytesIO(image_data))
+            # Use average hash (aHash) - good for detecting similar images
+            img_hash = imagehash.average_hash(image, hash_size=16)
+            return str(img_hash)
+        except Exception as e:
+            logger.debug(f"Failed to calculate image hash: {e}")
+            return None
+    
+    def _deduplicate_images(
+        self,
+        image_results: List[Tuple[str, float, Optional[str]]],
+        hash_threshold: int = 5
+    ) -> List[Tuple[str, float]]:
+        """
+        Remove duplicate/similar images using perceptual hashing.
+        
+        Args:
+            image_results: List of (url, score, hash) tuples
+            hash_threshold: Maximum hash difference to consider images similar (0-64)
+            
+        Returns:
+            List of (url, score) tuples with duplicates removed
+        """
+        if not _IMAGEHASH_AVAILABLE:
+            # If imagehash not available, just return sorted by score
+            return [(url, score) for url, score, _ in image_results]
+        
+        # Group images by hash similarity
+        unique_images = []
+        seen_hashes = []
+        
+        # Sort by score (descending) to keep best quality images
+        sorted_results = sorted(image_results, key=lambda x: x[1], reverse=True)
+        
+        for url, score, img_hash in sorted_results:
+            if img_hash is None:
+                # If hash calculation failed, include it (better safe than sorry)
+                unique_images.append((url, score))
+                continue
+            
+            # Check if this image is similar to any we've already seen
+            is_duplicate = False
+            for seen_hash in seen_hashes:
+                try:
+                    # Calculate hamming distance between hashes
+                    hash1 = imagehash.hex_to_hash(img_hash)
+                    hash2 = imagehash.hex_to_hash(seen_hash)
+                    distance = hash1 - hash2
+                    
+                    if distance <= hash_threshold:
+                        # Images are similar/duplicate
+                        is_duplicate = True
+                        logger.debug(f"Removing duplicate image {url} (hash distance: {distance})")
+                        break
+                except Exception as e:
+                    logger.debug(f"Failed to compare hashes: {e}")
+                    # If comparison fails, include the image
+                    break
+            
+            if not is_duplicate:
+                unique_images.append((url, score))
+                seen_hashes.append(img_hash)
+        
+        return unique_images
+    
     async def filter_food_images(
         self,
         image_urls: List[str],
-        min_score: float = 0.1,
+        min_score: float = 0.25,
         timeout: float = 5.0
     ) -> List[str]:
         """
         Filter a list of image URLs to only include those containing food.
-        Downloads and analyzes images in parallel.
+        Downloads and analyzes images in parallel, then removes duplicates.
         
         Args:
             image_urls: List of image URLs to analyze
-            min_score: Minimum food confidence score to include
+            min_score: Minimum food confidence score to include (default: 0.25)
             timeout: Timeout for downloading each image
             
         Returns:
-            List of image URLs that contain food, sorted by confidence
+            List of image URLs that contain food, sorted by confidence, with duplicates removed
         """
         if not image_urls:
             return []
         
-        async def analyze_image(url: str) -> Tuple[str, bool, float]:
+        async def analyze_image(url: str) -> Tuple[str, bool, float, Optional[str]]:
             """Download and analyze a single image."""
             try:
                 # Download image
@@ -259,33 +335,40 @@ class FoodDetector:
                 )
                 response.raise_for_status()
                 
+                image_data = response.content
+                
                 # Detect food
-                is_food, score = await self.detect_food_in_image(response.content)
-                return url, is_food, score
+                is_food, score = await self.detect_food_in_image(image_data)
+                
+                # Calculate hash for deduplication
+                img_hash = self._calculate_image_hash(image_data)
+                
+                return url, is_food, score, img_hash
                 
             except Exception as e:
                 logger.debug(f"Failed to analyze image {url}: {e}")
-                # On error, assume might be food with low confidence
-                return url, True, 0.3
+                # On error, don't include the image (better to miss than have false positives)
+                return url, False, 0.0, None
         
         # Analyze all images in parallel
         tasks = [analyze_image(url) for url in image_urls[:10]]  # Limit to 10 images
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Filter and sort by confidence
+        # Filter by food detection and minimum score
         food_images = []
         for result in results:
             if isinstance(result, Exception):
                 continue
-            url, is_food, score = result
+            url, is_food, score, img_hash = result
             if is_food and score >= min_score:
-                food_images.append((url, score))
+                food_images.append((url, score, img_hash))
         
-        # Sort by score (descending) and return URLs
-        food_images.sort(key=lambda x: x[1], reverse=True)
+        # Remove duplicates using perceptual hashing
+        unique_images = self._deduplicate_images(food_images)
         
-        filtered_urls = [url for url, _ in food_images]
-        logger.info(f"Food detection: {len(filtered_urls)}/{len(image_urls)} images contain food")
+        # Return URLs sorted by score (already sorted by deduplication)
+        filtered_urls = [url for url, _ in unique_images]
+        logger.info(f"Food detection: {len(filtered_urls)}/{len(image_urls)} unique food images (after deduplication)")
         
         return filtered_urls
 
