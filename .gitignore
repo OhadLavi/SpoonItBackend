@@ -34,3 +34,6 @@ dist/
 build/
 *.egg-info/
 
+# ONNX models (downloaded at runtime)
+models/
+

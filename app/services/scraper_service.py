@@ -25,6 +25,7 @@ except ImportError:
 from app.config import settings
 from app.models.recipe import Recipe
 from app.utils.exceptions import ScrapingError
+from app.services.food_detector import get_food_detector
 
 logger = logging.getLogger(__name__)
 
@@ -570,9 +571,12 @@ class ScraperService:
             main_markdown = f"Page Title: {page_title}\n\n{main_markdown}"
             logger.info(f"Added title to content. New content length: {len(main_markdown)} characters")
         
-        # STEP 3: Extract recipe data using Gemini API
-        logger.info("Step 3: Extracting recipe data with Gemini API")
-        gemini_start = time.time()
+        # STEP 3: Extract image URLs and start food detection in parallel with Gemini
+        logger.info("Step 3: Extracting images and recipe data in parallel")
+        
+        # Extract candidate image URLs from HTML (before Gemini call)
+        candidate_images = self._extract_recipe_images(html_content, url)
+        logger.info(f"Found {len(candidate_images)} candidate images for food detection")
         
         # Validate content before sending to Gemini
         if not main_markdown or not main_markdown.strip():
@@ -611,9 +615,13 @@ class ScraperService:
         logger.info(f"  Config: temperature={config.temperature}, top_p={config.top_p}, response_mime_type={config.response_mime_type}")
         logger.info(f"  Response schema: {json.dumps(cleaned_schema, indent=2, ensure_ascii=False)}")
         
+        # Run Gemini API and food detection in parallel
+        gemini_start = time.time()
         loop = asyncio.get_event_loop()
-        try:
-            gemini_response = await loop.run_in_executor(
+        
+        async def call_gemini():
+            """Call Gemini API in executor."""
+            return await loop.run_in_executor(
                 None,
                 lambda: self.client.models.generate_content(
                     model=GEMINI_MODEL,
@@ -621,12 +629,32 @@ class ScraperService:
                     config=config,
                 ),
             )
+        
+        async def filter_food_images():
+            """Filter images using food detection."""
+            if not candidate_images:
+                return []
+            try:
+                food_detector = get_food_detector()
+                return await food_detector.filter_food_images(candidate_images)
+            except Exception as e:
+                logger.warning(f"Food detection failed, using all candidate images: {e}")
+                return candidate_images
+        
+        # Run both tasks in parallel
+        try:
+            gemini_response, filtered_images = await asyncio.gather(
+                call_gemini(),
+                filter_food_images(),
+                return_exceptions=False
+            )
         except Exception as e:
             logger.error(f"Gemini API extraction failed: {e}")
             raise ScrapingError(f"Failed to extract recipe with Gemini: {e}") from e
         
         timings["gemini_api"] = time.time() - gemini_start
-        logger.info(f"Time for Gemini API extraction: {timings['gemini_api']:.2f} seconds")
+        logger.info(f"Time for Gemini API + food detection (parallel): {timings['gemini_api']:.2f} seconds")
+        logger.info(f"Food detection filtered to {len(filtered_images)} images")
         
         # STEP 4: Parse JSON response
         logger.info("Step 4: Parsing JSON response")
@@ -687,12 +715,11 @@ class ScraperService:
             logger.warning(f"URL does not appear to contain a valid recipe: {url}")
             raise ScrapingError("This URL does not appear to contain a recipe. No ingredients or instructions found.")
         
-        # Extract images from HTML if Gemini didn't find valid ones
+        # Use food-filtered images if Gemini didn't find valid ones
         if not recipe_data.get("images"):
-            extracted_images = self._extract_recipe_images(html_content, url)
-            if extracted_images:
-                recipe_data["images"] = extracted_images
-                logger.info(f"Added {len(extracted_images)} images extracted from HTML")
+            if filtered_images:
+                recipe_data["images"] = filtered_images[:5]  # Limit to 5 images
+                logger.info(f"Added {len(recipe_data['images'])} food-filtered images")
         
         # Remove ingredients field before creating Recipe (it's computed, not stored)
         recipe_data.pop("ingredients", None)
