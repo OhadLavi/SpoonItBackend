@@ -1344,7 +1344,7 @@ CONTENT:
         """
         try:
             soup = BeautifulSoup(html_content, "html.parser")
-            image_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif')
+            image_extensions = ('.jpg', '.jpeg', '.png', '.webp', '.avif')  # Exclude .gif
             # List of (source_type, url, priority) - lower priority number = higher priority
             found_images: List[Tuple[str, str, int]] = []
             
@@ -1440,13 +1440,14 @@ CONTENT:
                     if is_in_excluded_area(parent_classes, parent_id):
                         continue
                     
-                    # Check dimensions - content images should be reasonably large
+                    # Check dimensions - content images should be reasonably large (min 200x200 for dish photos)
                     width = img.get('width', '')
                     height = img.get('height', '')
                     try:
                         w = int(str(width).replace('px', '')) if width else 0
                         h = int(str(height).replace('px', '')) if height else 0
-                        if (w and w < 150) or (h and h < 150):
+                        # Filter out small images that are too small to be dish photos
+                        if (w and w < 200) or (h and h < 200):
                             continue
                     except (ValueError, TypeError):
                         pass
@@ -1500,6 +1501,10 @@ CONTENT:
                 
                 # Skip data URLs
                 if url_lower.startswith('data:'):
+                    continue
+                
+                # Skip GIF images (usually animations/icons, not recipe photos)
+                if url_lower.endswith('.gif') or '.gif?' in url_lower or url_lower.endswith('.gif/'):
                     continue
                 
                 # Skip if already seen

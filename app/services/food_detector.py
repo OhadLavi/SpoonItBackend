@@ -8,7 +8,7 @@ import hashlib
 import logging
 import os
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import numpy as np
@@ -164,7 +164,7 @@ class FoodDetector:
         
         return img_array
     
-    def _is_food_class(self, class_ids: List[int], probabilities: np.ndarray) -> Tuple[bool, float]:
+    def _is_food_class(self, class_ids: List[int], probabilities: np.ndarray, threshold: float = 0.25) -> Tuple[bool, float]:
         """Check if any of the top predicted classes are food-related."""
         food_score = 0.0
         
@@ -174,16 +174,16 @@ class FoodDetector:
                 weight = 1.0 - (i * 0.15)  # Decrease weight for lower positions
                 food_score += probabilities[class_id] * weight
         
-        # Return True if food score exceeds threshold (increased for better accuracy)
-        threshold = 0.25  # Higher threshold to reduce false positives
+        # Return True if food score exceeds threshold
         return food_score > threshold, food_score
     
-    async def detect_food_in_image(self, image_data: bytes) -> Tuple[bool, float]:
+    async def detect_food_in_image(self, image_data: bytes, threshold: float = 0.25) -> Tuple[bool, float]:
         """
         Detect if an image contains food.
         
         Args:
             image_data: Raw image bytes
+            threshold: Food detection threshold (default: 0.25)
             
         Returns:
             Tuple of (is_food, confidence_score)
@@ -201,11 +201,14 @@ class FoodDetector:
             # Preprocess
             input_tensor = self._preprocess_image(image)
             
+            # Get the input name from the model (different models use different names)
+            input_name = self._session.get_inputs()[0].name
+            
             # Run inference
             loop = asyncio.get_event_loop()
             outputs = await loop.run_in_executor(
                 None,
-                lambda: self._session.run(None, {'input': input_tensor})
+                lambda: self._session.run(None, {input_name: input_tensor})
             )
             
             # Get predictions
@@ -216,9 +219,9 @@ class FoodDetector:
             top_5_indices = np.argsort(probabilities)[-5:][::-1]
             
             # Check if food-related
-            is_food, score = self._is_food_class(top_5_indices.tolist(), probabilities)
+            is_food, score = self._is_food_class(top_5_indices.tolist(), probabilities, threshold)
             
-            logger.debug(f"Food detection: is_food={is_food}, score={score:.3f}")
+            logger.debug(f"Food detection: is_food={is_food}, score={score:.3f} (threshold={threshold})")
             return is_food, score
             
         except Exception as e:
@@ -231,81 +234,102 @@ class FoodDetector:
         exp_x = np.exp(x - np.max(x))
         return exp_x / exp_x.sum()
     
-    def _calculate_image_hash(self, image_data: bytes) -> Optional[str]:
-        """Calculate perceptual hash for image deduplication."""
+    def _calculate_image_hash_and_size(self, image_data: bytes) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
+        """Calculate perceptual hash and dimensions for image deduplication."""
         if not _IMAGEHASH_AVAILABLE:
-            return None
+            return None, None
         try:
             image = Image.open(BytesIO(image_data))
             # Use average hash (aHash) - good for detecting similar images
             img_hash = imagehash.average_hash(image, hash_size=16)
-            return str(img_hash)
+            # Get image dimensions
+            width, height = image.size
+            return str(img_hash), (width, height)
         except Exception as e:
-            logger.debug(f"Failed to calculate image hash: {e}")
-            return None
+            logger.debug(f"Failed to calculate image hash/size: {e}")
+            return None, None
     
     def _deduplicate_images(
         self,
-        image_results: List[Tuple[str, float, Optional[str]]],
+        image_results: List[Tuple[str, float, Optional[str], Optional[Tuple[int, int]]]],
         hash_threshold: int = 5
     ) -> List[Tuple[str, float]]:
         """
         Remove duplicate/similar images using perceptual hashing.
+        When duplicates are found, keeps the larger image (higher resolution).
         
         Args:
-            image_results: List of (url, score, hash) tuples
+            image_results: List of (url, score, hash, dimensions) tuples
             hash_threshold: Maximum hash difference to consider images similar (0-64)
             
         Returns:
-            List of (url, score) tuples with duplicates removed
+            List of (url, score) tuples with duplicates removed (larger images kept)
         """
         if not _IMAGEHASH_AVAILABLE:
             # If imagehash not available, just return sorted by score
-            return [(url, score) for url, score, _ in image_results]
+            return [(url, score) for url, score, _, _ in image_results]
         
-        # Group images by hash similarity
-        unique_images = []
-        seen_hashes = []
+        # Track unique images: {hash: (url, score, width*height)}
+        unique_by_hash: Dict[str, Tuple[str, float, int]] = {}
+        # Track images without hash (include all of them)
+        no_hash_images: List[Tuple[str, float]] = []
         
-        # Sort by score (descending) to keep best quality images
-        sorted_results = sorted(image_results, key=lambda x: x[1], reverse=True)
-        
-        for url, score, img_hash in sorted_results:
+        for url, score, img_hash, dimensions in image_results:
             if img_hash is None:
                 # If hash calculation failed, include it (better safe than sorry)
-                unique_images.append((url, score))
+                no_hash_images.append((url, score))
                 continue
             
-            # Check if this image is similar to any we've already seen
-            is_duplicate = False
-            for seen_hash in seen_hashes:
+            # Calculate image area (width * height) for size comparison
+            area = 0
+            if dimensions:
+                width, height = dimensions
+                area = width * height
+            
+            # Check if we've seen a similar hash
+            found_duplicate = False
+            for existing_hash, (existing_url, existing_score, existing_area) in unique_by_hash.items():
                 try:
                     # Calculate hamming distance between hashes
                     hash1 = imagehash.hex_to_hash(img_hash)
-                    hash2 = imagehash.hex_to_hash(seen_hash)
+                    hash2 = imagehash.hex_to_hash(existing_hash)
                     distance = hash1 - hash2
                     
                     if distance <= hash_threshold:
-                        # Images are similar/duplicate
-                        is_duplicate = True
-                        logger.debug(f"Removing duplicate image {url} (hash distance: {distance})")
+                        # Images are similar/duplicate - keep the larger one
+                        found_duplicate = True
+                        if area > existing_area:
+                            # Current image is larger, replace the existing one
+                            logger.debug(f"Replacing duplicate {existing_url} with larger image {url} "
+                                       f"(area: {existing_area} -> {area}, hash distance: {distance})")
+                            unique_by_hash[existing_hash] = (url, score, area)
+                        else:
+                            # Existing image is larger or same size, keep it
+                            logger.debug(f"Skipping duplicate {url} (existing {existing_url} is larger, "
+                                       f"area: {area} <= {existing_area}, hash distance: {distance})")
                         break
                 except Exception as e:
                     logger.debug(f"Failed to compare hashes: {e}")
                     # If comparison fails, include the image
                     break
             
-            if not is_duplicate:
-                unique_images.append((url, score))
-                seen_hashes.append(img_hash)
+            if not found_duplicate:
+                # New unique image
+                unique_by_hash[img_hash] = (url, score, area)
         
-        return unique_images
+        # Combine unique images and no-hash images, sort by score
+        all_unique = [(url, score) for url, score, _ in unique_by_hash.values()] + no_hash_images
+        all_unique.sort(key=lambda x: x[1], reverse=True)
+        
+        return all_unique
     
     async def filter_food_images(
         self,
         image_urls: List[str],
         min_score: float = 0.25,
-        timeout: float = 5.0
+        timeout: float = 5.0,
+        min_width: int = 200,
+        min_height: int = 200
     ) -> List[str]:
         """
         Filter a list of image URLs to only include those containing food.
@@ -315,6 +339,8 @@ class FoodDetector:
             image_urls: List of image URLs to analyze
             min_score: Minimum food confidence score to include (default: 0.25)
             timeout: Timeout for downloading each image
+            min_width: Minimum image width in pixels (default: 200)
+            min_height: Minimum image height in pixels (default: 200)
             
         Returns:
             List of image URLs that contain food, sorted by confidence, with duplicates removed
@@ -322,9 +348,15 @@ class FoodDetector:
         if not image_urls:
             return []
         
-        async def analyze_image(url: str) -> Tuple[str, bool, float, Optional[str]]:
+        async def analyze_image(url: str) -> Tuple[str, bool, float, Optional[str], Optional[Tuple[int, int]]]:
             """Download and analyze a single image."""
             try:
+                # Quick check: filter GIFs by URL extension
+                url_lower = url.lower()
+                if url_lower.endswith('.gif') or '.gif?' in url_lower:
+                    logger.debug(f"Skipping GIF image: {url}")
+                    return url, False, 0.0, None, None
+                
                 # Download image
                 loop = asyncio.get_event_loop()
                 response = await loop.run_in_executor(
@@ -337,18 +369,44 @@ class FoodDetector:
                 
                 image_data = response.content
                 
-                # Detect food
+                # Check image format - filter out GIFs
+                try:
+                    image = Image.open(BytesIO(image_data))
+                    image_format = image.format
+                    
+                    if image_format == 'GIF':
+                        logger.debug(f"Skipping GIF image (format detected): {url}")
+                        return url, False, 0.0, None, None
+                    
+                    # Check image dimensions - filter out small images
+                    width, height = image.size
+                    if width < min_width or height < min_height:
+                        logger.debug(f"Skipping small image {url} ({width}x{height}, min: {min_width}x{min_height})")
+                        return url, False, 0.0, None, None
+                    
+                except Exception as e:
+                    logger.debug(f"Failed to check image format/size for {url}: {e}")
+                    # If we can't check, continue anyway (better to include than miss)
+                
+                # Detect food (use default threshold 0.25, then filter by min_score)
                 is_food, score = await self.detect_food_in_image(image_data)
                 
-                # Calculate hash for deduplication
-                img_hash = self._calculate_image_hash(image_data)
+                # Calculate hash and dimensions for deduplication
+                img_hash, dimensions = self._calculate_image_hash_and_size(image_data)
                 
-                return url, is_food, score, img_hash
+                # Double-check dimensions after hash calculation (in case format check failed)
+                if dimensions:
+                    width, height = dimensions
+                    if width < min_width or height < min_height:
+                        logger.debug(f"Skipping small image {url} ({width}x{height})")
+                        return url, False, 0.0, None, None
+                
+                return url, is_food, score, img_hash, dimensions
                 
             except Exception as e:
                 logger.debug(f"Failed to analyze image {url}: {e}")
                 # On error, don't include the image (better to miss than have false positives)
-                return url, False, 0.0, None
+                return url, False, 0.0, None, None
         
         # Analyze all images in parallel
         tasks = [analyze_image(url) for url in image_urls[:10]]  # Limit to 10 images
@@ -359,11 +417,11 @@ class FoodDetector:
         for result in results:
             if isinstance(result, Exception):
                 continue
-            url, is_food, score, img_hash = result
+            url, is_food, score, img_hash, dimensions = result
             if is_food and score >= min_score:
-                food_images.append((url, score, img_hash))
+                food_images.append((url, score, img_hash, dimensions))
         
-        # Remove duplicates using perceptual hashing
+        # Remove duplicates using perceptual hashing (keeps larger images when duplicates found)
         unique_images = self._deduplicate_images(food_images)
         
         # Return URLs sorted by score (already sorted by deduplication)
