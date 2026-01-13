@@ -367,9 +367,17 @@ class ScraperService:
         """
         Extract recipe using BrightData API to fetch HTML, parse to markdown,
         and send to Gemini with recipe schema.
+        
+        Optimized for speed with parallel extraction of:
+        - Main content (Trafilatura)
+        - Structured content (ingredients/instructions)
+        - Images
+        - Page title
+        - Gemini schema preparation
         """
         start_time = time.time()
         timings = {}
+        loop = asyncio.get_event_loop()
         
         # STEP 1: Fetch HTML using BrightData API
         logger.info(f"Step 1: Fetching HTML from BrightData API for: {url}")
@@ -388,7 +396,7 @@ class ScraperService:
         
         brightdata_start = time.time()
         try:
-            response = await asyncio.get_event_loop().run_in_executor(
+            response = await loop.run_in_executor(
                 None,
                 lambda: requests.post(BRIGHTDATA_API_URL, json=payload, headers=headers, timeout=30)
             )
@@ -429,11 +437,11 @@ class ScraperService:
                 logger.warning(f"Could not decode full response: {e}")
                 logger.info(f"BrightData full response (raw bytes): {response.content}")
         
-        # STEP 2: Extract main content using Trafilatura (fast, article-only)
-        logger.info("Step 2: Extracting main content with Trafilatura")
+        # STEP 2: Parse HTML and extract all data in parallel
+        logger.info("Step 2: Parsing HTML and extracting data in parallel")
         parse_start = time.time()
         
-        # Try to decode HTML content
+        # Decode HTML content
         try:
             html_content = response.content.decode('utf-8', errors='replace')
             logger.info(f"Decoded HTML content length: {len(html_content)} characters")
@@ -444,77 +452,112 @@ class ScraperService:
             logger.error(f"Failed to decode HTML content: {e}")
             raise ScrapingError(f"Failed to decode HTML content from BrightData: {e}") from e
         
-        # First, extract recipe-specific structured content (ingredients, instructions)
-        # Trafilatura often misses these as they're in structured divs, not "article" text
-        recipe_structured_content = self._extract_recipe_structured_content(html_content)
-        if recipe_structured_content:
-            logger.info(f"Extracted recipe structured content: {len(recipe_structured_content)} chars")
+        # Validate HTML content
+        if not html_content or len(html_content.strip()) < 50:
+            logger.error(f"HTML content is too short or empty: {len(html_content) if html_content else 0} characters")
+            raise ScrapingError(f"HTML content from BrightData is empty or too short")
         
-        # Use Trafilatura for fast, article-only extraction
-        main_markdown = None
-        if _TRAFILATURA_AVAILABLE:
+        # Parse BeautifulSoup once (will be reused by multiple extractors)
+        soup = BeautifulSoup(html_content, "html.parser")
+        if not soup:
+            logger.error("BeautifulSoup failed to parse HTML - soup is None")
+            raise ScrapingError("Failed to parse HTML with BeautifulSoup")
+        
+        # Define parallel extraction tasks
+        async def extract_main_content_trafilatura() -> Optional[str]:
+            """Extract main content using Trafilatura (CPU-bound, run in executor)."""
+            if not _TRAFILATURA_AVAILABLE:
+                return None
             try:
-                extracted_text = trafilatura.extract(
-                    html_content,
-                    include_comments=False,
-                    include_tables=True,  # Include tables - recipes often use them
-                    favor_recall=True  # More inclusive - capture more content
+                extracted = await loop.run_in_executor(
+                    None,
+                    lambda: trafilatura.extract(
+                        html_content,
+                        include_comments=False,
+                        include_tables=True,
+                        favor_recall=True
+                    )
                 )
-                if extracted_text and len(extracted_text.strip()) > 100:
-                    main_markdown = extracted_text
-                    logger.info(f"Trafilatura extracted {len(main_markdown)} characters")
-                else:
-                    logger.warning(f"Trafilatura returned empty/too short content (length: {len(extracted_text) if extracted_text else 0}), falling back to BeautifulSoup")
+                if extracted and len(extracted.strip()) > 100:
+                    logger.info(f"Trafilatura extracted {len(extracted)} characters")
+                    return extracted
             except Exception as e:
-                logger.warning(f"Trafilatura extraction failed: {e}, falling back to BeautifulSoup")
+                logger.warning(f"Trafilatura extraction failed: {e}")
+            return None
         
-        # Fallback to BeautifulSoup if Trafilatura didn't work
-        if not main_markdown or len(main_markdown.strip()) < 100:
-            logger.info("Using BeautifulSoup for content extraction")
-            
-            # Validate HTML content before parsing
-            if not html_content or len(html_content.strip()) < 50:
-                logger.error(f"HTML content is too short or empty: {len(html_content) if html_content else 0} characters")
-                logger.error(f"HTML content preview: {html_content[:500] if html_content else 'None'}")
-                raise ScrapingError(f"HTML content from BrightData is empty or too short ({len(html_content) if html_content else 0} chars). Response might be an error page or blocked.")
-            
+        async def extract_structured_content() -> str:
+            """Extract recipe structured content (ingredients/instructions)."""
+            return self._extract_recipe_structured_content(html_content)
+        
+        async def extract_images() -> List[str]:
+            """Extract candidate images from HTML."""
+            return self._extract_recipe_images(html_content, url)
+        
+        async def extract_page_title() -> Optional[str]:
+            """Extract page title from pre-parsed soup."""
             try:
-                soup = BeautifulSoup(html_content, "html.parser")
-                
-                # Check if soup parsed successfully
-                if not soup:
-                    logger.error("BeautifulSoup failed to parse HTML - soup is None")
-                    raise ScrapingError("Failed to parse HTML with BeautifulSoup")
-                
-                # Try to find main content
+                title_tag = soup.find('title')
+                if title_tag:
+                    return title_tag.get_text(strip=True)
+                og_title = soup.find('meta', property='og:title')
+                if og_title and og_title.get('content'):
+                    return og_title.get('content').strip()
+            except Exception as e:
+                logger.warning(f"Failed to extract page title: {e}")
+            return None
+        
+        async def prepare_gemini_config() -> Tuple[Dict[str, Any], Any]:
+            """Prepare Gemini schema and config (doesn't depend on content)."""
+            schema = self._get_recipe_response_schema()
+            cleaned = self._clean_schema_for_gemini(schema)
+            config = types.GenerateContentConfig(
+                temperature=0.0,
+                top_p=0.0,
+                response_mime_type="application/json",
+                response_schema=cleaned,
+            )
+            return cleaned, config
+        
+        # Run all extraction tasks in parallel
+        (
+            trafilatura_content,
+            structured_content,
+            candidate_images,
+            page_title,
+            (cleaned_schema, gemini_config)
+        ) = await asyncio.gather(
+            extract_main_content_trafilatura(),
+            extract_structured_content(),
+            extract_images(),
+            extract_page_title(),
+            prepare_gemini_config(),
+        )
+        
+        # Log extraction results
+        if structured_content:
+            logger.info(f"Extracted recipe structured content: {len(structured_content)} chars")
+        logger.info(f"Found {len(candidate_images)} candidate images")
+        if page_title:
+            logger.info(f"Extracted page title: {page_title}")
+        
+        # Use Trafilatura result or fallback to BeautifulSoup
+        main_markdown = trafilatura_content
+        if not main_markdown or len(main_markdown.strip()) < 100:
+            logger.info("Using BeautifulSoup for content extraction (Trafilatura insufficient)")
+            try:
                 main_element, used_selector = find_main_content(soup, None)
                 logger.info(f"Content selector used: {used_selector}")
                 
                 if main_element is None:
-                    logger.warning("Could not find main content element, using entire body")
                     main_element = soup.find('body') or soup
                 
-                # If still None, use the entire soup
-                if main_element is None:
-                    logger.warning("No body element found, using entire soup")
-                    main_element = soup
-                
-                # Try markdownify first
                 main_html = str(main_element)
                 main_markdown = markdownify(main_html)
                 logger.info(f"BeautifulSoup markdownify extracted {len(main_markdown)} characters")
                 
-                # If markdownify resulted in empty content, try direct text extraction
                 if not main_markdown or len(main_markdown.strip()) < 50:
-                    logger.warning("Markdown conversion resulted in empty content, trying direct text extraction")
                     main_markdown = main_element.get_text(separator='\n', strip=True)
                     logger.info(f"BeautifulSoup direct text extraction got {len(main_markdown)} characters")
-                    
-                    # If still empty, log the HTML structure for debugging
-                    if not main_markdown or len(main_markdown.strip()) < 50:
-                        logger.error(f"Both markdownify and text extraction failed. HTML element preview: {main_html[:500]}")
-                        logger.error(f"Element type: {type(main_element)}, has text: {bool(main_element.get_text()) if hasattr(main_element, 'get_text') else 'N/A'}")
-                        raise ScrapingError(f"Failed to extract any text content from HTML. Element appears to be empty.")
                     
             except Exception as e:
                 logger.error(f"BeautifulSoup parsing/extraction failed: {e}", exc_info=True)
@@ -525,99 +568,48 @@ class ScraperService:
             logger.error(f"Content extraction failed - only got {len(main_markdown) if main_markdown else 0} characters")
             raise ScrapingError("Failed to extract meaningful content from the page")
         
-        # Combine main content with recipe structured content if both exist
-        # This ensures ingredients/instructions from structured HTML elements aren't lost
-        if recipe_structured_content:
-            # Check if the structured content is already in main_markdown
-            # If not, append it to ensure Gemini sees the ingredients
-            if main_markdown and recipe_structured_content not in main_markdown:
-                # Check if key parts are missing (e.g., specific ingredient lines)
-                sample_lines = recipe_structured_content.split('\n')[:3]
+        # Combine main content with structured content if needed
+        if structured_content:
+            if main_markdown and structured_content not in main_markdown:
+                sample_lines = structured_content.split('\n')[:3]
                 missing_content = any(line.strip() and line.strip() not in main_markdown for line in sample_lines if len(line.strip()) > 5)
                 if missing_content:
-                    logger.info("Adding structured recipe content to main content (ingredients/instructions may be missing)")
-                    main_markdown = f"{main_markdown}\n\n--- Recipe Structured Data ---\n{recipe_structured_content}"
+                    logger.info("Adding structured recipe content to main content")
+                    main_markdown = f"{main_markdown}\n\n--- Recipe Structured Data ---\n{structured_content}"
         
-        # Limit content size to avoid sending too much to Gemini
+        # Limit content size
         if len(main_markdown) > 50000:
             logger.warning(f"Content too long ({len(main_markdown)} chars), truncating to 50000")
             main_markdown = main_markdown[:50000] + "\n\n[... content truncated ...]"
         
-        timings["html_parse"] = time.time() - parse_start
-        logger.info(f"Time to extract content: {timings['html_parse']:.2f} seconds")
-        logger.info(f"Final content length: {len(main_markdown)} characters")
-        logger.debug(f"Content preview: {main_markdown}")
-        
-        # Extract website title from HTML and prepend to content
-        page_title = None
-        try:
-            # Parse HTML to extract title
-            soup = BeautifulSoup(html_content, "html.parser")
-            title_tag = soup.find('title')
-            if title_tag:
-                page_title = title_tag.get_text(strip=True)
-                logger.info(f"Extracted page title: {page_title}")
-            else:
-                # Try og:title or other meta tags
-                og_title = soup.find('meta', property='og:title')
-                if og_title and og_title.get('content'):
-                    page_title = og_title.get('content').strip()
-                    logger.info(f"Extracted page title from og:title: {page_title}")
-        except Exception as e:
-            logger.warning(f"Failed to extract page title: {e}")
-        
-        # Prepend title to content if available
+        # Prepend title to content
         if page_title:
             main_markdown = f"Page Title: {page_title}\n\n{main_markdown}"
             logger.info(f"Added title to content. New content length: {len(main_markdown)} characters")
         
-        # STEP 3: Extract image URLs and start food detection in parallel with Gemini
-        logger.info("Step 3: Extracting images and recipe data in parallel")
+        timings["html_parse"] = time.time() - parse_start
+        logger.info(f"Time for parallel extraction: {timings['html_parse']:.2f} seconds")
+        logger.info(f"Final content length: {len(main_markdown)} characters")
         
-        # Extract candidate image URLs from HTML (before Gemini call)
-        candidate_images = self._extract_recipe_images(html_content, url)
-        logger.info(f"Found {len(candidate_images)} candidate images for food detection")
+        # STEP 3: Run Gemini API and food detection in parallel
+        logger.info("Step 3: Calling Gemini API and filtering images in parallel")
         
         # Validate content before sending to Gemini
         if not main_markdown or not main_markdown.strip():
-            logger.error(f"Content validation failed: main_markdown is {type(main_markdown)}, length: {len(main_markdown) if main_markdown else 0}")
+            logger.error(f"Content validation failed")
             raise ScrapingError("No content extracted from the page - cannot extract recipe")
         
-        # Detect language (default to Hebrew for Hebrew sites)
-        language = "he"  # Can be enhanced with actual detection if needed
-        
-        logger.info(f"Building prompt with content length: {len(main_markdown)} characters")
-        logger.info(f"Content preview: {main_markdown}")
+        # Build prompt
+        language = "he"
         prompt = self._build_markdown_extraction_prompt(url, main_markdown, language)
-        
-        # Verify the prompt contains the content
-        if "CONTENT:" in prompt and len(prompt.split("CONTENT:")[1].strip()) < 10:
-            logger.error(f"WARNING: Prompt built but CONTENT section appears empty! Prompt length: {len(prompt)}")
-            logger.error(f"main_markdown type: {type(main_markdown)}, length: {len(main_markdown) if main_markdown else 0}")
-        
-        # Log a preview of what's being sent
-        logger.debug(f"Full prompt preview: {prompt}")
-        response_schema = self._get_recipe_response_schema()
-        
-        # Clean schema to remove additionalProperties (Gemini doesn't accept this field)
-        cleaned_schema = self._clean_schema_for_gemini(response_schema)
-        
-        config = types.GenerateContentConfig(
-            temperature=0.0,
-            top_p=0.0,  # Deterministic output
-            response_mime_type="application/json",
-            response_schema=cleaned_schema,
-        )
         
         logger.info(f"Sending to Gemini (_extract_with_brightdata):")
         logger.info(f"  Model: {GEMINI_MODEL}")
-        logger.info(f"  Prompt: {prompt}")
-        logger.info(f"  Config: temperature={config.temperature}, top_p={config.top_p}, response_mime_type={config.response_mime_type}")
-        logger.info(f"  Response schema: {json.dumps(cleaned_schema, indent=2, ensure_ascii=False)}")
+        logger.debug(f"  Prompt: {prompt}")
+        logger.info(f"  Config: temperature={gemini_config.temperature}, top_p={gemini_config.top_p}")
         
         # Run Gemini API and food detection in parallel
         gemini_start = time.time()
-        loop = asyncio.get_event_loop()
         
         async def call_gemini():
             """Call Gemini API in executor."""
@@ -626,7 +618,7 @@ class ScraperService:
                 lambda: self.client.models.generate_content(
                     model=GEMINI_MODEL,
                     contents=prompt,
-                    config=config,
+                    config=gemini_config,
                 ),
             )
         
@@ -687,8 +679,8 @@ class ScraperService:
         logger.info("="*60)
         logger.info(f"BrightData API Time: {timings['brightdata_api']:.2f} seconds")
         logger.info(f"Total HTML Fetch Time: {timings['html_fetch']:.2f} seconds")
-        logger.info(f"HTML Parse & Markdown Conversion Time: {timings['html_parse']:.2f} seconds")
-        logger.info(f"Gemini API Extraction Time: {timings['gemini_api']:.2f} seconds")
+        logger.info(f"Parallel Extraction (content/images/title): {timings['html_parse']:.2f} seconds")
+        logger.info(f"Gemini + Food Detection (parallel): {timings['gemini_api']:.2f} seconds")
         logger.info(f"JSON Parsing Time: {timings['json_parse']:.4f} seconds")
         logger.info(f"Total Time: {timings['total']:.2f} seconds")
         logger.info("="*60)
