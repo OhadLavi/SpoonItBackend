@@ -7,7 +7,7 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -689,7 +689,7 @@ class ScraperService:
         
         # Extract images from HTML if Gemini didn't find valid ones
         if not recipe_data.get("images"):
-            extracted_images = self._extract_recipe_images(html_content)
+            extracted_images = self._extract_recipe_images(html_content, url)
             if extracted_images:
                 recipe_data["images"] = extracted_images
                 logger.info(f"Added {len(extracted_images)} images extracted from HTML")
@@ -1314,54 +1314,129 @@ CONTENT:
             logger.warning(f"Failed to extract recipe structured content: {e}")
             return ""
 
-    def _extract_recipe_images(self, html_content: str) -> List[str]:
+    def _extract_recipe_images(self, html_content: str, page_url: str) -> List[str]:
         """
         Extract recipe-related image URLs from HTML using generic approaches.
-        Filters out icons, ads, and non-recipe images.
+        Focuses on images within recipe content areas and filters out icons, ads, and non-recipe images.
+        
+        Args:
+            html_content: The HTML content of the page
+            page_url: The URL of the page (used to resolve relative URLs)
         """
         try:
             soup = BeautifulSoup(html_content, "html.parser")
             image_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif')
-            found_images = []
+            # List of (source_type, url, priority) - lower priority number = higher priority
+            found_images: List[Tuple[str, str, int]] = []
             
-            # 1. OpenGraph image (most reliable - sites set this as their main image)
+            # --- STEP 1: Extract from structured metadata (highest priority) ---
+            
+            # Schema.org image (most reliable for recipes)
+            for elem in soup.select('[itemprop="image"]'):
+                img_url = elem.get('src') or elem.get('content') or elem.get('href')
+                if img_url:
+                    found_images.append(('schema', img_url, 0))
+            
+            # OpenGraph image (main page image, usually the hero/featured image)
             og_image = soup.find('meta', property='og:image')
             if og_image and og_image.get('content'):
-                found_images.append(('og', og_image.get('content')))
+                found_images.append(('og', og_image.get('content'), 1))
             
-            # 2. Schema.org image (standard recipe markup)
-            for elem in soup.select('[itemprop="image"]'):
-                url = elem.get('src') or elem.get('content') or elem.get('href')
-                if url:
-                    found_images.append(('schema', url))
+            # --- STEP 2: Find the main recipe content area ---
             
-            # 3. All images in the page, then filter
-            for img in soup.find_all('img'):
-                url = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
-                if not url:
-                    continue
-                
-                # Try to get image dimensions to filter out small icons
-                width = img.get('width', '')
-                height = img.get('height', '')
-                
-                # Skip tiny images (likely icons)
+            main_content_element = None
+            recipe_content_selectors = [
+                # Recipe-specific selectors
+                '[itemtype*="Recipe"]',
+                '[itemtype*="recipe"]',
+                '[class*="recipe-content" i]',
+                '[class*="recipe-body" i]',
+                '[id*="recipe-content" i]',
+                '[id*="recipe-body" i]',
+                # Generic content selectors
+                '[class*="recipe" i]',
+                '[id*="recipe" i]',
+                'main',
+                'article',
+                '[role="main"]',
+                '.content',
+                '#content',
+                '.main-content',
+                '#main-content',
+                '.post-content',
+                '.entry-content',
+            ]
+            
+            for selector in recipe_content_selectors:
                 try:
-                    if width and int(str(width).replace('px', '')) < 100:
-                        continue
-                    if height and int(str(height).replace('px', '')) < 100:
-                        continue
-                except (ValueError, TypeError):
-                    pass
-                
-                found_images.append(('img', url))
+                    element = soup.select_one(selector)
+                    if element:
+                        text_content = element.get_text(strip=True)
+                        if len(text_content) > 100:
+                            main_content_element = element
+                            logger.debug(f"Found recipe content area using selector: {selector}")
+                            break
+                except Exception:
+                    continue
             
-            # Filter and deduplicate
-            image_urls = []
-            seen_urls = set()
+            # Fallback to find_main_content if no recipe-specific area found
+            if not main_content_element:
+                main_content_element, _ = find_main_content(soup, None)
             
-            # Patterns to skip (icons, avatars, tracking pixels, social buttons, plugins)
-            skip_patterns = [
+            # --- STEP 3: Extract images from recipe content area (medium priority) ---
+            
+            def get_parent_context(element, levels: int = 3) -> Tuple[List[str], str]:
+                """Get classes and IDs from parent elements for context checking."""
+                parent_classes = []
+                parent_id = ""
+                parent = element.parent
+                for _ in range(levels):
+                    if parent:
+                        parent_classes.extend(parent.get('class', []) or [])
+                        parent_id = parent.get('id', '') or parent_id
+                        parent = parent.parent
+                    else:
+                        break
+                return parent_classes, parent_id
+            
+            def is_in_excluded_area(parent_classes: List[str], parent_id: str) -> bool:
+                """Check if element is in navigation, ads, social, or other excluded areas."""
+                excluded_keywords = [
+                    'nav', 'navigation', 'menu', 'header', 'footer', 'sidebar',
+                    'widget', 'ad', 'advert', 'advertisement', 'banner', 'promo',
+                    'social', 'share', 'comment', 'related', 'recommended',
+                    'author', 'profile', 'avatar', 'user'
+                ]
+                all_context = ' '.join(parent_classes).lower() + ' ' + parent_id.lower()
+                return any(kw in all_context for kw in excluded_keywords)
+            
+            if main_content_element:
+                for img in main_content_element.find_all('img'):
+                    img_url = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
+                    if not img_url:
+                        continue
+                    
+                    # Check parent context
+                    parent_classes, parent_id = get_parent_context(img)
+                    if is_in_excluded_area(parent_classes, parent_id):
+                        continue
+                    
+                    # Check dimensions - content images should be reasonably large
+                    width = img.get('width', '')
+                    height = img.get('height', '')
+                    try:
+                        w = int(str(width).replace('px', '')) if width else 0
+                        h = int(str(height).replace('px', '')) if height else 0
+                        if (w and w < 150) or (h and h < 150):
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+                    
+                    found_images.append(('content', img_url, 2))
+            
+            # --- STEP 4: Pattern-based filtering ---
+            
+            skip_url_patterns = [
                 # Icons and UI elements
                 'avatar', 'icon', 'logo', 'sprite', 'thumb',
                 'gravatar', 'placeholder', 'loading', 'spinner',
@@ -1373,7 +1448,7 @@ CONTENT:
                 'ad-', 'ads/', 'advert', 'banner', 'promo',
                 # Emojis and ratings
                 'emoji', 'smiley', 'star-rating', 'rating',
-                # WordPress plugins and themes (generic paths)
+                # WordPress plugins and themes
                 '/plugins/', '/themes/', '/cache/',
                 # Common non-content paths
                 '/assets/', '/static/', '/js/', '/css/',
@@ -1383,42 +1458,65 @@ CONTENT:
                 'play', 'pause', 'video-', 'audio-',
             ]
             
-            for source, url in found_images:
-                if not url or not isinstance(url, str):
+            # Small dimension patterns in filenames
+            small_dimension_patterns = [
+                '-50x', '-32x', '-16x', '-24x', '-48x', '-64x', '-75x', '-80x', '-100x',
+                'x50.', 'x32.', 'x16.', 'x24.', 'x48.', 'x64.', 'x75.', 'x80.', 'x100.',
+            ]
+            
+            # --- STEP 5: Filter, deduplicate, and resolve URLs ---
+            
+            image_urls = []
+            seen_urls = set()
+            
+            # Sort by priority (lower number = higher priority)
+            found_images.sort(key=lambda x: x[2])
+            
+            for source, img_url, priority in found_images:
+                if not img_url or not isinstance(img_url, str):
                     continue
-                    
-                url = url.strip()
-                url_lower = url.lower()
+                
+                img_url = img_url.strip()
+                url_lower = img_url.lower()
+                
+                # Skip data URLs
+                if url_lower.startswith('data:'):
+                    continue
                 
                 # Skip if already seen
                 if url_lower in seen_urls:
                     continue
                 
                 # Skip non-image URLs
-                base_url = url_lower.split('?')[0]
-                if not any(base_url.endswith(ext) for ext in image_extensions):
-                    # Also check if extension is in the URL (for CDN URLs with query params)
+                base_url_path = url_lower.split('?')[0]
+                if not any(base_url_path.endswith(ext) for ext in image_extensions):
+                    # Also check if extension is anywhere in the URL (for CDN URLs)
                     if not any(ext in url_lower for ext in image_extensions):
                         continue
                 
                 # Skip patterns that indicate non-recipe images
-                if any(pattern in url_lower for pattern in skip_patterns):
+                if any(pattern in url_lower for pattern in skip_url_patterns):
                     continue
                 
                 # Skip very small dimension indicators in filename
-                if any(dim in url_lower for dim in ['-50x', '-32x', '-16x', '-24x', 'x50.', 'x32.', 'x16.', 'x24.']):
+                if any(dim in url_lower for dim in small_dimension_patterns):
                     continue
                 
-                # Make absolute URL
-                if url.startswith('//'):
-                    url = 'https:' + url
-                elif url.startswith('/'):
-                    continue  # Skip relative URLs without domain
+                # Resolve relative URLs
+                if img_url.startswith('//'):
+                    img_url = 'https:' + img_url
+                elif img_url.startswith('/'):
+                    parsed = urlparse(page_url)
+                    base = f"{parsed.scheme}://{parsed.netloc}"
+                    img_url = urljoin(base, img_url)
+                elif not img_url.startswith('http'):
+                    # Relative path without leading slash
+                    img_url = urljoin(page_url, img_url)
                 
                 seen_urls.add(url_lower)
-                image_urls.append(url)
+                image_urls.append(img_url)
             
-            # Limit to first 5 images
+            # Limit to first 5 images (already sorted by priority)
             image_urls = image_urls[:5]
             logger.info(f"Extracted {len(image_urls)} recipe images from HTML")
             return image_urls
