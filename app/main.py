@@ -139,7 +139,7 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(PerformanceMiddleware, slow_request_threshold=2.0, very_slow_request_threshold=5.0)
 app.add_middleware(RequestLoggingMiddleware)
-setup_compression(app)
+# setup_compression(app)
 setup_cors(app)
 
 # Include routers
