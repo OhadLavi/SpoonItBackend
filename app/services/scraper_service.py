@@ -530,35 +530,15 @@ class ScraperService:
             try:
                 response = await client.get(url, headers=headers, timeout=FAST_TIMEOUT)
                 
-                # Early exit: check status code before processing content
-                if response.status_code in (403, 429):
-                    logger.debug(f"Direct fetch blocked: status {response.status_code}")
-                    return None
-                
-                if response.status_code != 200:
-                    logger.debug(f"Direct fetch failed: status {response.status_code}")
-                    return None
-                
-                # Get content
+                # Get content for decision table evaluation
                 html_content = response.text
                 
-                # Early exit: check content length before expensive bot-block check
-                if len(html_content.strip()) < 3000:  # Heuristic: very short = likely block/error
-                    logger.debug(f"Direct fetch content too short: {len(html_content)} chars")
+                # Apply decision table: accept or reject based on status code and content
+                if self._should_accept_direct_fetch(response.status_code, html_content):
+                    logger.debug(f"Direct fetch successful (fast path): {len(html_content)} chars")
+                    return html_content
+                else:
                     return None
-                
-                # Check for bot-block indicators
-                if self._is_bot_blocked(html_content):
-                    logger.debug("Direct fetch detected bot-block page")
-                    return None
-                
-                # Final validation: ensure reasonable content length
-                if len(html_content.strip()) < 500:
-                    logger.debug(f"Direct fetch content too short after checks: {len(html_content)} chars")
-                    return None
-                
-                logger.debug(f"Direct fetch successful (fast path): {len(html_content)} chars")
-                return html_content
                 
             except (httpx.TimeoutException, httpx.ConnectTimeout, httpx.ReadTimeout):
                 # Fallback to safe timeout (only once, not multiple retries)
@@ -566,31 +546,15 @@ class ScraperService:
                 try:
                     response = await client.get(url, headers=headers, timeout=SAFE_TIMEOUT)
                     
-                    # Same early exit checks
-                    if response.status_code in (403, 429):
-                        logger.debug(f"Direct fetch blocked (safe timeout): status {response.status_code}")
-                        return None
-                    
-                    if response.status_code != 200:
-                        logger.debug(f"Direct fetch failed (safe timeout): status {response.status_code}")
-                        return None
-                    
+                    # Get content for decision table evaluation
                     html_content = response.text
                     
-                    if len(html_content.strip()) < 3000:
-                        logger.debug(f"Direct fetch content too short (safe timeout): {len(html_content)} chars")
+                    # Apply decision table: accept or reject based on status code and content
+                    if self._should_accept_direct_fetch(response.status_code, html_content):
+                        logger.debug(f"Direct fetch successful (safe timeout): {len(html_content)} chars")
+                        return html_content
+                    else:
                         return None
-                    
-                    if self._is_bot_blocked(html_content):
-                        logger.debug("Direct fetch detected bot-block page (safe timeout)")
-                        return None
-                    
-                    if len(html_content.strip()) < 500:
-                        logger.debug(f"Direct fetch content too short after checks (safe timeout): {len(html_content)} chars")
-                        return None
-                    
-                    logger.debug(f"Direct fetch successful (safe timeout): {len(html_content)} chars")
-                    return html_content
                     
                 except (httpx.TimeoutException, httpx.ConnectTimeout, httpx.ReadTimeout):
                     logger.debug("Direct fetch timed out on both fast and safe timeouts")
@@ -612,40 +576,90 @@ class ScraperService:
                 logger.debug(f"Direct fetch unexpected error: {e}")
                 return None
     
-    def _is_bot_blocked(self, html_content: str) -> bool:
-        """Check if HTML content indicates bot blocking."""
+    def _has_strong_challenge_markers(self, html_content: str) -> bool:
+        """
+        Check if HTML content contains strong challenge markers.
+        Uses allowlist approach - only checks for specific known challenge strings.
+        Language-neutral, vendor-specific, rare false positives.
+        """
         if not html_content:
-            return True
+            return False
         
         html_lower = html_content.lower()
         
-        # Common bot-block indicators
-        bot_indicators = [
-            "access denied",
-            "blocked",
-            "cloudflare",
+        # Strong challenge markers (allowlist - these are the ONLY strings to check)
+        challenge_markers = [
+            "cdn-cgi/challenge",
+            "cf-browser-verification",
+            "just a moment...",
             "checking your browser",
-            "please enable cookies",
-            "captcha",
-            "challenge",
-            "ddos protection",
-            "security check",
-            "unusual traffic",
             "verify you are human",
-            "bot detection",
-            "rate limit",
+            "enable javascript to continue",
+            "access denied",
+            "perimeterx",
+            "human verification",
+            "akamai-bot",
+            "reference #",
         ]
         
-        # Check title and body for bot-block text
-        for indicator in bot_indicators:
-            if indicator in html_lower:
+        # Check for any challenge marker
+        for marker in challenge_markers:
+            if marker in html_lower:
                 return True
         
-        # Check for very short content that might be a redirect/block page
-        if len(html_content.strip()) < 200:
-            return True
-        
         return False
+    
+    def _should_accept_direct_fetch(self, status_code: int, html_content: str) -> bool:
+        """
+        Decision table for accepting/rejecting direct fetch.
+        
+        ✅ ACCEPT direct fetch if ALL are true:
+        - HTTP status is 200
+        - HTML length > 10-15 KB
+        - NOT a known challenge signature
+        
+        ❌ REJECT direct fetch if ANY is true:
+        - HTTP status in {403, 429, 503}
+        - HTML length < 3 KB
+        - Strong challenge markers present
+        
+        Returns:
+            True if should accept, False if should reject
+        """
+        html_length = len(html_content.strip()) if html_content else 0
+        
+        # ❌ REJECT if ANY rejection condition is true
+        
+        # Reject based on HTTP status
+        if status_code in (403, 429, 503):
+            logger.debug(f"Rejecting direct fetch: HTTP status {status_code}")
+            return False
+        
+        # Reject if HTML too short (< 3 KB)
+        if html_length < 3000:
+            logger.debug(f"Rejecting direct fetch: HTML too short ({html_length} bytes)")
+            return False
+        
+        # Reject if strong challenge markers present
+        if self._has_strong_challenge_markers(html_content):
+            logger.debug("Rejecting direct fetch: strong challenge markers detected")
+            return False
+        
+        # ✅ ACCEPT if ALL acceptance conditions are true
+        
+        # Must have HTTP 200
+        if status_code != 200:
+            logger.debug(f"Rejecting direct fetch: HTTP status {status_code} (not 200)")
+            return False
+        
+        # Must have sufficient HTML length (> 10-15 KB, using 10 KB as threshold)
+        if html_length < 10000:
+            logger.debug(f"Rejecting direct fetch: HTML too short for acceptance ({html_length} bytes, need >10KB)")
+            return False
+        
+        # All conditions met - accept
+        logger.debug(f"Accepting direct fetch: status {status_code}, {html_length} bytes, no challenge markers")
+        return True
     
     def _extract_jsonld_recipe(self, html_content: str, soup: Optional[BeautifulSoup] = None) -> Optional[Dict[str, Any]]:
         """
