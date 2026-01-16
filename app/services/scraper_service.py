@@ -522,8 +522,9 @@ class ScraperService:
         }
         
         # Adaptive timeouts: try fast first, then safe
-        FAST_TIMEOUT = httpx.Timeout(connect=0.5, read=1.0, write=0.5, pool=0.5)
-        SAFE_TIMEOUT = httpx.Timeout(connect=1.0, read=2.0, write=0.5, pool=0.5)
+        # Increased timeouts to handle slower servers and HTTP/2 header processing
+        FAST_TIMEOUT = httpx.Timeout(connect=2.0, read=5.0, write=1.5, pool=1.5)
+        SAFE_TIMEOUT = httpx.Timeout(connect=5.0, read=7.0, write=2.5, pool=2.0)
         
         async with httpx.AsyncClient(follow_redirects=True, http2=True) as client:
             # Try fast timeout first
