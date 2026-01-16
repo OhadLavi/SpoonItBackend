@@ -45,6 +45,9 @@ for logger_name in [
     "h2.frame",
     "h2.settings",
     "h2.windows",
+    "hpack",
+    "hpack.hpack",
+    "hpack.table",
     "hyperframe",
     "hyperframe.frame",
 ]:
@@ -482,20 +485,37 @@ class ScraperService:
             http_method: "httpx" (direct fetch), "headless" (browser), or "brightdata"
             content_source: "JSON-LD" or "HTML"
             gemini_used: Whether Gemini API was called
-            timings: Optional timing dict for total time and image processing time
+            timings: Optional timing dict for all intermediate steps
         """
-        total_time = timings.get("total", 0) if timings else 0
-        image_processing_time = timings.get("image_processing", 0) if timings else 0
+        timings = timings or {}
+        total_time = timings.get("total", 0)
+        
         logger.info("="*70)
         logger.info("EXTRACTION PATH SUMMARY:")
         logger.info("="*70)
-        logger.info(f"HTTP Method: {http_method.upper()}")
-        logger.info(f"Content Source: {content_source}")
-        logger.info(f"Gemini Used: {'YES' if gemini_used else 'NO'}")
-        if image_processing_time > 0:
-            logger.info(f"Image Processing Time: {image_processing_time:.2f}s")
+        logger.info(f"HTTP Method:     {http_method.upper()}")
+        logger.info(f"Content Source:  {content_source}")
+        logger.info(f"Gemini Used:     {'YES' if gemini_used else 'NO'}")
+        
+        # Detailed timings breakdown
+        if "direct_fetch" in timings:
+            logger.info(f"Direct Fetch:    {timings['direct_fetch']:.2f}s")
+        if "brightdata_api" in timings:
+            logger.info(f"BrightData API:  {timings['brightdata_api']:.2f}s")
+        if "html_parse" in timings:
+            logger.info(f"HTML Parse/Ext:  {timings['html_parse']:.2f}s")
+        if "gemini_api" in timings:
+            logger.info(f"Gemini API:      {timings['gemini_api']:.2f}s")
+            
+        image_time = timings.get("image_processing", 0)
+        if image_time > 0:
+            logger.info(f"Image Proc:      {image_time:.2f}s (processed in parallel)")
+        else:
+            logger.info(f"Image Proc:      {'0.00s' if 'image_processing' in timings else 'Skipped'}")
+            
         if total_time > 0:
-            logger.info(f"Total Time: {total_time:.2f}s")
+            logger.info("-" * 30)
+            logger.info(f"TOTAL TIME:      {total_time:.2f}s")
         logger.info("="*70)
     
     async def extract_recipe_from_url(self, url: str) -> Recipe:
@@ -1325,13 +1345,20 @@ class ScraperService:
                     if has_ingredients or has_instructions:
                         # Success! No Gemini call needed
                         timings["html_parse"] = time.time() - parse_start
+                        
+                        # Image processing is skipped for JSON-LD fast path per user request
+                        timings["image_processing"] = 0.0
+                        logger.info("Added image_processing to the timings dictionary: 0.00s (skipped for JSON-LD)")
+                        
                         timings["total"] = time.time() - start_time
                         logger.info(f"✅ JSON-LD direct mapping successful (no Gemini call): {timings['total']:.2f}s")
                         logger.info(f"  Ingredients: {has_ingredients}, Instructions: {has_instructions}")
                         # Map source to http_method
                         http_method = "httpx" if source == "direct" else "brightdata"
                         self._log_extraction_path(http_method, "JSON-LD", False, timings)
-                        return recipe
+                        
+                        # Return the mapped data
+                        return Recipe(**recipe_data)
                     else:
                         logger.info("JSON-LD recipe missing key fields, falling back to Gemini")
             except Exception as e:
@@ -1439,6 +1466,7 @@ class ScraperService:
                 
                 timings["gemini_api"] = time.time() - gemini_start
                 timings["image_processing"] = image_processing_time
+                logger.info(f"Added image_processing to the timings dictionary: {image_processing_time:.2f}s")
                 logger.info(f"Time for Gemini API + food detection (parallel): {timings['gemini_api']:.2f} seconds")
                 logger.info(f"Food detection filtered to {len(filtered_images)} images")
                 
@@ -1464,20 +1492,12 @@ class ScraperService:
                 logger.info(f"Time for JSON parsing: {timings['json_parse']:.4f} seconds")
                 
                 # Calculate total time and log summary
+                # Total time calculated for unified summary in _log_extraction_path
                 timings["total"] = time.time() - start_time
                 
-                logger.info("="*60)
-                logger.info("TIMING SUMMARY (JSON-LD path):")
-                logger.info("="*60)
-                if 'direct_fetch' in timings:
-                    logger.info(f"Direct Fetch Time: {timings['direct_fetch']:.2f} seconds")
-                if 'brightdata_api' in timings:
-                    logger.info(f"BrightData API Time: {timings['brightdata_api']:.2f} seconds")
-                logger.info(f"JSON-LD Extraction: {timings['html_parse']:.2f} seconds")
-                logger.info(f"Gemini + Food Detection (parallel): {timings['gemini_api']:.2f} seconds")
-                logger.info(f"JSON Parsing Time: {timings['json_parse']:.4f} seconds")
-                logger.info(f"Total Time: {timings['total']:.2f} seconds")
-                logger.info("="*60)
+                # Summary logging will be handled by _log_extraction_path at the end
+                # Removing redundant intermediate TIMING SUMMARY to keep logs clean
+                pass
                 
                 # Normalize data to match Recipe model
                 recipe_data = self._normalize_recipe_data(recipe_data)
@@ -1704,6 +1724,7 @@ class ScraperService:
         
         timings["gemini_api"] = time.time() - gemini_start
         timings["image_processing"] = image_processing_time
+        logger.info(f"Added image_processing to the timings dictionary: {image_processing_time:.2f}s")
         logger.info(f"Time for Gemini API + food detection (parallel): {timings['gemini_api']:.2f} seconds")
         logger.info(f"Food detection filtered to {len(filtered_images)} images")
         
@@ -1731,22 +1752,9 @@ class ScraperService:
         logger.info(f"Time for JSON parsing: {timings['json_parse']:.4f} seconds")
         
         # STEP 5: Calculate total time and log summary
+        # Total time calculated for unified summary in _log_extraction_path
         timings["total"] = time.time() - start_time
-        
-        logger.info("="*60)
-        logger.info("TIMING SUMMARY:")
-        logger.info("="*60)
-        if 'brightdata_api' in timings:
-            logger.info(f"BrightData API Time: {timings['brightdata_api']:.2f} seconds")
-        if 'html_fetch' in timings:
-            logger.info(f"Total HTML Fetch Time: {timings['html_fetch']:.2f} seconds")
-        if 'direct_fetch' in timings:
-            logger.info(f"Direct Fetch Time: {timings['direct_fetch']:.2f} seconds")
-        logger.info(f"Parallel Extraction (content/images/title): {timings['html_parse']:.2f} seconds")
-        logger.info(f"Gemini + Food Detection (parallel): {timings['gemini_api']:.2f} seconds")
-        logger.info(f"JSON Parsing Time: {timings['json_parse']:.4f} seconds")
-        logger.info(f"Total Time: {timings['total']:.2f} seconds")
-        logger.info("="*60)
+        # Redundant TIMING SUMMARY removed to keep logs clean
         
         # Normalize data to match Recipe model
         recipe_data = self._normalize_recipe_data(recipe_data)
