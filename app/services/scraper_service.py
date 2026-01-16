@@ -31,10 +31,24 @@ from app.services.food_detector import get_food_detector
 logger = logging.getLogger(__name__)
 
 # Disable verbose HTTP/2 debug logging from httpx/httpcore
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
-logging.getLogger("httpcore.http2").setLevel(logging.WARNING)
-logging.getLogger("h2").setLevel(logging.WARNING)
+# Set all HTTP/2 related loggers to WARNING to suppress "Decoded", "Encoding", etc. messages
+for logger_name in [
+    "httpx",
+    "httpcore",
+    "httpcore.http2",
+    "httpcore.http2.hpack",
+    "httpcore.http2.hpack.table",
+    "h2",
+    "h2.connection",
+    "h2.events",
+    "h2.stream",
+    "h2.frame",
+    "h2.settings",
+    "h2.windows",
+    "hyperframe",
+    "hyperframe.frame",
+]:
+    logging.getLogger(logger_name).setLevel(logging.WARNING)
 
 SOCIAL_DOMAINS = ("instagram.com", "tiktok.com")
 GEMINI_MODEL = "gemini-2.5-flash-lite"
@@ -468,15 +482,18 @@ class ScraperService:
             http_method: "httpx" (direct fetch), "headless" (browser), or "brightdata"
             content_source: "JSON-LD" or "HTML"
             gemini_used: Whether Gemini API was called
-            timings: Optional timing dict for total time
+            timings: Optional timing dict for total time and image processing time
         """
         total_time = timings.get("total", 0) if timings else 0
+        image_processing_time = timings.get("image_processing", 0) if timings else 0
         logger.info("="*70)
         logger.info("EXTRACTION PATH SUMMARY:")
         logger.info("="*70)
         logger.info(f"HTTP Method: {http_method.upper()}")
         logger.info(f"Content Source: {content_source}")
         logger.info(f"Gemini Used: {'YES' if gemini_used else 'NO'}")
+        if image_processing_time > 0:
+            logger.info(f"Image Processing Time: {image_processing_time:.2f}s")
         if total_time > 0:
             logger.info(f"Total Time: {total_time:.2f}s")
         logger.info("="*70)
@@ -1398,17 +1415,20 @@ class ScraperService:
                 async def filter_food_images():
                     """Filter images using food detection."""
                     if not candidate_images:
-                        return []
+                        return [], 0.0
                     try:
                         food_detector = get_food_detector()
-                        return await food_detector.filter_food_images(candidate_images)
+                        image_start = time.time()
+                        images = await food_detector.filter_food_images(candidate_images)
+                        image_time = time.time() - image_start
+                        return images, image_time
                     except Exception as e:
                         logger.warning(f"Food detection failed, using all candidate images: {e}")
-                        return candidate_images
+                        return candidate_images, 0.0
                 
                 # Run both tasks in parallel
                 try:
-                    gemini_response, filtered_images = await asyncio.gather(
+                    gemini_response, (filtered_images, image_processing_time) = await asyncio.gather(
                         call_gemini(),
                         filter_food_images(),
                         return_exceptions=False
@@ -1418,6 +1438,7 @@ class ScraperService:
                     raise ScrapingError(f"Failed to extract recipe with Gemini: {e}") from e
                 
                 timings["gemini_api"] = time.time() - gemini_start
+                timings["image_processing"] = image_processing_time
                 logger.info(f"Time for Gemini API + food detection (parallel): {timings['gemini_api']:.2f} seconds")
                 logger.info(f"Food detection filtered to {len(filtered_images)} images")
                 
@@ -1659,17 +1680,20 @@ class ScraperService:
         async def filter_food_images():
             """Filter images using food detection."""
             if not candidate_images:
-                return []
+                return [], 0.0
             try:
                 food_detector = get_food_detector()
-                return await food_detector.filter_food_images(candidate_images)
+                image_start = time.time()
+                images = await food_detector.filter_food_images(candidate_images)
+                image_time = time.time() - image_start
+                return images, image_time
             except Exception as e:
                 logger.warning(f"Food detection failed, using all candidate images: {e}")
-                return candidate_images
+                return candidate_images, 0.0
         
         # Run both tasks in parallel
         try:
-            gemini_response, filtered_images = await asyncio.gather(
+            gemini_response, (filtered_images, image_processing_time) = await asyncio.gather(
                 call_gemini(),
                 filter_food_images(),
                 return_exceptions=False
@@ -1679,6 +1703,7 @@ class ScraperService:
             raise ScrapingError(f"Failed to extract recipe with Gemini: {e}") from e
         
         timings["gemini_api"] = time.time() - gemini_start
+        timings["image_processing"] = image_processing_time
         logger.info(f"Time for Gemini API + food detection (parallel): {timings['gemini_api']:.2f} seconds")
         logger.info(f"Food detection filtered to {len(filtered_images)} images")
         
