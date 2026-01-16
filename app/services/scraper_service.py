@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse, urljoin
 
+import httpx
 import requests
 from bs4 import BeautifulSoup
 from google import genai
@@ -315,12 +316,35 @@ async def extract_social_text_headless(url: str, timeout_ms: int = 8000) -> Soci
 class ScraperService:
     def __init__(self):
         self._client: genai.Client | None = None
+        # Cache Gemini schema and config (computed once, reused for every request)
+        self._cleaned_schema: Dict[str, Any] | None = None
+        self._gemini_config: types.GenerateContentConfig | None = None
 
     @property
     def client(self) -> genai.Client:
         if self._client is None:
             self._client = genai.Client(api_key=settings.gemini_api_key)
         return self._client
+    
+    @property
+    def cleaned_schema(self) -> Dict[str, Any]:
+        """Get cached cleaned schema for Gemini."""
+        if self._cleaned_schema is None:
+            schema = self._get_recipe_response_schema()
+            self._cleaned_schema = self._clean_schema_for_gemini(schema)
+        return self._cleaned_schema
+    
+    @property
+    def gemini_config(self) -> types.GenerateContentConfig:
+        """Get cached Gemini config."""
+        if self._gemini_config is None:
+            self._gemini_config = types.GenerateContentConfig(
+                temperature=0.0,
+                top_p=0.0,
+                response_mime_type="application/json",
+                response_schema=self.cleaned_schema,
+            )
+        return self._gemini_config
     
     def _clean_schema_for_gemini(self, schema: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -349,20 +373,667 @@ class ScraperService:
         
         return cleaned
     
+    def _log_extraction_path(
+        self,
+        http_method: str,
+        content_source: str,
+        gemini_used: bool,
+        timings: Optional[Dict[str, float]] = None
+    ) -> None:
+        """
+        Log a summary of the extraction path used.
+        
+        Args:
+            http_method: "httpx" (direct fetch), "headless" (browser), or "brightdata"
+            content_source: "JSON-LD" or "HTML"
+            gemini_used: Whether Gemini API was called
+            timings: Optional timing dict for total time
+        """
+        total_time = timings.get("total", 0) if timings else 0
+        logger.info("="*70)
+        logger.info("EXTRACTION PATH SUMMARY:")
+        logger.info("="*70)
+        logger.info(f"HTTP Method: {http_method.upper()}")
+        logger.info(f"Content Source: {content_source}")
+        logger.info(f"Gemini Used: {'YES' if gemini_used else 'NO'}")
+        if total_time > 0:
+            logger.info(f"Total Time: {total_time:.2f}s")
+        logger.info("="*70)
+    
     async def extract_recipe_from_url(self, url: str) -> Recipe:
         if is_social_url(url):
             logger.info(f"[social] Using headless browser for: {url}")
             return await self._extract_social(url)
 
-        # Regular website - use BrightData API approach
-        logger.info(f"[brightdata] Extracting recipe from: {url}")
+        # Regular website - try direct fetch first, fallback to BrightData
+        logger.info(f"[regular] Extracting recipe from: {url}")
+        start_time = time.time()
+        timings = {}
+        
+        # Try fast direct fetch first
+        direct_fetch_start = time.time()
+        html_content = await self._try_direct_fetch(url)
+        if html_content:
+            timings["direct_fetch"] = time.time() - direct_fetch_start
+            logger.info(f"[direct] Direct fetch successful ({timings['direct_fetch']:.2f}s), using fast path")
+            return await self._extract_from_html_content(url, html_content, source="direct", timings=timings, start_time=start_time)
+        
+        # Fallback to BrightData if direct fetch failed
+        logger.info(f"[brightdata] Direct fetch failed, using BrightData fallback")
         return await self._extract_with_brightdata(url)
 
 
 
     # -------------------------
-    # Regular URLs - BrightData API Approach
+    # Regular URLs - Fast Direct Fetch + BrightData Fallback
     # -------------------------
+    async def _try_direct_fetch(self, url: str) -> Optional[str]:
+        """
+        Try a fast direct HTTP fetch with adaptive timeouts and early exit heuristics.
+        Uses httpx with fast timeout first, then falls back to safe timeout if needed.
+        Returns HTML content if successful, None if we should fallback to BrightData.
+        """
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/123.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+        }
+        
+        # Adaptive timeouts: try fast first, then safe
+        FAST_TIMEOUT = httpx.Timeout(connect=0.5, read=1.0, write=0.5, pool=0.5)
+        SAFE_TIMEOUT = httpx.Timeout(connect=1.0, read=2.0, write=0.5, pool=0.5)
+        
+        async with httpx.AsyncClient(follow_redirects=True, http2=True) as client:
+            # Try fast timeout first
+            try:
+                response = await client.get(url, headers=headers, timeout=FAST_TIMEOUT)
+                
+                # Early exit: check status code before processing content
+                if response.status_code in (403, 429):
+                    logger.debug(f"Direct fetch blocked: status {response.status_code}")
+                    return None
+                
+                if response.status_code != 200:
+                    logger.debug(f"Direct fetch failed: status {response.status_code}")
+                    return None
+                
+                # Get content
+                html_content = response.text
+                
+                # Early exit: check content length before expensive bot-block check
+                if len(html_content.strip()) < 3000:  # Heuristic: very short = likely block/error
+                    logger.debug(f"Direct fetch content too short: {len(html_content)} chars")
+                    return None
+                
+                # Check for bot-block indicators
+                if self._is_bot_blocked(html_content):
+                    logger.debug("Direct fetch detected bot-block page")
+                    return None
+                
+                # Final validation: ensure reasonable content length
+                if len(html_content.strip()) < 500:
+                    logger.debug(f"Direct fetch content too short after checks: {len(html_content)} chars")
+                    return None
+                
+                logger.debug(f"Direct fetch successful (fast path): {len(html_content)} chars")
+                return html_content
+                
+            except (httpx.TimeoutException, httpx.ConnectTimeout, httpx.ReadTimeout):
+                # Fallback to safe timeout (only once, not multiple retries)
+                logger.debug("Direct fetch fast timeout, trying safe timeout")
+                try:
+                    response = await client.get(url, headers=headers, timeout=SAFE_TIMEOUT)
+                    
+                    # Same early exit checks
+                    if response.status_code in (403, 429):
+                        logger.debug(f"Direct fetch blocked (safe timeout): status {response.status_code}")
+                        return None
+                    
+                    if response.status_code != 200:
+                        logger.debug(f"Direct fetch failed (safe timeout): status {response.status_code}")
+                        return None
+                    
+                    html_content = response.text
+                    
+                    if len(html_content.strip()) < 3000:
+                        logger.debug(f"Direct fetch content too short (safe timeout): {len(html_content)} chars")
+                        return None
+                    
+                    if self._is_bot_blocked(html_content):
+                        logger.debug("Direct fetch detected bot-block page (safe timeout)")
+                        return None
+                    
+                    if len(html_content.strip()) < 500:
+                        logger.debug(f"Direct fetch content too short after checks (safe timeout): {len(html_content)} chars")
+                        return None
+                    
+                    logger.debug(f"Direct fetch successful (safe timeout): {len(html_content)} chars")
+                    return html_content
+                    
+                except (httpx.TimeoutException, httpx.ConnectTimeout, httpx.ReadTimeout):
+                    logger.debug("Direct fetch timed out on both fast and safe timeouts")
+                    return None
+                except httpx.HTTPStatusError as e:
+                    logger.debug(f"Direct fetch HTTP error (safe timeout): {e}")
+                    return None
+                except httpx.RequestError as e:
+                    logger.debug(f"Direct fetch request error (safe timeout): {e}")
+                    return None
+                    
+            except httpx.HTTPStatusError as e:
+                logger.debug(f"Direct fetch HTTP error: {e}")
+                return None
+            except httpx.RequestError as e:
+                logger.debug(f"Direct fetch request error: {e}")
+                return None
+            except Exception as e:
+                logger.debug(f"Direct fetch unexpected error: {e}")
+                return None
+    
+    def _is_bot_blocked(self, html_content: str) -> bool:
+        """Check if HTML content indicates bot blocking."""
+        if not html_content:
+            return True
+        
+        html_lower = html_content.lower()
+        
+        # Common bot-block indicators
+        bot_indicators = [
+            "access denied",
+            "blocked",
+            "cloudflare",
+            "checking your browser",
+            "please enable cookies",
+            "captcha",
+            "challenge",
+            "ddos protection",
+            "security check",
+            "unusual traffic",
+            "verify you are human",
+            "bot detection",
+            "rate limit",
+        ]
+        
+        # Check title and body for bot-block text
+        for indicator in bot_indicators:
+            if indicator in html_lower:
+                return True
+        
+        # Check for very short content that might be a redirect/block page
+        if len(html_content.strip()) < 200:
+            return True
+        
+        return False
+    
+    def _extract_jsonld_recipe(self, html_content: str, soup: Optional[BeautifulSoup] = None) -> Optional[Dict[str, Any]]:
+        """
+        Extract JSON-LD Recipe objects from HTML.
+        Returns the best Recipe object if found, None otherwise.
+        
+        Args:
+            html_content: The HTML content (used only if soup is not provided)
+            soup: Pre-parsed BeautifulSoup object (preferred to avoid re-parsing)
+        """
+        try:
+            if soup is None:
+                soup = BeautifulSoup(html_content, "html.parser")
+            jsonld_scripts = soup.find_all('script', type='application/ld+json')
+            
+            recipes = []
+            for script in jsonld_scripts:
+                try:
+                    data = json.loads(script.string)
+                    
+                    # Handle both single objects and arrays
+                    if isinstance(data, list):
+                        for item in data:
+                            if isinstance(item, dict) and item.get('@type') == 'Recipe':
+                                recipes.append(item)
+                    elif isinstance(data, dict):
+                        # Check if it's a Recipe directly
+                        if data.get('@type') == 'Recipe':
+                            recipes.append(data)
+                        # Check if it's wrapped in @graph
+                        elif '@graph' in data and isinstance(data['@graph'], list):
+                            for item in data['@graph']:
+                                if isinstance(item, dict) and item.get('@type') == 'Recipe':
+                                    recipes.append(item)
+                except (json.JSONDecodeError, AttributeError, TypeError) as e:
+                    logger.debug(f"Failed to parse JSON-LD script: {e}")
+                    continue
+            
+            # Check for NewsArticle with recipe content in articleBody
+            if not recipes:
+                # Heuristic: Check for NewsArticle with recipe markers in articleBody
+                for script in jsonld_scripts:
+                    try:
+                        data = json.loads(script.string)
+                        items_to_check = []
+                        if isinstance(data, list):
+                            items_to_check = data
+                        elif isinstance(data, dict):
+                            if data.get('@type') == 'NewsArticle':
+                                items_to_check = [data]
+                            elif '@graph' in data and isinstance(data['@graph'], list):
+                                items_to_check = data['@graph']
+                        
+                        for item in items_to_check:
+                            if isinstance(item, dict) and item.get('@type') == 'NewsArticle':
+                                article_body = item.get('articleBody') or item.get('text')
+                                if article_body and isinstance(article_body, str):
+                                    # Check for Hebrew/English recipe markers
+                                    recipe_markers = [
+                                        'המרכיבים', 'מצרכים', 'אופן ההכנה', 'הוראות הכנה',
+                                        'ingredients', 'instructions', 'directions', 'recipe'
+                                    ]
+                                    body_lower = article_body.lower()
+                                    if any(marker in body_lower for marker in recipe_markers):
+                                        logger.info("Found NewsArticle with recipe content in articleBody")
+                                        # Return None to fall back to standard extraction (articleBody will be used)
+                                        return None
+                    except (json.JSONDecodeError, AttributeError, TypeError):
+                        continue
+            
+            if not recipes:
+                return None
+            
+            logger.info(f"Found {len(recipes)} JSON-LD Recipe object(s)")
+            
+            # If multiple recipes, pick the best one
+            if len(recipes) > 1:
+                best_recipe = max(recipes, key=self._score_jsonld_recipe)
+                logger.info("Selected best recipe from multiple JSON-LD recipes")
+                return best_recipe
+            
+            return recipes[0]
+            
+        except Exception as e:
+            logger.debug(f"JSON-LD extraction failed: {e}")
+            return None
+    
+    def _score_jsonld_recipe(self, recipe: Dict[str, Any]) -> int:
+        """
+        Score a JSON-LD recipe to determine quality.
+        Higher score = more complete recipe.
+        """
+        score = 0
+        
+        # Check for key recipe fields
+        if recipe.get("recipeIngredient"):
+            score += 1
+        if recipe.get("recipeInstructions"):
+            score += 1
+        if recipe.get("image"):
+            score += 1
+        if recipe.get("name"):
+            score += 1
+        
+        # Bonus points for more complete data
+        if isinstance(recipe.get("recipeIngredient"), list) and len(recipe.get("recipeIngredient", [])) > 3:
+            score += 1
+        if isinstance(recipe.get("recipeInstructions"), list) and len(recipe.get("recipeInstructions", [])) > 3:
+            score += 1
+        
+        return score
+    
+    def _jsonld_recipe_to_text(self, recipe: Dict[str, Any]) -> Optional[str]:
+        """
+        Convert JSON-LD Recipe object to clean text format for Gemini.
+        Returns formatted text or None if recipe is invalid.
+        """
+        try:
+            parts = []
+            
+            # Title/Name
+            name = recipe.get("name") or recipe.get("headline")
+            if name:
+                parts.append(f"Recipe Name: {name}")
+            
+            # Description
+            description = recipe.get("description")
+            if description:
+                parts.append(f"\nDescription:\n{description}")
+            
+            # Ingredients
+            ingredients = recipe.get("recipeIngredient") or recipe.get("ingredients")
+            if ingredients:
+                parts.append("\nIngredients:")
+                if isinstance(ingredients, list):
+                    for ing in ingredients:
+                        if isinstance(ing, str):
+                            parts.append(f"• {ing}")
+                        elif isinstance(ing, dict):
+                            # Handle structured ingredient format
+                            ing_text = ing.get("name") or ing.get("@value") or str(ing)
+                            if ing.get("amount"):
+                                ing_text = f"{ing.get('amount')} {ing_text}"
+                            parts.append(f"• {ing_text}")
+                elif isinstance(ingredients, str):
+                    parts.append(f"• {ingredients}")
+            
+            # Instructions
+            instructions = recipe.get("recipeInstructions") or recipe.get("instructions")
+            if instructions:
+                parts.append("\nInstructions:")
+                if isinstance(instructions, list):
+                    for i, inst in enumerate(instructions, 1):
+                        if isinstance(inst, str):
+                            parts.append(f"{i}. {inst}")
+                        elif isinstance(inst, dict):
+                            # Handle structured instruction format
+                            inst_text = inst.get("text") or inst.get("@value") or inst.get("name") or str(inst)
+                            parts.append(f"{i}. {inst_text}")
+                elif isinstance(instructions, str):
+                    parts.append(f"1. {instructions}")
+            
+            # Yield/Servings
+            yield_info = recipe.get("recipeYield") or recipe.get("yield")
+            if yield_info:
+                if isinstance(yield_info, list) and yield_info:
+                    yield_info = yield_info[0]
+                parts.append(f"\nYield: {yield_info}")
+            
+            # Prep time
+            prep_time = recipe.get("prepTime")
+            if prep_time:
+                parts.append(f"Prep Time: {prep_time}")
+            
+            # Cook time
+            cook_time = recipe.get("cookTime")
+            if cook_time:
+                parts.append(f"Cook Time: {cook_time}")
+            
+            # Total time
+            total_time = recipe.get("totalTime")
+            if total_time:
+                parts.append(f"Total Time: {total_time}")
+            
+            # Nutrition
+            nutrition = recipe.get("nutrition")
+            if nutrition and isinstance(nutrition, dict):
+                nutrition_parts = []
+                if nutrition.get("calories"):
+                    nutrition_parts.append(f"Calories: {nutrition.get('calories')}")
+                if nutrition.get("proteinContent"):
+                    nutrition_parts.append(f"Protein: {nutrition.get('proteinContent')}")
+                if nutrition.get("fatContent"):
+                    nutrition_parts.append(f"Fat: {nutrition.get('fatContent')}")
+                if nutrition.get("carbohydrateContent"):
+                    nutrition_parts.append(f"Carbs: {nutrition.get('carbohydrateContent')}")
+                if nutrition_parts:
+                    parts.append(f"\nNutrition:\n" + "\n".join(nutrition_parts))
+            
+            result = "\n".join(parts)
+            
+            # Validate we have meaningful content (at least ingredients or instructions)
+            has_ingredients = bool(ingredients)
+            has_instructions = bool(instructions)
+            
+            if not has_ingredients and not has_instructions:
+                logger.warning("JSON-LD recipe missing both ingredients and instructions")
+                return None
+            
+            if len(result.strip()) < 50:
+                logger.warning("JSON-LD recipe text too short")
+                return None
+            
+            return result
+            
+        except Exception as e:
+            logger.warning(f"Failed to convert JSON-LD recipe to text: {e}")
+            return None
+    
+    def _parse_iso8601_duration(self, duration: str) -> Optional[int]:
+        """
+        Parse ISO 8601 duration (e.g., "PT30M", "PT1H30M") to minutes.
+        Returns None if parsing fails.
+        """
+        if not duration or not isinstance(duration, str):
+            return None
+        
+        try:
+            # Remove PT prefix
+            if not duration.startswith('PT'):
+                return None
+            duration = duration[2:]
+            
+            minutes = 0
+            hours = 0
+            
+            # Parse hours
+            if 'H' in duration:
+                parts = duration.split('H')
+                hours = int(parts[0])
+                duration = parts[1] if len(parts) > 1 else ''
+            
+            # Parse minutes
+            if 'M' in duration:
+                parts = duration.split('M')
+                minutes = int(parts[0])
+            
+            return hours * 60 + minutes
+        except (ValueError, AttributeError):
+            return None
+    
+    def _jsonld_recipe_to_recipe_data(self, recipe: Dict[str, Any], url: str) -> Optional[Dict[str, Any]]:
+        """
+        Map JSON-LD Recipe directly to Recipe model format.
+        Returns recipe data dict or None if mapping fails.
+        """
+        try:
+            data: Dict[str, Any] = {
+                "source": url,
+                "title": recipe.get("name") or recipe.get("headline"),
+                "language": "he",  # Default, could be detected from content
+            }
+            
+            # Servings/Yield
+            yield_info = recipe.get("recipeYield") or recipe.get("yield")
+            if yield_info:
+                if isinstance(yield_info, list) and yield_info:
+                    yield_info = yield_info[0]
+                if isinstance(yield_info, str):
+                    data["servings"] = {
+                        "amount": None,
+                        "unit": None,
+                        "raw": yield_info
+                    }
+                elif isinstance(yield_info, (int, float)):
+                    data["servings"] = {
+                        "amount": str(int(yield_info)),
+                        "unit": None,
+                        "raw": str(int(yield_info))
+                    }
+            
+            # Times (parse ISO 8601 duration)
+            prep_time = recipe.get("prepTime")
+            if prep_time:
+                minutes = self._parse_iso8601_duration(prep_time)
+                if minutes:
+                    data["prep_time_minutes"] = minutes
+            
+            cook_time = recipe.get("cookTime")
+            if cook_time:
+                minutes = self._parse_iso8601_duration(cook_time)
+                if minutes:
+                    data["cook_time_minutes"] = minutes
+            
+            total_time = recipe.get("totalTime")
+            if total_time:
+                minutes = self._parse_iso8601_duration(total_time)
+                if minutes:
+                    data["total_time_minutes"] = minutes
+            
+            # Ingredients -> ingredientGroups
+            ingredients = recipe.get("recipeIngredient") or recipe.get("ingredients")
+            ingredient_groups = []
+            if ingredients:
+                if isinstance(ingredients, list):
+                    normalized_ingredients = []
+                    for ing in ingredients:
+                        if isinstance(ing, str):
+                            # Simple string ingredient
+                            normalized_ingredients.append({
+                                "name": ing,
+                                "amount": None,
+                                "preparation": None,
+                                "raw": ing
+                            })
+                        elif isinstance(ing, dict):
+                            # Structured ingredient
+                            name = ing.get("name") or ing.get("@value") or str(ing)
+                            amount = ing.get("amount") or ing.get("quantity")
+                            if amount and ing.get("unit"):
+                                amount = f"{amount} {ing.get('unit')}"
+                            
+                            normalized_ingredients.append({
+                                "name": name,
+                                "amount": amount,
+                                "preparation": ing.get("preparation"),
+                                "raw": ing.get("text") or name
+                            })
+                    
+                    if normalized_ingredients:
+                        ingredient_groups.append({
+                            "name": None,
+                            "ingredients": normalized_ingredients
+                        })
+                elif isinstance(ingredients, str):
+                    # Single string ingredient
+                    ingredient_groups.append({
+                        "name": None,
+                        "ingredients": [{
+                            "name": ingredients,
+                            "amount": None,
+                            "preparation": None,
+                            "raw": ingredients
+                        }]
+                    })
+            
+            data["ingredient_groups"] = ingredient_groups
+            
+            # Instructions -> instructionGroups
+            instructions = recipe.get("recipeInstructions") or recipe.get("instructions")
+            instruction_groups = []
+            if instructions:
+                if isinstance(instructions, list):
+                    normalized_instructions = []
+                    for inst in instructions:
+                        if isinstance(inst, str):
+                            normalized_instructions.append(inst)
+                        elif isinstance(inst, dict):
+                            # Structured instruction
+                            inst_text = inst.get("text") or inst.get("@value") or inst.get("name") or str(inst)
+                            normalized_instructions.append(inst_text)
+                    
+                    if normalized_instructions:
+                        instruction_groups.append({
+                            "name": None,
+                            "instructions": normalized_instructions
+                        })
+                elif isinstance(instructions, str):
+                    # Single string instruction
+                    instruction_groups.append({
+                        "name": None,
+                        "instructions": [instructions]
+                    })
+            
+            data["instruction_groups"] = instruction_groups
+            
+            # Images
+            images = []
+            image_data = recipe.get("image")
+            if image_data:
+                if isinstance(image_data, str):
+                    images.append(image_data)
+                elif isinstance(image_data, list):
+                    for img in image_data:
+                        if isinstance(img, str):
+                            images.append(img)
+                        elif isinstance(img, dict):
+                            img_url = img.get("url") or img.get("@id") or img.get("contentUrl")
+                            if img_url:
+                                images.append(img_url)
+                elif isinstance(image_data, dict):
+                    img_url = image_data.get("url") or image_data.get("@id") or image_data.get("contentUrl")
+                    if img_url:
+                        images.append(img_url)
+            
+            data["images"] = images[:5]  # Limit to 5 images
+            
+            # Nutrition
+            nutrition = recipe.get("nutrition")
+            if nutrition and isinstance(nutrition, dict):
+                nutrition_data = {}
+                
+                # Calories
+                calories = nutrition.get("calories") or nutrition.get("calorieContent")
+                if calories:
+                    try:
+                        if isinstance(calories, str):
+                            calories = float(''.join(c for c in calories if c.isdigit() or c == '.'))
+                        nutrition_data["calories"] = float(calories) if calories >= 0 else None
+                    except (ValueError, TypeError):
+                        pass
+                
+                # Protein
+                protein = nutrition.get("proteinContent")
+                if protein:
+                    try:
+                        if isinstance(protein, str):
+                            protein = float(''.join(c for c in protein if c.isdigit() or c == '.'))
+                        nutrition_data["protein_g"] = float(protein) if protein >= 0 else None
+                    except (ValueError, TypeError):
+                        pass
+                
+                # Fat
+                fat = nutrition.get("fatContent")
+                if fat:
+                    try:
+                        if isinstance(fat, str):
+                            fat = float(''.join(c for c in fat if c.isdigit() or c == '.'))
+                        nutrition_data["fat_g"] = float(fat) if fat >= 0 else None
+                    except (ValueError, TypeError):
+                        pass
+                
+                # Carbs
+                carbs = nutrition.get("carbohydrateContent")
+                if carbs:
+                    try:
+                        if isinstance(carbs, str):
+                            carbs = float(''.join(c for c in carbs if c.isdigit() or c == '.'))
+                        nutrition_data["carbs_g"] = float(carbs) if carbs >= 0 else None
+                    except (ValueError, TypeError):
+                        pass
+                
+                # Per
+                nutrition_data["per"] = nutrition.get("servingSize") or "מנה"
+                
+                if nutrition_data:
+                    data["nutrition"] = nutrition_data
+            
+            # Notes (from description if it's not already used)
+            notes = []
+            description = recipe.get("description")
+            if description and description != data.get("title"):
+                # Only add as note if it's substantial and different from title
+                if len(description) > 50:
+                    notes.append(description)
+            data["notes"] = notes
+            
+            return data
+            
+        except Exception as e:
+            logger.warning(f"Failed to map JSON-LD recipe to Recipe data: {e}")
+            return None
+    
     async def _extract_with_brightdata(self, url: str) -> Recipe:
         """
         Extract recipe using BrightData API to fetch HTML, parse to markdown,
@@ -410,41 +1081,19 @@ class ScraperService:
         logger.info(f"BrightData API Time: {timings['brightdata_api']:.2f} seconds")
         logger.info(f"Total HTML Fetch Time: {timings['html_fetch']:.2f} seconds")
         
-        # Log response details
-        logger.info(f"BrightData response status code: {response.status_code}")
-        logger.info(f"BrightData response headers: {dict(response.headers)}")
-        logger.info(f"BrightData response size: {len(response.content)} bytes")
+        # Log response details (DEBUG only - avoid logging large HTML at INFO)
+        logger.debug(f"BrightData response status code: {response.status_code}")
+        logger.debug(f"BrightData response size: {len(response.content)} bytes")
         
         # Validate response content
         if not response.content:
             logger.error("BrightData API returned empty response content")
             raise ScrapingError("BrightData API returned empty HTML content")
         
-        # Log response content
-        try:
-            response_preview = response.content.decode('utf-8', errors='replace')
-            logger.info(f"BrightData response preview:\n{response_preview}")
-        except Exception as e:
-            logger.warning(f"Could not decode response preview: {e}")
-            logger.info(f"BrightData response preview: {response.content}")
-        
-        # Log full response if it's small enough (less than 10KB)
-        if len(response.content) < 10000:
-            try:
-                full_response = response.content.decode('utf-8', errors='replace')
-                logger.info(f"BrightData full response ({len(full_response)} chars):\n{full_response}")
-            except Exception as e:
-                logger.warning(f"Could not decode full response: {e}")
-                logger.info(f"BrightData full response (raw bytes): {response.content}")
-        
-        # STEP 2: Parse HTML and extract all data in parallel
-        logger.info("Step 2: Parsing HTML and extracting data in parallel")
-        parse_start = time.time()
-        
         # Decode HTML content
         try:
             html_content = response.content.decode('utf-8', errors='replace')
-            logger.info(f"Decoded HTML content length: {len(html_content)} characters")
+            logger.debug(f"Decoded HTML content length: {len(html_content)} characters")
             if len(html_content.strip()) < 100:
                 logger.warning(f"HTML content is very short ({len(html_content)} chars), might be empty or error page")
                 logger.debug(f"HTML content preview: {html_content[:1000]}")
@@ -457,11 +1106,268 @@ class ScraperService:
             logger.error(f"HTML content is too short or empty: {len(html_content) if html_content else 0} characters")
             raise ScrapingError(f"HTML content from BrightData is empty or too short")
         
+        # Extract recipe from HTML content
+        return await self._extract_from_html_content(url, html_content, source="brightdata", timings=timings, start_time=start_time)
+    
+    async def _extract_from_html_content(
+        self, 
+        url: str, 
+        html_content: str, 
+        source: str = "unknown",
+        timings: Optional[Dict[str, float]] = None,
+        start_time: Optional[float] = None
+    ) -> Recipe:
+        """
+        Extract recipe from HTML content. Shared logic for both direct fetch and BrightData.
+        
+        Args:
+            url: The source URL
+            html_content: The HTML content to extract from
+            source: Source of HTML ("direct" or "brightdata") for logging
+            timings: Optional dict to track timings (will create if None)
+            start_time: Optional start time for total timing (will use current time if None)
+        """
+        if timings is None:
+            timings = {}
+        if start_time is None:
+            start_time = time.time()
+        
+        loop = asyncio.get_event_loop()
+        
+        # STEP 2: Parse HTML and extract all data in parallel
+        logger.info(f"Step 2: Parsing HTML and extracting data in parallel (source: {source})")
+        parse_start = time.time()
+        
+        # Validate HTML content
+        if not html_content or len(html_content.strip()) < 50:
+            logger.error(f"HTML content is too short or empty: {len(html_content) if html_content else 0} characters")
+            raise ScrapingError(f"HTML content is empty or too short")
+        
         # Parse BeautifulSoup once (will be reused by multiple extractors)
         soup = BeautifulSoup(html_content, "html.parser")
         if not soup:
             logger.error("BeautifulSoup failed to parse HTML - soup is None")
             raise ScrapingError("Failed to parse HTML with BeautifulSoup")
+        
+        # STEP 2a: Try to extract JSON-LD Recipe first (fast path)
+        jsonld_recipe = self._extract_jsonld_recipe(html_content, soup=soup)
+        if jsonld_recipe:
+            logger.info("Found JSON-LD Recipe, attempting direct mapping (fast path)")
+            
+            # Try direct mapping first (no Gemini call)
+            try:
+                recipe_data = self._jsonld_recipe_to_recipe_data(jsonld_recipe, url)
+                if recipe_data:
+                    # Validate with Pydantic
+                    recipe = Recipe(**recipe_data)
+                    
+                    # Validate that this is actually a recipe (has ingredients or instructions)
+                    has_ingredients = bool(recipe.ingredient_groups and 
+                                           any(g.ingredients for g in recipe.ingredient_groups))
+                    has_instructions = bool(recipe.instruction_groups and 
+                                            any(g.instructions for g in recipe.instruction_groups))
+                    
+                    if has_ingredients or has_instructions:
+                        # Success! No Gemini call needed
+                        timings["html_parse"] = time.time() - parse_start
+                        timings["total"] = time.time() - start_time
+                        logger.info(f"✅ JSON-LD direct mapping successful (no Gemini call): {timings['total']:.2f}s")
+                        logger.info(f"  Ingredients: {has_ingredients}, Instructions: {has_instructions}")
+                        # Map source to http_method
+                        http_method = "httpx" if source == "direct" else "brightdata"
+                        self._log_extraction_path(http_method, "JSON-LD", False, timings)
+                        return recipe
+                    else:
+                        logger.info("JSON-LD recipe missing key fields, falling back to Gemini")
+            except Exception as e:
+                logger.info(f"JSON-LD direct mapping failed ({e}), falling back to Gemini")
+            
+            # Fallback to Gemini if direct mapping failed or validation failed
+            logger.info("Using Gemini for JSON-LD normalization")
+            jsonld_text = self._jsonld_recipe_to_text(jsonld_recipe)
+            if jsonld_text:
+                # Use JSON-LD content instead of trafilatura/markdownify
+                # Still need to extract images and title in parallel
+                async def extract_images() -> List[str]:
+                    """Extract candidate images from HTML."""
+                    return self._extract_recipe_images(html_content, url, soup=soup)
+                
+                async def extract_page_title() -> Optional[str]:
+                    """Extract page title from pre-parsed soup."""
+                    try:
+                        title_tag = soup.find('title')
+                        if title_tag:
+                            return title_tag.get_text(strip=True)
+                        og_title = soup.find('meta', property='og:title')
+                        if og_title and og_title.get('content'):
+                            return og_title.get('content').strip()
+                        # Use JSON-LD name as fallback
+                        if jsonld_recipe.get('name'):
+                            return jsonld_recipe.get('name')
+                    except Exception as e:
+                        logger.warning(f"Failed to extract page title: {e}")
+                    return None
+                
+                # Extract images and title in parallel (schema/config are cached)
+                candidate_images, page_title = await asyncio.gather(
+                    extract_images(),
+                    extract_page_title(),
+                )
+                
+                # Use cached schema and config
+                cleaned_schema = self.cleaned_schema
+                gemini_config = self.gemini_config
+                
+                # Use JSON-LD text as main content
+                main_markdown = jsonld_text
+                if page_title and page_title not in main_markdown:
+                    main_markdown = f"Page Title: {page_title}\n\n{main_markdown}"
+                
+                timings["html_parse"] = time.time() - parse_start
+                logger.info(f"Time for JSON-LD extraction: {timings['html_parse']:.2f} seconds")
+                logger.info(f"JSON-LD content length: {len(main_markdown)} characters")
+                logger.info(f"Found {len(candidate_images)} candidate images")
+                
+                # Continue to Gemini step (skip the rest of the extraction)
+                # Validate content before sending to Gemini
+                if not main_markdown or not main_markdown.strip():
+                    logger.error(f"JSON-LD content validation failed")
+                    raise ScrapingError("No content extracted from JSON-LD - cannot extract recipe")
+                
+                # Build prompt
+                language = "he"
+                prompt = self._build_markdown_extraction_prompt(url, main_markdown, language)
+                
+                logger.info(f"Sending to Gemini (JSON-LD source: {source}):")
+                logger.info(f"  Model: {GEMINI_MODEL}")
+                logger.debug(f"  Prompt: {prompt}")
+                logger.info(f"  Config: temperature={gemini_config.temperature}, top_p={gemini_config.top_p}")
+                
+                # Run Gemini API and food detection in parallel
+                gemini_start = time.time()
+                
+                async def call_gemini():
+                    """Call Gemini API in executor."""
+                    return await loop.run_in_executor(
+                        None,
+                        lambda: self.client.models.generate_content(
+                            model=GEMINI_MODEL,
+                            contents=prompt,
+                            config=gemini_config,
+                        ),
+                    )
+                
+                async def filter_food_images():
+                    """Filter images using food detection."""
+                    if not candidate_images:
+                        return []
+                    try:
+                        food_detector = get_food_detector()
+                        return await food_detector.filter_food_images(candidate_images)
+                    except Exception as e:
+                        logger.warning(f"Food detection failed, using all candidate images: {e}")
+                        return candidate_images
+                
+                # Run both tasks in parallel
+                try:
+                    gemini_response, filtered_images = await asyncio.gather(
+                        call_gemini(),
+                        filter_food_images(),
+                        return_exceptions=False
+                    )
+                except Exception as e:
+                    logger.error(f"Gemini API extraction failed: {e}")
+                    raise ScrapingError(f"Failed to extract recipe with Gemini: {e}") from e
+                
+                timings["gemini_api"] = time.time() - gemini_start
+                logger.info(f"Time for Gemini API + food detection (parallel): {timings['gemini_api']:.2f} seconds")
+                logger.info(f"Food detection filtered to {len(filtered_images)} images")
+                
+                # Parse JSON response
+                logger.info("Step 4: Parsing JSON response")
+                parse_json_start = time.time()
+                
+                if not gemini_response or not gemini_response.text:
+                    logger.error("Gemini returned empty response")
+                    raise ScrapingError("Gemini returned empty response")
+                
+                recipe_raw_string = gemini_response.text.strip()
+                json_text = extract_first_json_object(recipe_raw_string)
+                
+                try:
+                    recipe_data = json.loads(json_text)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse JSON from Gemini response: {e}")
+                    logger.error(f"Raw response text: {recipe_raw_string}...")
+                    raise ScrapingError(f"Failed to parse recipe JSON: {e}") from e
+                
+                timings["json_parse"] = time.time() - parse_json_start
+                logger.info(f"Time for JSON parsing: {timings['json_parse']:.4f} seconds")
+                
+                # Calculate total time and log summary
+                timings["total"] = time.time() - start_time
+                
+                logger.info("="*60)
+                logger.info("TIMING SUMMARY (JSON-LD path):")
+                logger.info("="*60)
+                if 'direct_fetch' in timings:
+                    logger.info(f"Direct Fetch Time: {timings['direct_fetch']:.2f} seconds")
+                if 'brightdata_api' in timings:
+                    logger.info(f"BrightData API Time: {timings['brightdata_api']:.2f} seconds")
+                logger.info(f"JSON-LD Extraction: {timings['html_parse']:.2f} seconds")
+                logger.info(f"Gemini + Food Detection (parallel): {timings['gemini_api']:.2f} seconds")
+                logger.info(f"JSON Parsing Time: {timings['json_parse']:.4f} seconds")
+                logger.info(f"Total Time: {timings['total']:.2f} seconds")
+                logger.info("="*60)
+                
+                # Normalize data to match Recipe model
+                recipe_data = self._normalize_recipe_data(recipe_data)
+                recipe_data["source"] = url
+                
+                # Fallback: Use page title if Gemini didn't extract a title
+                if not recipe_data.get("title") and page_title:
+                    clean_title = page_title.split("|")[0].strip()
+                    if clean_title:
+                        recipe_data["title"] = clean_title
+                        logger.info(f"Using page title as recipe title: {clean_title}")
+                
+                # Validate that this is actually a recipe
+                has_ingredients = bool(recipe_data.get("ingredientGroups") and 
+                                       any(g.get("ingredients") for g in recipe_data.get("ingredientGroups", [])))
+                has_instructions = bool(recipe_data.get("instructionGroups") and 
+                                        any(g.get("instructions") for g in recipe_data.get("instructionGroups", [])))
+                
+                if not has_ingredients and not has_instructions:
+                    logger.warning(f"URL does not appear to contain a valid recipe: {url}")
+                    raise ScrapingError("This URL does not appear to contain a recipe. No ingredients or instructions found.")
+                
+                # Use food-filtered images if Gemini didn't find valid ones
+                if not recipe_data.get("images"):
+                    if filtered_images:
+                        recipe_data["images"] = filtered_images[:5]
+                        logger.info(f"Added {len(recipe_data['images'])} food-filtered images")
+                
+                # Remove ingredients field before creating Recipe
+                recipe_data.pop("ingredients", None)
+                
+                # Log the final normalized data
+                logger.info(f"=== FINAL NORMALIZED DATA FOR RECIPE ===")
+                logger.info(f"Final data: {json.dumps(recipe_data, indent=2, ensure_ascii=False, default=str)}")
+                
+                recipe = Recipe(**recipe_data)
+                
+                # Log the final Recipe JSON
+                logger.info(f"=== RECIPE JSON RETURNED TO FRONTEND ===")
+                logger.info(f"Recipe JSON: {recipe.model_dump_json(indent=2, by_alias=True)}")
+                
+                # Map source to http_method
+                http_method = "httpx" if source == "direct" else "brightdata"
+                self._log_extraction_path(http_method, "JSON-LD", True, timings)
+                
+                return recipe
+        
+        # STEP 2b: Fallback to regular extraction (no JSON-LD found)
+        logger.info("No JSON-LD Recipe found, using standard extraction path")
         
         # Define parallel extraction tasks
         async def extract_main_content_trafilatura() -> Optional[str]:
@@ -487,11 +1393,11 @@ class ScraperService:
         
         async def extract_structured_content() -> str:
             """Extract recipe structured content (ingredients/instructions)."""
-            return self._extract_recipe_structured_content(html_content)
+            return self._extract_recipe_structured_content(html_content, soup=soup)
         
         async def extract_images() -> List[str]:
             """Extract candidate images from HTML."""
-            return self._extract_recipe_images(html_content, url)
+            return self._extract_recipe_images(html_content, url, soup=soup)
         
         async def extract_page_title() -> Optional[str]:
             """Extract page title from pre-parsed soup."""
@@ -506,32 +1412,22 @@ class ScraperService:
                 logger.warning(f"Failed to extract page title: {e}")
             return None
         
-        async def prepare_gemini_config() -> Tuple[Dict[str, Any], Any]:
-            """Prepare Gemini schema and config (doesn't depend on content)."""
-            schema = self._get_recipe_response_schema()
-            cleaned = self._clean_schema_for_gemini(schema)
-            config = types.GenerateContentConfig(
-                temperature=0.0,
-                top_p=0.0,
-                response_mime_type="application/json",
-                response_schema=cleaned,
-            )
-            return cleaned, config
-        
-        # Run all extraction tasks in parallel
+        # Run all extraction tasks in parallel (schema/config are cached, no need to prepare)
         (
             trafilatura_content,
             structured_content,
             candidate_images,
             page_title,
-            (cleaned_schema, gemini_config)
         ) = await asyncio.gather(
             extract_main_content_trafilatura(),
             extract_structured_content(),
             extract_images(),
             extract_page_title(),
-            prepare_gemini_config(),
         )
+        
+        # Use cached schema and config
+        cleaned_schema = self.cleaned_schema
+        gemini_config = self.gemini_config
         
         # Log extraction results
         if structured_content:
@@ -603,7 +1499,7 @@ class ScraperService:
         language = "he"
         prompt = self._build_markdown_extraction_prompt(url, main_markdown, language)
         
-        logger.info(f"Sending to Gemini (_extract_with_brightdata):")
+        logger.info(f"Sending to Gemini (source: {source}):")
         logger.info(f"  Model: {GEMINI_MODEL}")
         logger.debug(f"  Prompt: {prompt}")
         logger.info(f"  Config: temperature={gemini_config.temperature}, top_p={gemini_config.top_p}")
@@ -677,8 +1573,12 @@ class ScraperService:
         logger.info("="*60)
         logger.info("TIMING SUMMARY:")
         logger.info("="*60)
-        logger.info(f"BrightData API Time: {timings['brightdata_api']:.2f} seconds")
-        logger.info(f"Total HTML Fetch Time: {timings['html_fetch']:.2f} seconds")
+        if 'brightdata_api' in timings:
+            logger.info(f"BrightData API Time: {timings['brightdata_api']:.2f} seconds")
+        if 'html_fetch' in timings:
+            logger.info(f"Total HTML Fetch Time: {timings['html_fetch']:.2f} seconds")
+        if 'direct_fetch' in timings:
+            logger.info(f"Direct Fetch Time: {timings['direct_fetch']:.2f} seconds")
         logger.info(f"Parallel Extraction (content/images/title): {timings['html_parse']:.2f} seconds")
         logger.info(f"Gemini + Food Detection (parallel): {timings['gemini_api']:.2f} seconds")
         logger.info(f"JSON Parsing Time: {timings['json_parse']:.4f} seconds")
@@ -726,6 +1626,10 @@ class ScraperService:
         logger.info(f"=== RECIPE JSON RETURNED TO FRONTEND ===")
         logger.info(f"Recipe JSON: {recipe.model_dump_json(indent=2, by_alias=True)}")
         
+        # Map source to http_method
+        http_method = "httpx" if source == "direct" else "brightdata"
+        self._log_extraction_path(http_method, "HTML", True, timings)
+        
         return recipe
 
 
@@ -757,16 +1661,9 @@ class ScraperService:
 
         prompt = self._build_text_prompt(url, text)
 
-        # Use the same schema enforcement as _extract_with_brightdata
-        response_schema = self._get_recipe_response_schema()
-        cleaned_schema = self._clean_schema_for_gemini(response_schema)
-        
-        config = types.GenerateContentConfig(
-            temperature=0.0,
-            top_p=0.0,
-            response_mime_type="application/json",
-            response_schema=cleaned_schema,
-        )
+        # Use cached schema and config
+        cleaned_schema = self.cleaned_schema
+        config = self.gemini_config
         
         logger.info(f"Sending to Gemini (_extract_social):")
         logger.info(f"  Model: {GEMINI_MODEL}")
@@ -899,8 +1796,11 @@ class ScraperService:
         logger.info(f"=== RECIPE JSON RETURNED TO FRONTEND ===")
         logger.info(f"Recipe JSON: {recipe.model_dump_json(indent=2, by_alias=True)}")
         
+        # This is called from _extract_social, so use headless method
+        self._log_extraction_path("headless", "HTML", True, None)
+        
         return recipe
-    
+
     def _normalize_recipe_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize recipe data from Gemini to match Recipe model."""
         # Handle wrapped responses (e.g. {"Recipe": {...}} or {"recipe": {...}})
@@ -1219,13 +2119,18 @@ CRITICAL RULES:
 CONTENT:
 {markdown_content}
 """
-    def _extract_recipe_structured_content(self, html_content: str) -> str:
+    def _extract_recipe_structured_content(self, html_content: str, soup: Optional[BeautifulSoup] = None) -> str:
         """
         Extract recipe-specific structured content (ingredients, instructions) from HTML.
         Uses generic patterns - Schema.org, common class/id patterns, and list structures.
+        
+        Args:
+            html_content: The HTML content (used only if soup is not provided)
+            soup: Pre-parsed BeautifulSoup object (preferred to avoid re-parsing)
         """
         try:
-            soup = BeautifulSoup(html_content, "html.parser")
+            if soup is None:
+                soup = BeautifulSoup(html_content, "html.parser")
             extracted_parts = []
             
             # Generic selectors for recipe ingredients (priority order)
@@ -1333,17 +2238,19 @@ CONTENT:
             logger.warning(f"Failed to extract recipe structured content: {e}")
             return ""
 
-    def _extract_recipe_images(self, html_content: str, page_url: str) -> List[str]:
+    def _extract_recipe_images(self, html_content: str, page_url: str, soup: Optional[BeautifulSoup] = None) -> List[str]:
         """
         Extract recipe-related image URLs from HTML using generic approaches.
         Focuses on images within recipe content areas and filters out icons, ads, and non-recipe images.
         
         Args:
-            html_content: The HTML content of the page
+            html_content: The HTML content of the page (used only if soup is not provided)
             page_url: The URL of the page (used to resolve relative URLs)
+            soup: Pre-parsed BeautifulSoup object (preferred to avoid re-parsing)
         """
         try:
-            soup = BeautifulSoup(html_content, "html.parser")
+            if soup is None:
+                soup = BeautifulSoup(html_content, "html.parser")
             image_extensions = ('.jpg', '.jpeg', '.png', '.webp', '.avif')  # Exclude .gif
             # List of (source_type, url, priority) - lower priority number = higher priority
             found_images: List[Tuple[str, str, int]] = []
