@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -348,8 +349,12 @@ class FoodDetector:
         if not image_urls:
             return []
         
+        filter_start_time = time.time()
+        total_images = len(image_urls[:10])  # Limit to 10 images
+        
         async def analyze_image(url: str) -> Tuple[str, bool, float, Optional[str], Optional[Tuple[int, int]]]:
             """Download and analyze a single image."""
+            image_start_time = time.time()
             try:
                 # Quick check: filter GIFs by URL extension
                 url_lower = url.lower()
@@ -389,10 +394,14 @@ class FoodDetector:
                     # If we can't check, continue anyway (better to include than miss)
                 
                 # Detect food (use default threshold 0.25, then filter by min_score)
+                detect_start = time.time()
                 is_food, score = await self.detect_food_in_image(image_data)
+                detect_time = time.time() - detect_start
                 
                 # Calculate hash and dimensions for deduplication
+                hash_start = time.time()
                 img_hash, dimensions = self._calculate_image_hash_and_size(image_data)
+                hash_time = time.time() - hash_start
                 
                 # Double-check dimensions after hash calculation (in case format check failed)
                 if dimensions:
@@ -400,6 +409,11 @@ class FoodDetector:
                     if width < min_width or height < min_height:
                         logger.debug(f"Skipping small image {url} ({width}x{height})")
                         return url, False, 0.0, None, None
+                
+                image_time = time.time() - image_start_time
+                logger.debug(f"Image processed: {url[:60]}... | "
+                           f"is_food={is_food}, score={score:.3f} | "
+                           f"time={image_time:.3f}s (detect={detect_time:.3f}s, hash={hash_time:.3f}s)")
                 
                 return url, is_food, score, img_hash, dimensions
                 
@@ -422,11 +436,20 @@ class FoodDetector:
                 food_images.append((url, score, img_hash, dimensions))
         
         # Remove duplicates using perceptual hashing (keeps larger images when duplicates found)
+        dedup_start = time.time()
         unique_images = self._deduplicate_images(food_images)
+        dedup_time = time.time() - dedup_start
         
         # Return URLs sorted by score (already sorted by deduplication)
         filtered_urls = [url for url, _ in unique_images]
-        logger.info(f"Food detection: {len(filtered_urls)}/{len(image_urls)} unique food images (after deduplication)")
+        
+        total_time = time.time() - filter_start_time
+        valid_count = len(filtered_urls)
+        invalid_count = total_images - valid_count
+        
+        logger.info(f"Food detection complete: {valid_count}/{total_images} valid food images "
+                   f"({invalid_count} invalid) | "
+                   f"total_time={total_time:.3f}s (dedup={dedup_time:.3f}s)")
         
         return filtered_urls
 

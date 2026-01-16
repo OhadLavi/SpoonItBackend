@@ -30,6 +30,12 @@ from app.services.food_detector import get_food_detector
 
 logger = logging.getLogger(__name__)
 
+# Disable verbose HTTP/2 debug logging from httpx/httpcore
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("httpcore.http2").setLevel(logging.WARNING)
+logging.getLogger("h2").setLevel(logging.WARNING)
+
 SOCIAL_DOMAINS = ("instagram.com", "tiktok.com")
 GEMINI_MODEL = "gemini-2.5-flash-lite"
 BRIGHTDATA_API_URL = "https://api.brightdata.com/request"
