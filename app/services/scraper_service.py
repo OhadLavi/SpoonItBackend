@@ -136,6 +136,81 @@ def clean_text(s: str) -> str:
     return s
 
 
+def clean_and_split_instructions(instruction_text: str) -> List[str]:
+    """
+    Clean HTML tags and split a single instruction string into multiple steps.
+    
+    Args:
+        instruction_text: Single string containing instructions (may have HTML tags)
+        
+    Returns:
+        List of cleaned instruction strings
+    """
+    if not instruction_text:
+        return []
+    
+    # Remove HTML tags using BeautifulSoup
+    soup = BeautifulSoup(instruction_text, "html.parser")
+    cleaned_text = soup.get_text(separator=" ", strip=True)
+    
+    # Remove common HTML artifacts and noise
+    # Remove caption tags and similar patterns
+    cleaned_text = re.sub(r'\[caption[^\]]*\].*?\[/caption\]', '', cleaned_text, flags=re.IGNORECASE | re.DOTALL)
+    cleaned_text = re.sub(r'\[caption[^\]]*\]', '', cleaned_text, flags=re.IGNORECASE)
+    cleaned_text = re.sub(r'\[/caption\]', '', cleaned_text, flags=re.IGNORECASE)
+    
+    # Remove other common HTML-like patterns
+    cleaned_text = re.sub(r'<[^>]+>', '', cleaned_text)
+    cleaned_text = re.sub(r'&[a-z]+;', '', cleaned_text, flags=re.IGNORECASE)
+    
+    # Clean up whitespace
+    cleaned_text = re.sub(r'\s+', ' ', cleaned_text)
+    cleaned_text = cleaned_text.strip()
+    
+    if not cleaned_text:
+        return []
+    
+    # Split into steps - try multiple strategies
+    steps = []
+    
+    # Strategy 1: Split by numbered patterns (1., 2., etc.) or bullet points
+    numbered_split = re.split(r'(?:^|\s)(?:\d+[\.\)]\s*|[\u2022\u2023\u25E6\-\*]\s*)', cleaned_text, flags=re.MULTILINE)
+    if len(numbered_split) > 1:
+        for step in numbered_split:
+            step = step.strip()
+            if step and len(step) > 5:  # Minimum meaningful length
+                steps.append(step)
+        if steps:
+            return steps
+    
+    # Strategy 2: Split by periods followed by optional space and letter (sentence boundaries)
+    # Works for both English and Hebrew - Hebrew sentences often start immediately after period
+    sentence_split = re.split(r'\.\s*(?=[A-Zא-ת])', cleaned_text)
+    if len(sentence_split) > 1:
+        # Filter out very short fragments (likely false splits)
+        filtered_steps = []
+        for step in sentence_split:
+            step = step.strip()
+            # Add period back if it was removed (unless it's the last step)
+            if step and not step.endswith('.'):
+                step += '.'
+            if step and len(step) > 10:  # Minimum meaningful length for a step
+                filtered_steps.append(step)
+        if len(filtered_steps) > 1:
+            return filtered_steps
+    
+    # Strategy 3: Split by newlines
+    line_split = [line.strip() for line in cleaned_text.split('\n') if line.strip()]
+    if len(line_split) > 1:
+        # Filter out very short lines
+        filtered_steps = [step for step in line_split if len(step) > 10]
+        if len(filtered_steps) > 1:
+            return filtered_steps
+    
+    # Strategy 4: If all else fails, return as single instruction
+    return [cleaned_text] if cleaned_text else []
+
+
 # =========================================================
 # Headless social extraction
 # =========================================================
@@ -725,13 +800,34 @@ class ScraperService:
                 if isinstance(instructions, list):
                     for i, inst in enumerate(instructions, 1):
                         if isinstance(inst, str):
-                            parts.append(f"{i}. {inst}")
+                            # Clean HTML tags
+                            soup = BeautifulSoup(inst, "html.parser")
+                            cleaned_inst = soup.get_text(separator=" ", strip=True)
+                            cleaned_inst = re.sub(r'\[caption[^\]]*\].*?\[/caption\]', '', cleaned_inst, flags=re.IGNORECASE | re.DOTALL)
+                            cleaned_inst = re.sub(r'\[caption[^\]]*\]', '', cleaned_inst, flags=re.IGNORECASE)
+                            cleaned_inst = re.sub(r'\[/caption\]', '', cleaned_inst, flags=re.IGNORECASE)
+                            cleaned_inst = re.sub(r'<[^>]+>', '', cleaned_inst)
+                            cleaned_inst = re.sub(r'\s+', ' ', cleaned_inst).strip()
+                            if cleaned_inst:
+                                parts.append(f"{i}. {cleaned_inst}")
                         elif isinstance(inst, dict):
                             # Handle structured instruction format
                             inst_text = inst.get("text") or inst.get("@value") or inst.get("name") or str(inst)
-                            parts.append(f"{i}. {inst_text}")
+                            # Clean HTML tags
+                            soup = BeautifulSoup(inst_text, "html.parser")
+                            cleaned_inst = soup.get_text(separator=" ", strip=True)
+                            cleaned_inst = re.sub(r'\[caption[^\]]*\].*?\[/caption\]', '', cleaned_inst, flags=re.IGNORECASE | re.DOTALL)
+                            cleaned_inst = re.sub(r'\[caption[^\]]*\]', '', cleaned_inst, flags=re.IGNORECASE)
+                            cleaned_inst = re.sub(r'\[/caption\]', '', cleaned_inst, flags=re.IGNORECASE)
+                            cleaned_inst = re.sub(r'<[^>]+>', '', cleaned_inst)
+                            cleaned_inst = re.sub(r'\s+', ' ', cleaned_inst).strip()
+                            if cleaned_inst:
+                                parts.append(f"{i}. {cleaned_inst}")
                 elif isinstance(instructions, str):
-                    parts.append(f"1. {instructions}")
+                    # Clean HTML and split into steps
+                    split_instructions = clean_and_split_instructions(instructions)
+                    for i, inst in enumerate(split_instructions, 1):
+                        parts.append(f"{i}. {inst}")
             
             # Yield/Servings
             yield_info = recipe.get("recipeYield") or recipe.get("yield")
@@ -927,11 +1023,30 @@ class ScraperService:
                     normalized_instructions = []
                     for inst in instructions:
                         if isinstance(inst, str):
-                            normalized_instructions.append(inst)
+                            # Clean HTML tags from instruction
+                            soup = BeautifulSoup(inst, "html.parser")
+                            cleaned_inst = soup.get_text(separator=" ", strip=True)
+                            # Remove caption tags and similar patterns
+                            cleaned_inst = re.sub(r'\[caption[^\]]*\].*?\[/caption\]', '', cleaned_inst, flags=re.IGNORECASE | re.DOTALL)
+                            cleaned_inst = re.sub(r'\[caption[^\]]*\]', '', cleaned_inst, flags=re.IGNORECASE)
+                            cleaned_inst = re.sub(r'\[/caption\]', '', cleaned_inst, flags=re.IGNORECASE)
+                            cleaned_inst = re.sub(r'<[^>]+>', '', cleaned_inst)
+                            cleaned_inst = re.sub(r'\s+', ' ', cleaned_inst).strip()
+                            if cleaned_inst:
+                                normalized_instructions.append(cleaned_inst)
                         elif isinstance(inst, dict):
                             # Structured instruction
                             inst_text = inst.get("text") or inst.get("@value") or inst.get("name") or str(inst)
-                            normalized_instructions.append(inst_text)
+                            # Clean HTML tags from instruction text
+                            soup = BeautifulSoup(inst_text, "html.parser")
+                            cleaned_inst = soup.get_text(separator=" ", strip=True)
+                            cleaned_inst = re.sub(r'\[caption[^\]]*\].*?\[/caption\]', '', cleaned_inst, flags=re.IGNORECASE | re.DOTALL)
+                            cleaned_inst = re.sub(r'\[caption[^\]]*\]', '', cleaned_inst, flags=re.IGNORECASE)
+                            cleaned_inst = re.sub(r'\[/caption\]', '', cleaned_inst, flags=re.IGNORECASE)
+                            cleaned_inst = re.sub(r'<[^>]+>', '', cleaned_inst)
+                            cleaned_inst = re.sub(r'\s+', ' ', cleaned_inst).strip()
+                            if cleaned_inst:
+                                normalized_instructions.append(cleaned_inst)
                     
                     if normalized_instructions:
                         instruction_groups.append({
@@ -939,11 +1054,13 @@ class ScraperService:
                             "instructions": normalized_instructions
                         })
                 elif isinstance(instructions, str):
-                    # Single string instruction
-                    instruction_groups.append({
-                        "name": None,
-                        "instructions": [instructions]
-                    })
+                    # Single string instruction - clean HTML and split into steps
+                    split_instructions = clean_and_split_instructions(instructions)
+                    if split_instructions:
+                        instruction_groups.append({
+                            "name": None,
+                            "instructions": split_instructions
+                        })
             
             data["instruction_groups"] = instruction_groups
             
