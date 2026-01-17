@@ -853,6 +853,11 @@ class ScraperService:
         logger.info(f"=== RECIPE JSON RETURNED TO FRONTEND ===")
         logger.info(f"Recipe JSON: {recipe.model_dump_json(indent=2, by_alias=True)}")
         
+        
+        # Measure strictly local processing time
+        total_duration = time.time() - start_time
+        logger.info(f"Total _extract_with_brightdata execution time: {total_duration:.2f} seconds")
+
         return recipe
 
 
@@ -2082,7 +2087,53 @@ CONTENT:
             
             # Limit to first 5 images (already sorted by priority)
             image_urls = image_urls[:5]
-            logger.info(f"Extracted {len(image_urls)} recipe images from HTML")
+            
+            # Fallback: if no images found, try to search in the entire body (relaxed mode)
+            if not image_urls and soup.body:
+                logger.info("No images found in main content, trying fallback to body search")
+                for img in soup.body.find_all('img'):
+                    img_url = img.get('src') or img.get('data-src') or img.get('data-lazy-src')
+                    if not img_url:
+                        continue
+                    
+                    # Basic filtering for fallback
+                    width = img.get('width', '')
+                    height = img.get('height', '')
+                    try:
+                        w = int(str(width).replace('px', '')) if width else 0
+                        h = int(str(height).replace('px', '')) if height else 0
+                        if (w and w < 100) or (h and h < 100): # More relaxed size check
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+
+                    if any(pattern in img_url.lower() for pattern in skip_url_patterns):
+                        continue
+                        
+                    # Dedup & Resolve (simplified for fallback)
+                    img_url = img_url.strip()
+                    url_lower = img_url.lower()
+                    
+                    if url_lower in seen_urls: continue
+                    if not any(ext in url_lower for ext in image_extensions): continue # Still require image extension
+                    if any(dim in url_lower for dim in small_dimension_patterns): continue
+                    
+                    if img_url.startswith('//'):
+                        img_url = 'https:' + img_url
+                    elif img_url.startswith('/'):
+                        parsed = urlparse(page_url)
+                        base = f"{parsed.scheme}://{parsed.netloc}"
+                        img_url = urljoin(base, img_url)
+                    elif not img_url.startswith('http'):
+                        img_url = urljoin(page_url, img_url)
+
+                    seen_urls.add(url_lower)
+                    image_urls.append(img_url)
+                    
+                    if len(image_urls) >= 5:
+                        break
+
+            logger.info(f"Extracted {len(image_urls)} recipe images from HTML (including fallback)")
             return image_urls
             
         except Exception as e:

@@ -442,6 +442,7 @@ class FoodDetector:
         
         # Return URLs sorted by score (already sorted by deduplication)
         filtered_urls = [url for url, _ in unique_images]
+        logger.info(f"Food detector keeping {len(filtered_urls)}/{len(unique_images)} unique images after deduplication. Raw unique: {unique_images}")
         
         total_time = time.time() - filter_start_time
         valid_count = len(filtered_urls)
