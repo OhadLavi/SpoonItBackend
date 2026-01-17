@@ -33,6 +33,26 @@ SOCIAL_DOMAINS = ("instagram.com", "tiktok.com")
 GEMINI_MODEL = "gemini-2.5-flash-lite"
 BRIGHTDATA_API_URL = "https://api.brightdata.com/request"
 
+# Some sites respond with Brotli (Content-Encoding: br) if you advertise it via Accept-Encoding.
+# On minimal Cloud Run images, Brotli decoding is often unavailable. If that happens, the HTTP client
+# may hand you *compressed bytes* interpreted as text (gibberish like "[Z..."), which then causes the
+# LLM to hallucinate a recipe.
+#
+# We avoid this by NOT advertising br, and by retrying with `Accept-Encoding: identity` if the
+# response doesn't look like HTML.
+DIRECT_FETCH_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7",
+    # Important: do NOT include "br" here.
+    "Accept-Encoding": "gzip, deflate",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+}
+
 
 # =========================================================
 # Utils
@@ -321,6 +341,71 @@ class ScraperService:
         if self._client is None:
             self._client = genai.Client(api_key=settings.gemini_api_key)
         return self._client
+
+    @staticmethod
+    def _looks_like_html(text: str) -> bool:
+        """Best-effort check that the response is actually HTML and not compressed/binary data."""
+        if not text or len(text) < 200:
+            return False
+
+        sample = text[:5000].lower()
+
+        # Strong signal of binary/corruption
+        if "\x00" in sample:
+            return False
+        # If we see lots of Unicode replacement characters early, it's often compressed bytes decoded as UTF-8.
+        rep = sample.count("\ufffd")
+        if rep / max(1, len(sample)) > 0.001:
+            return False
+
+        # Typical HTML markers
+        if "<html" in sample or "<!doctype" in sample or "<body" in sample or "<head" in sample:
+            return True
+
+        # Fallback heuristic: lots of tags
+        if sample.count("<") > 20 and ("</" in sample or "<div" in sample or "<p" in sample or "<article" in sample):
+            return True
+
+        return False
+
+    def _try_direct_fetch_html(self, url: str, *, timeout_seconds: float = 6.0) -> str | None:
+        """Attempt a fast direct GET (no BrightData). Retries with identity encoding if needed."""
+        base_headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7",
+            # Avoid Brotli unless you explicitly add a brotli decoder dependency.
+            "Accept-Encoding": "gzip, deflate",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        }
+
+        def _get(hdrs: Dict[str, str]) -> str | None:
+            r = requests.get(url, headers=hdrs, timeout=(2, timeout_seconds), allow_redirects=True)
+            if not (200 <= r.status_code < 300):
+                return None
+            text = r.text or ""
+            return text if self._looks_like_html(text) else None
+
+        try:
+            text = _get(base_headers)
+            if text:
+                return text
+        except Exception as e:
+            logger.debug(f"Direct fetch failed (gzip/deflate): {e}")
+
+        # Retry: force no compression. This often fixes sites that otherwise respond with br/unknown encodings.
+        try:
+            hdrs = dict(base_headers)
+            hdrs["Accept-Encoding"] = "identity"
+            return _get(hdrs)
+        except Exception as e:
+            logger.debug(f"Direct fetch failed (identity): {e}")
+            return None
     
     def _clean_schema_for_gemini(self, schema: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -379,83 +464,85 @@ class ScraperService:
         timings = {}
         loop = asyncio.get_event_loop()
         
-        # STEP 1: Fetch HTML using BrightData API
-        logger.info(f"Step 1: Fetching HTML from BrightData API for: {url}")
+        # STEP 1: Fetch HTML (direct fast path, fallback to BrightData)
+        logger.info(f"Step 1: Fetching HTML for: {url}")
         fetch_start = time.time()
-        
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {settings.brightdata_api_key}"
-        }
-        
-        payload = {
-            "zone": "spoonit_unlocker_api",
-            "url": url,
-            "format": "raw"
-        }
-        
-        brightdata_start = time.time()
+
+        html_content: Optional[str] = None
+
+        # Try a direct fetch first to avoid BrightData latency/cost.
+        # If the direct response is not valid HTML (e.g., compressed bytes / binary), we fall back.
         try:
-            response = await loop.run_in_executor(
-                None,
-                lambda: requests.post(BRIGHTDATA_API_URL, json=payload, headers=headers, timeout=30)
-            )
-            response.raise_for_status()
+            html_content = await loop.run_in_executor(None, lambda: self._try_direct_fetch_html(url))
+            if html_content:
+                logger.info(f"Direct fetch successful (fast path): {len(html_content)} chars")
         except Exception as e:
-            logger.error(f"BrightData API request failed: {e}")
-            raise ScrapingError(f"Failed to fetch HTML from BrightData API: {e}") from e
-        
-        timings["brightdata_api"] = time.time() - brightdata_start
+            logger.warning(f"Direct fetch failed: {e}")
+            html_content = None
+
+        if not html_content:
+            logger.info("Direct fetch unavailable/invalid; using BrightData API")
+
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {settings.brightdata_api_key}",
+            }
+
+            payload = {
+                "zone": "spoonit_unlocker_api",
+                "url": url,
+                "format": "raw",
+            }
+
+            brightdata_start = time.time()
+            try:
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: requests.post(BRIGHTDATA_API_URL, json=payload, headers=headers, timeout=30),
+                )
+                response.raise_for_status()
+            except Exception as e:
+                logger.error(f"BrightData API request failed: {e}")
+                raise ScrapingError(f"Failed to fetch HTML from BrightData API: {e}") from e
+
+            timings["brightdata_api"] = time.time() - brightdata_start
+
+            # Validate response content
+            if not response.content:
+                logger.error("BrightData API returned empty response content")
+                raise ScrapingError("BrightData API returned empty HTML content")
+
+            # Decode HTML content
+            try:
+                html_content = response.content.decode("utf-8", errors="replace")
+            except Exception as e:
+                logger.error(f"Failed to decode HTML content: {e}")
+                raise ScrapingError(f"Failed to decode HTML content from BrightData: {e}") from e
+
+            if not self._looks_like_html(html_content):
+                logger.warning("BrightData returned content that doesn't look like HTML; refusing to pass to Gemini")
+                logger.debug(f"BrightData content preview: {html_content[:2000]}")
+                raise ScrapingError("BrightData returned non-HTML or corrupted content")
+
+        # Timings for fetch step
+        timings.setdefault("brightdata_api", 0.0)
         timings["html_fetch"] = time.time() - fetch_start
         logger.info(f"BrightData API Time: {timings['brightdata_api']:.2f} seconds")
         logger.info(f"Total HTML Fetch Time: {timings['html_fetch']:.2f} seconds")
-        
-        # Log response details
-        logger.info(f"BrightData response status code: {response.status_code}")
-        logger.info(f"BrightData response headers: {dict(response.headers)}")
-        logger.info(f"BrightData response size: {len(response.content)} bytes")
-        
-        # Validate response content
-        if not response.content:
-            logger.error("BrightData API returned empty response content")
-            raise ScrapingError("BrightData API returned empty HTML content")
-        
-        # Log response content
-        try:
-            response_preview = response.content.decode('utf-8', errors='replace')
-            logger.info(f"BrightData response preview:\n{response_preview}")
-        except Exception as e:
-            logger.warning(f"Could not decode response preview: {e}")
-            logger.info(f"BrightData response preview: {response.content}")
-        
-        # Log full response if it's small enough (less than 10KB)
-        if len(response.content) < 10000:
-            try:
-                full_response = response.content.decode('utf-8', errors='replace')
-                logger.info(f"BrightData full response ({len(full_response)} chars):\n{full_response}")
-            except Exception as e:
-                logger.warning(f"Could not decode full response: {e}")
-                logger.info(f"BrightData full response (raw bytes): {response.content}")
         
         # STEP 2: Parse HTML and extract all data in parallel
         logger.info("Step 2: Parsing HTML and extracting data in parallel")
         parse_start = time.time()
         
-        # Decode HTML content
-        try:
-            html_content = response.content.decode('utf-8', errors='replace')
-            logger.info(f"Decoded HTML content length: {len(html_content)} characters")
-            if len(html_content.strip()) < 100:
-                logger.warning(f"HTML content is very short ({len(html_content)} chars), might be empty or error page")
-                logger.debug(f"HTML content preview: {html_content[:1000]}")
-        except Exception as e:
-            logger.error(f"Failed to decode HTML content: {e}")
-            raise ScrapingError(f"Failed to decode HTML content from BrightData: {e}") from e
-        
-        # Validate HTML content
+        # Validate HTML content (should already be a decoded string at this point)
+        logger.info(f"HTML content length: {len(html_content)} characters")
+        if len(html_content.strip()) < 100:
+            logger.warning(f"HTML content is very short ({len(html_content)} chars), might be empty or an error page")
+            logger.debug(f"HTML content preview: {html_content[:1000]}")
+
         if not html_content or len(html_content.strip()) < 50:
             logger.error(f"HTML content is too short or empty: {len(html_content) if html_content else 0} characters")
-            raise ScrapingError(f"HTML content from BrightData is empty or too short")
+            raise ScrapingError("HTML content is empty or too short")
         
         # Parse BeautifulSoup once (will be reused by multiple extractors)
         soup = BeautifulSoup(html_content, "html.parser")
@@ -463,6 +550,46 @@ class ScraperService:
             logger.error("BeautifulSoup failed to parse HTML - soup is None")
             raise ScrapingError("Failed to parse HTML with BeautifulSoup")
         
+
+        # Try JSON-LD Recipe first (fast path). If incomplete, fall back to full extraction + Gemini.
+        try:
+            jsonld_recipe = self._extract_json_ld_recipe(soup)
+        except Exception as e:
+            jsonld_recipe = None
+            logger.debug(f"JSON-LD extraction error: {e}")
+
+        if jsonld_recipe:
+            logger.info("Found JSON-LD Recipe, attempting direct mapping (fast path)")
+            try:
+                jsonld_data = self._map_json_ld_recipe_to_data(jsonld_recipe, url, language=language)
+
+                # Extract and filter images (no Gemini call)
+                candidate_images = await self._extract_recipe_images(html_content, url)
+                if candidate_images:
+                    filtered_images = await loop.run_in_executor(None, self._filter_images_with_food_detection, candidate_images)
+                else:
+                    filtered_images = []
+                if filtered_images:
+                    jsonld_data["images"] = filtered_images[:5]
+
+                # Title fallback from <title>
+                page_title = soup.title.string.strip() if soup.title and soup.title.string else None
+                if not jsonld_data.get("title") and page_title:
+                    jsonld_data["title"] = page_title.split("|")[0].strip() or None
+
+                jsonld_data = self._normalize_recipe_data(jsonld_data)
+
+                if self._is_recipe_data_sufficient(jsonld_data):
+                    jsonld_data.pop("ingredients", None)
+                    recipe = Recipe(**jsonld_data)
+                    logger.info("JSON-LD mapping succeeded, skipping Gemini extraction")
+                    return recipe
+                else:
+                    logger.warning("JSON-LD Recipe seems incomplete after normalization; falling back to Gemini extraction")
+            except Exception as e:
+                logger.warning(f"JSON-LD mapping failed, falling back to Gemini extraction: {e}")
+
+
         # Define parallel extraction tasks
         async def extract_main_content_trafilatura() -> Optional[str]:
             """Extract main content using Trafilatura (CPU-bound, run in executor)."""
@@ -914,43 +1041,6 @@ class ScraperService:
 
         normalized = dict(data)
 
-        # --- Helpers: handle multi-line JSON-LD fields + URL-only instructions ---
-        # Some sites publish schema.org Recipe fields as a single multi-line string
-        # (e.g., recipeIngredient=["2 eggs\n1 cup milk..."]). We split those defensively.
-        IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg", ".tif", ".tiff", ".avif")
-        _URL_ONLY_RE = re.compile(r"^(https?://|www\.)\S+$", re.IGNORECASE)
-
-        def _is_url_only(val: str) -> bool:
-            if not isinstance(val, str):
-                return False
-            s = val.strip()
-            return bool(s and _URL_ONLY_RE.match(s))
-
-        def _is_image_url(val: str) -> bool:
-            if not _is_url_only(val):
-                return False
-            try:
-                p = urlparse(val.strip()).path.lower()
-            except Exception:
-                return False
-            return any(p.endswith(ext) for ext in IMAGE_EXTS)
-
-        def _split_text_items(val: str):
-            if not isinstance(val, str):
-                return []
-            s = val
-            # common HTML line breaks
-            s = re.sub(r"<br\s*/?>", "\n", s, flags=re.IGNORECASE)
-            # strip remaining tags crudely
-            s = re.sub(r"</?[^>]+>", "", s)
-            parts = []
-            for line in re.split(r"[\r\n]+", s):
-                line = line.strip()
-                line = line.lstrip("•*-–—\t " ).strip()
-                if line:
-                    parts.append(line)
-            return parts
-
         
         # servings: normalize to Servings object structure
         if "servings" in normalized:
@@ -994,21 +1084,31 @@ class ScraperService:
                 converted_ingredients = []
                 for ing in normalized["ingredients"]:
                     if isinstance(ing, str):
-                        for line in _split_text_items(ing):
-                            converted_ingredients.append({"name": line, "amount": None, "preparation": None, "raw": line})
+                        converted_ingredients.append({"name": ing, "amount": None, "preparation": None, "raw": ing})
                     elif isinstance(ing, dict):
-                        name = str(ing.get("name") or "").strip()
-                        raw = str(ing.get("raw") or name or "").strip()
-                        if raw and ("\n" in raw or "<br" in raw.lower()):
-                            for line in _split_text_items(raw):
-                                converted_ingredients.append({"name": line, "amount": None, "preparation": None, "raw": line})
-                            continue
-                        if raw or name:
-                            converted_ingredients.append({**ing, "name": name or raw, "raw": raw or name or str(ing)})
+                        # Extract amount from raw if possible
+                        raw = ing.get("raw", "")
+                        name = ing.get("name", "")
+                        amount = ing.get("amount")
+                        if amount is None:
+                            qty = ing.get("quantity")
+                            unit = ing.get("unit")
+                            if qty or unit:
+                                parts = []
+                                if qty:
+                                    parts.append(str(qty))
+                                if unit:
+                                    parts.append(str(unit))
+                                amount = " ".join(parts) if parts else None
+                        converted_ingredients.append({
+                            "name": name or raw or str(ing),
+                            "amount": amount,
+                            "preparation": ing.get("preparation"),
+                            "raw": raw or name or str(ing)
+                        })
                     else:
-                        s = str(ing).strip()
-                        if s:
-                            converted_ingredients.append({"name": s, "amount": None, "preparation": None, "raw": s})
+                        converted_ingredients.append({"name": str(ing), "amount": None, "preparation": None, "raw": str(ing)})
+                
                 normalized["ingredientGroups"] = [{"name": None, "ingredients": converted_ingredients}]
                 logger.info(f"Created ingredientGroups with {len(converted_ingredients)} ingredients")
         
@@ -1020,25 +1120,47 @@ class ScraperService:
                         normalized_ingredients = []
                         for ing in group["ingredients"]:
                             if isinstance(ing, str):
-                                for line in _split_text_items(ing):
-                                    normalized_ingredients.append({"name": line, "raw": line})
+                                # String format: convert to structured with raw
+                                normalized_ingredients.append({"name": ing, "raw": ing})
                             elif isinstance(ing, dict):
-                                raw_candidate = ing.get("raw") or ing.get("name") or ""
-                                if isinstance(raw_candidate, str) and raw_candidate and ("\n" in raw_candidate or "<br" in raw_candidate.lower()):
-                                    for line in _split_text_items(raw_candidate):
-                                        normalized_ingredients.append({"name": line, "raw": line})
-                                    continue
-                                name = str(ing.get("name") or "").strip()
-                                raw = str(ing.get("raw") or name or "").strip()
-                                if raw or name:
-                                    normalized_ingredients.append({**ing, "name": name or raw, "raw": raw or name})
+                                # Already an object - preserve structured format if it has 'name'
+                                if "name" in ing:
+                                    # New structured format - ensure it has required fields
+                                    # Handle amount: use existing amount, or combine quantity+unit
+                                    amount = ing.get("amount")
+                                    if amount is None:
+                                        qty = ing.get("quantity")
+                                        unit = ing.get("unit")
+                                        if qty or unit:
+                                            parts = []
+                                            if qty:
+                                                parts.append(str(qty))
+                                            if unit:
+                                                parts.append(str(unit))
+                                            amount = " ".join(parts) if parts else None
+                                    
+                                    normalized_ing = {
+                                        "name": ing.get("name", ""),
+                                        "amount": amount,
+                                        "preparation": ing.get("preparation"),
+                                        "raw": ing.get("raw")
+                                    }
+                                    normalized_ingredients.append(normalized_ing)
+                                elif "raw" in ing:
+                                    # Old format with just raw - keep it for backward compatibility
+                                    normalized_ingredients.append(ing)
+                                else:
+                                    # Unknown format - convert to raw
+                                    normalized_ingredients.append({"raw": str(ing)})
                             else:
-                                s = str(ing).strip()
-                                if s:
-                                    normalized_ingredients.append({"name": s, "raw": s})
+                                normalized_ingredients.append({"raw": str(ing)})
                         group["ingredients"] = normalized_ingredients
         elif "ingredientGroups" not in normalized:
             normalized["ingredientGroups"] = []
+
+        # Post-process ingredientGroups to fix common unit/name swaps (e.g., name="כפות", amount="2")
+        # by re-parsing from the raw line when possible.
+        normalized["ingredientGroups"] = self._repair_ingredient_units(normalized["ingredientGroups"])
         
         # nutrition: normalize and filter to only allowed fields
         if "nutrition" in normalized and isinstance(normalized["nutrition"], dict):
@@ -1135,9 +1257,7 @@ class ScraperService:
                             # Add to a single group with all instructions
                             if not normalized_instruction_groups:
                                 normalized_instruction_groups.append({"name": "הוראות הכנה", "instructions": []})
-                            s = str(instruction_text).strip()
-                            if s and not _is_url_only(s):
-                                normalized_instruction_groups[0]["instructions"].append(s)
+                            normalized_instruction_groups[0]["instructions"].append(str(instruction_text))
                     elif "instructions" in group:
                         # Correct format - ensure it's a list
                         instructions = group.get("instructions", [])
@@ -1146,7 +1266,7 @@ class ScraperService:
                         # Remove extra fields like "step", "instruction"
                         clean_group = {
                             "name": group.get("name"),
-                            "instructions": [s for s in (str(inst).strip() for inst in instructions if inst) if s and not _is_url_only(s)]
+                            "instructions": [str(inst) for inst in instructions if inst]
                         }
                         normalized_instruction_groups.append(clean_group)
                     elif "instruction" in group:
@@ -1155,9 +1275,7 @@ class ScraperService:
                         if instruction_text:
                             if not normalized_instruction_groups:
                                 normalized_instruction_groups.append({"name": "הוראות הכנה", "instructions": []})
-                            s = str(instruction_text).strip()
-                            if s and not _is_url_only(s):
-                                normalized_instruction_groups[0]["instructions"].append(s)
+                            normalized_instruction_groups[0]["instructions"].append(str(instruction_text))
             
             # If we have normalized groups, use them; otherwise keep original structure
             if normalized_instruction_groups:
@@ -1171,8 +1289,6 @@ class ScraperService:
                     if isinstance(group, dict):
                         if "instructions" not in group or not isinstance(group["instructions"], list):
                             group["instructions"] = []
-                        # Drop URL-only steps (some sites mistakenly include image URLs as steps)
-                        group["instructions"] = [s for s in (str(inst).strip() for inst in group["instructions"] if inst) if s and not _is_url_only(s)]
                         # Ensure name exists
                         if "name" not in group or not group["name"]:
                             group["name"] = "הוראות הכנה"
@@ -1182,6 +1298,66 @@ class ScraperService:
                         for key in group_keys:
                             if key not in allowed_keys:
                                 group.pop(key)
+
+
+        # Split multi-line ingredient raw strings into separate ingredients (some JSON-LD exporters do this)
+        try:
+            for group in normalized.get("ingredientGroups", []) or []:
+                if not isinstance(group, dict):
+                    continue
+                ings = group.get("ingredients") or []
+                new_ings = []
+                for ing in ings:
+                    if not isinstance(ing, dict):
+                        continue
+                    raw = ing.get("raw")
+                    if raw and isinstance(raw, str) and "\n" in raw:
+                        for line in [x.strip() for x in raw.split("\n") if x and x.strip()]:
+                            new_ings.append({
+                                "amount": None,
+                                "name": line,
+                                "preparation": None,
+                                "raw": line,
+                            })
+                    else:
+                        new_ings.append(ing)
+                group["ingredients"] = new_ings
+
+            # Also split plain ingredients list entries if present
+            if isinstance(normalized.get("ingredients"), list):
+                flat = []
+                for item in normalized.get("ingredients"):
+                    if isinstance(item, str) and "\n" in item:
+                        flat.extend([x.strip() for x in item.split("\n") if x and x.strip()])
+                    else:
+                        flat.append(item)
+                normalized["ingredients"] = flat
+        except Exception:
+            pass
+
+        # Remove URL-only instruction entries (some JSON-LD includes image URLs as a final instruction)
+        try:
+            for group in normalized.get("instructionGroups", []) or []:
+                if not isinstance(group, dict):
+                    continue
+                inst = group.get("instructions") or []
+                if not isinstance(inst, list):
+                    continue
+                cleaned = []
+                for s in inst:
+                    if not isinstance(s, str):
+                        continue
+                    ss = s.strip()
+                    if not ss:
+                        continue
+                    if re.match(r"^(https?:)?//\S+$", ss) or re.match(r"^https?://\S+$", ss, re.I):
+                        # drop URLs (including image URLs)
+                        continue
+                    cleaned.append(ss)
+                group["instructions"] = cleaned
+        except Exception:
+            pass
+
         if "notes" not in normalized:
             normalized["notes"] = []
         if "images" not in normalized:
@@ -1206,6 +1382,355 @@ class ScraperService:
                 logger.info(f"Filtered images: kept {len(valid_images)} valid image URLs")
         
         return normalized
+
+    def _repair_ingredient_units(self, ingredient_groups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Repair common Hebrew parsing mistakes in ingredients using the raw line.
+
+        Example failure mode:
+          raw: "2 כפות סוכר" -> amount="2", name="כפות"
+        We rewrite to:
+          amount="2 כפות", name="סוכר"
+
+        This is intentionally conservative: we only act when we have a raw string and the current 'name'
+        looks like a *unit token*.
+        """
+        unit_tokens = {
+            "כפות", "כף", "כפית", "כפיות", "כוס", "כוסות", "מיכל", "קמצוץ",
+        }
+
+        # Matches: <qty> <unit> <ingredient...>
+        qty_unit_name = re.compile(r"^\s*(\d+(?:[\.,]\d+)?)\s+([^\s]+)\s+(.+?)\s*$")
+        # Matches: <unit> <ingredient...> (no explicit qty)
+        unit_name = re.compile(r"^\s*([^\s]+)\s+(.+?)\s*$")
+
+        for group in ingredient_groups or []:
+            ingredients = group.get("ingredients") or []
+            if not isinstance(ingredients, list):
+                continue
+
+            for ing in ingredients:
+                if not isinstance(ing, dict):
+                    continue
+
+                raw = (ing.get("raw") or "").strip()
+                if not raw:
+                    continue
+
+                name = (ing.get("name") or "").strip()
+                amount = ing.get("amount")
+
+                # Only attempt repair when name is a known unit token (or a short token like "כפות")
+                if name not in unit_tokens:
+                    continue
+
+                m = qty_unit_name.match(raw)
+                if m:
+                    qty, unit, rest = m.group(1), m.group(2), m.group(3)
+                    if unit in unit_tokens and rest:
+                        ing["amount"] = f"{qty} {unit}".strip()
+                        ing["name"] = rest.strip()
+                        continue
+
+                # Handle cases like: "קמצוץ מלח"
+                m = unit_name.match(raw)
+                if m:
+                    unit, rest = m.group(1), m.group(2)
+                    if unit in unit_tokens and rest and (amount is None or str(amount).strip() in {"", "1"}):
+                        ing["amount"] = unit
+                        ing["name"] = rest.strip()
+
+        return ingredient_groups
+
+
+    # -------------------------
+    # JSON-LD (Recipe) extraction (fast path)
+    # -------------------------
+
+    def _extract_json_ld_recipe(self, soup):
+        # Returns the first JSON-LD object that appears to be a Recipe
+        scripts = soup.find_all("script", attrs={"type": re.compile(r"application/ld\+json", re.I)})
+        for script in scripts:
+            raw = script.string or script.get_text(strip=False) or ""
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                data = json.loads(raw)
+            except Exception:
+                # Some sites include multiple JSON objects; try to salvage the first JSON object
+                try:
+                    start = raw.find("{")
+                    end = raw.rfind("}")
+                    if start != -1 and end != -1 and end > start:
+                        data = json.loads(raw[start : end + 1])
+                    else:
+                        continue
+                except Exception:
+                    continue
+
+            recipe = self._find_recipe_in_json_ld(data)
+            if recipe:
+                return recipe
+        return None
+
+    def _find_recipe_in_json_ld(self, data):
+        # Walk common JSON-LD shapes and return a dict that is a Recipe
+        if isinstance(data, dict):
+            if self._json_ld_is_recipe(data):
+                return data
+
+            graph = data.get("@graph")
+            if isinstance(graph, list):
+                for item in graph:
+                    found = self._find_recipe_in_json_ld(item)
+                    if found:
+                        return found
+
+            main_entity = data.get("mainEntity")
+            if main_entity:
+                found = self._find_recipe_in_json_ld(main_entity)
+                if found:
+                    return found
+
+            items = data.get("@type")
+            if items == "ItemList" and isinstance(data.get("itemListElement"), list):
+                for item in data.get("itemListElement"):
+                    found = self._find_recipe_in_json_ld(item)
+                    if found:
+                        return found
+
+            for v in data.values():
+                found = self._find_recipe_in_json_ld(v)
+                if found:
+                    return found
+
+        elif isinstance(data, list):
+            for item in data:
+                found = self._find_recipe_in_json_ld(item)
+                if found:
+                    return found
+        return None
+
+    def _json_ld_is_recipe(self, obj):
+        t = obj.get("@type") if isinstance(obj, dict) else None
+        if isinstance(t, str):
+            return t.lower() == "recipe"
+        if isinstance(t, list):
+            return any(isinstance(x, str) and x.lower() == "recipe" for x in t)
+        return False
+
+    def _looks_like_url(self, s):
+        if not isinstance(s, str):
+            return False
+        s = s.strip()
+        if not s:
+            return False
+        return bool(re.match(r"^(https?:)?//", s) or re.match(r"^https?://", s, re.I) or re.match(r"^www\.", s, re.I))
+
+    def _looks_like_image_url(self, s):
+        if not isinstance(s, str):
+            return False
+        s = s.strip()
+        if not self._looks_like_url(s):
+            return False
+        return bool(re.search(r"\.(jpg|jpeg|png|webp|gif)(\?|#|$)", s, re.I))
+
+    def _parse_iso8601_duration_minutes(self, duration_value):
+        # Parse ISO8601 duration like PT30M / PT1H20M
+        if not isinstance(duration_value, str):
+            return None
+        dur = duration_value.strip().upper()
+        m = re.match(r"^P(?:(?P<days>\d+)D)?(?:T(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?(?:(?P<seconds>\d+)S)?)?$", dur)
+        if not m:
+            return None
+        days = int(m.group("days") or 0)
+        hours = int(m.group("hours") or 0)
+        minutes = int(m.group("minutes") or 0)
+        seconds = int(m.group("seconds") or 0)
+        total = days * 24 * 60 + hours * 60 + minutes
+        if total == 0 and seconds:
+            return 1
+        return total if total > 0 else None
+
+    def _normalize_ingredient_lines(self, raw_ingredients):
+        # Return list[str]
+        lines = []
+        if raw_ingredients is None:
+            return lines
+        if isinstance(raw_ingredients, str):
+            raw_ingredients = [raw_ingredients]
+        if not isinstance(raw_ingredients, list):
+            return lines
+
+        for item in raw_ingredients:
+            if not item:
+                continue
+            if isinstance(item, str):
+                parts = [p.strip() for p in item.split("\n") if p and p.strip()]
+                for p in parts:
+                    if self._looks_like_url(p):
+                        continue
+                    lines.append(p)
+            else:
+                # unknown type
+                continue
+
+        # de-dup preserve order
+        out = []
+        seen = set()
+        for x in lines:
+            k = x.strip()
+            if not k or k in seen:
+                continue
+            seen.add(k)
+            out.append(k)
+        return out
+
+    def _normalize_instruction_lines(self, raw_instructions):
+        # Return list[str]
+        def clean_text(s):
+            s = (s or "").strip()
+            if not s:
+                return None
+            if self._looks_like_image_url(s) or (self._looks_like_url(s) and len(s) < 300):
+                return None
+            # Strip HTML if present
+            if "<" in s and ">" in s:
+                try:
+                    s = BeautifulSoup(s, "html.parser").get_text(" ", strip=True)
+                except Exception:
+                    pass
+            s = re.sub(r"\s+", " ", s).strip()
+            return s or None
+
+        def extract(obj):
+            out = []
+            if obj is None:
+                return out
+            if isinstance(obj, str):
+                for part in obj.split("\n"):
+                    t = clean_text(part)
+                    if t:
+                        out.append(t)
+                return out
+            if isinstance(obj, list):
+                for it in obj:
+                    out.extend(extract(it))
+                return out
+            if isinstance(obj, dict):
+                # schema.org HowToStep / HowToSection / ItemList
+                if "text" in obj and isinstance(obj.get("text"), str):
+                    out.extend(extract(obj.get("text")))
+                if "name" in obj and isinstance(obj.get("name"), str) and not out:
+                    # sometimes only name exists
+                    out.extend(extract(obj.get("name")))
+                if "itemListElement" in obj:
+                    out.extend(extract(obj.get("itemListElement")))
+                if "steps" in obj:
+                    out.extend(extract(obj.get("steps")))
+                return out
+            return out
+
+        lines = extract(raw_instructions)
+        # de-dup preserve order
+        out = []
+        seen = set()
+        for x in lines:
+            k = x.strip()
+            if not k or k in seen:
+                continue
+            seen.add(k)
+            out.append(k)
+        return out
+
+    def _parse_amount_name_from_ingredient(self, line):
+        # Best-effort split of Hebrew/English quantity+unit from ingredient name
+        if not isinstance(line, str):
+            return None, None
+        s = line.strip()
+        if not s:
+            return None, None
+        tokens = s.split()
+        if not tokens:
+            return None, None
+        units = {
+            "כף", "כפות", "כפית", "כפיות", "כוס", "כוסות", "קורט",
+            "גרם", "ג", "ג'", "ג\"ר",
+            "מ\"ל", "מל", "ליטר", "ל'",
+            "ק\"ג", "קג",
+            "ml", "g", "kg", "tbsp", "tsp", "cup", "cups", "tablespoon", "teaspoon"
+        }
+
+        first = tokens[0]
+        if re.match(r"^\d+[\d\/\.,]*$", first):
+            if len(tokens) >= 2 and tokens[1] in units:
+                amount = first + " " + tokens[1]
+                name = " ".join(tokens[2:])
+            else:
+                amount = first
+                name = " ".join(tokens[1:])
+            return amount.strip() or None, name.strip() or None
+
+        if first in units and len(tokens) >= 2:
+            amount = first
+            name = " ".join(tokens[1:])
+            return amount.strip() or None, name.strip() or None
+
+        return None, s
+
+    def _map_json_ld_recipe_to_data(self, recipe_json_ld, source_url, language="he"):
+        # Map schema.org Recipe JSON-LD to our internal schema
+        title = recipe_json_ld.get("name") or None
+        ingredients_lines = self._normalize_ingredient_lines(recipe_json_ld.get("recipeIngredient"))
+        instructions_lines = self._normalize_instruction_lines(recipe_json_ld.get("recipeInstructions"))
+
+        ingredient_objects = []
+        for line in ingredients_lines:
+            amount, name = self._parse_amount_name_from_ingredient(line)
+            ingredient_objects.append({
+                "amount": amount,
+                "name": name or line,
+                "preparation": None,
+                "raw": line,
+            })
+
+        data = {
+            "title": title,
+            "language": language,
+            "source": source_url,
+            "ingredients": ingredients_lines,
+            "ingredientGroups": [{"name": None, "ingredients": ingredient_objects}],
+            "instructionGroups": [{"name": None, "instructions": instructions_lines}],
+            "prepTimeMinutes": self._parse_iso8601_duration_minutes(recipe_json_ld.get("prepTime")),
+            "cookTimeMinutes": self._parse_iso8601_duration_minutes(recipe_json_ld.get("cookTime")),
+            "totalTimeMinutes": self._parse_iso8601_duration_minutes(recipe_json_ld.get("totalTime")),
+            "servings": None,
+            "notes": [],
+            "images": [],
+        }
+
+        ry = recipe_json_ld.get("recipeYield")
+        if isinstance(ry, (str, int, float)):
+            s = str(ry)
+            m = re.search(r"(\d+)", s)
+            if m:
+                try:
+                    data["servings"] = int(m.group(1))
+                except Exception:
+                    pass
+
+        return data
+
+    def _is_recipe_data_sufficient(self, data):
+        try:
+            ingredient_groups = data.get("ingredientGroups") or []
+            instruction_groups = data.get("instructionGroups") or []
+            ingredient_count = sum(len(g.get("ingredients") or []) for g in ingredient_groups if isinstance(g, dict))
+            instruction_count = sum(len(g.get("instructions") or []) for g in instruction_groups if isinstance(g, dict))
+            return ingredient_count >= 2 and instruction_count >= 1
+        except Exception:
+            return False
+
 
     # -------------------------
     # Prompts
