@@ -57,6 +57,20 @@ DIRECT_FETCH_HEADERS = {
 # =========================================================
 # Utils
 # =========================================================
+
+# Common strings found in WAF blocking/challenge pages
+BLOCKING_KEYWORDS = [
+    "incapsula",
+    "request unsuccessful",
+    "security check",
+    "captcha",
+    "challenge-form",
+    "challenge-running",
+    "block script",
+    "access denied",
+    "error 1020",
+    "attention required",
+]
 def find_main_content(soup: BeautifulSoup, selector: Optional[str] = None) -> Tuple[Any, str]:
     """
     Find the main content element in the HTML.
@@ -368,6 +382,8 @@ class ScraperService:
 
         return False
 
+
+
     def _try_direct_fetch_html(self, url: str, *, timeout_seconds: float = 6.0) -> str | None:
         """Attempt a fast direct GET (no BrightData). Retries with identity encoding if needed."""
         base_headers = {
@@ -393,6 +409,14 @@ class ScraperService:
 
         try:
             text = _get(base_headers)
+            
+            # Check for blocking keywords first
+            if text:
+                lower_text = text.lower()
+                if any(k in lower_text for k in BLOCKING_KEYWORDS):
+                    logger.warning(f"Direct fetch returned blocking page ('{next(k for k in BLOCKING_KEYWORDS if k in lower_text)}'); forcing fallback")
+                    return None
+
             # Require at least 600 chars to avoid "blocked" or "challenge" pages (e.g. 212 chars)
             if text and len(text) >= 600:
                 return text
@@ -406,6 +430,14 @@ class ScraperService:
             hdrs = dict(base_headers)
             hdrs["Accept-Encoding"] = "identity"
             text = _get(hdrs)
+            
+            # Check for blocking keywords in retry logic too
+            if text:
+                lower_text = text.lower()
+                if any(k in lower_text for k in BLOCKING_KEYWORDS):
+                    logger.warning(f"Direct fetch (identity) returned blocking page; forcing fallback")
+                    return None
+            
             if text and len(text) >= 600:
                 return text
             return None
@@ -855,9 +887,9 @@ class ScraperService:
         
         recipe = Recipe(**recipe_data)
         
-        # Log the final Recipe JSON being returned to frontend
-        logger.info(f"=== RECIPE JSON RETURNED TO FRONTEND ===")
-        logger.info(f"Recipe JSON: {recipe.model_dump_json(indent=2, by_alias=True)}")
+        # Log recipe metadata (avoid expensive serialization)
+        logger.info(f"=== RECIPE RETURNED TO FRONTEND ===")
+        logger.info(f"Recipe summary: title='{recipe.title}', {len(recipe.ingredient_groups)} ingredient groups, {len(recipe.instruction_groups)} instruction groups, {len(recipe.images)} images")
         
         
         # Measure strictly local processing time
@@ -1033,9 +1065,9 @@ class ScraperService:
         
         recipe = Recipe(**data)
         
-        # Log the final Recipe JSON being returned to frontend
-        logger.info(f"=== RECIPE JSON RETURNED TO FRONTEND ===")
-        logger.info(f"Recipe JSON: {recipe.model_dump_json(indent=2, by_alias=True)}")
+        # Log recipe metadata (avoid expensive serialization)
+        logger.info(f"=== RECIPE RETURNED TO FRONTEND ===")
+        logger.info(f"Recipe summary: title='{recipe.title}', {len(recipe.ingredient_groups)} ingredient groups, {len(recipe.instruction_groups)} instruction groups, {len(recipe.images)} images")
         
         return recipe
     
