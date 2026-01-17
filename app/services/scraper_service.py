@@ -393,8 +393,11 @@ class ScraperService:
 
         try:
             text = _get(base_headers)
-            if text:
+            # Require at least 600 chars to avoid "blocked" or "challenge" pages (e.g. 212 chars)
+            if text and len(text) >= 600:
                 return text
+            elif text:
+                logger.warning(f"Direct fetch returned short/invalid content ({len(text)} chars); treating as failed to force fallback")
         except Exception as e:
             logger.debug(f"Direct fetch failed (gzip/deflate): {e}")
 
@@ -402,7 +405,10 @@ class ScraperService:
         try:
             hdrs = dict(base_headers)
             hdrs["Accept-Encoding"] = "identity"
-            return _get(hdrs)
+            text = _get(hdrs)
+            if text and len(text) >= 600:
+                return text
+            return None
         except Exception as e:
             logger.debug(f"Direct fetch failed (identity): {e}")
             return None
