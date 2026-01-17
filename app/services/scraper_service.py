@@ -559,7 +559,7 @@ class ScraperService:
             ),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             "Accept-Language": "he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Encoding": "gzip, deflate",  # REMOVED br to avoid encoded gibberish
             "Connection": "keep-alive",
             "Upgrade-Insecure-Requests": "1",
         }
@@ -620,6 +620,38 @@ class ScraperService:
                 logger.debug(f"Direct fetch unexpected error: {e}")
                 return None
     
+    def _looks_like_html(self, content: str) -> bool:
+        """
+        Check if content looks like valid HTML text (not binary/compressed nonsense).
+        Returns True if it looks like HTML, False otherwise.
+        """
+        if not content:
+            return False
+            
+        # Check for null bytes or excessive replacement chars (indicators of binary/compressed data)
+        # If > 5% of first 1000 chars are replacement chars, it's likely garbage
+        total_len = min(len(content), 1000)
+        sample = content[:total_len]
+        
+        if '\0' in sample:
+            logger.warning("Rejecting content: null bytes detected")
+            return False
+            
+        replacement_count = sample.count('\ufffd')
+        if replacement_count > total_len * 0.05:
+            logger.warning(f"Rejecting content: excessive replacement characters ({replacement_count}/{total_len})")
+            return False
+            
+        # Check for HTML indicators
+        content_lower = sample.lower()
+        html_indicators = ['<html', '<!doctype', '<body', '<head', '<div', '<span', '<p']
+        if any(ind in content_lower for ind in html_indicators):
+            return True
+            
+        # If it's just plain text but readable, we might accept it if it's long enough
+        # but for direct fetch validation we prefer explicit HTML tags to be safe
+        return False
+
     def _has_strong_challenge_markers(self, html_content: str) -> bool:
         """
         Check if HTML content contains strong challenge markers.
@@ -701,6 +733,10 @@ class ScraperService:
             logger.debug(f"Rejecting direct fetch: HTML too short for acceptance ({html_length} bytes, need >10KB)")
             return False
         
+        if not self._looks_like_html(html_content):
+            logger.debug("Rejecting direct fetch: content does not look like valid HTML (possible binary/garbage)")
+            return False
+            
         # All conditions met - accept
         logger.debug(f"Accepting direct fetch: status {status_code}, {html_length} bytes, no challenge markers")
         return True
@@ -2101,6 +2137,60 @@ class ScraperService:
                         group["ingredients"] = normalized_ingredients
         elif "ingredientGroups" not in normalized:
             normalized["ingredientGroups"] = []
+            
+        # Fix common Hebrew parsing error: unit extracted as name
+        # Example: name="כפות", amount="2" (from raw "2 כפות סוכר") -> should be name="סוכר", amount="2 כפות"
+        common_units = {
+            # Hebrew
+            "כף", "כפות", "כפית", "כפיות", "כוס", "כוסות", "גרם", "ק״ג", "ק\"ג", "קילו", "קילוגרם",
+            "ליטר", "מ״ל", "מ\"ל", "מיליליטר", "אריזה", "חבילה", "שקית", "פחית", "צנצנת", "בקבוק",
+            "קורט", "קמצוץ", "טיפה", "טיפות", "מנה", "מנות",
+            # English
+            "cup", "cups", "tbsp", "tablespoon", "tablespoons", "tsp", "teaspoon", "teaspoons",
+            "gram", "grams", "g", "kg", "kilogram", "kilograms", "ml", "liter", "liters", "oz", "ounce", "ounces",
+            "lb", "pound", "pounds", "pinch", "dash", "drop", "drops", "can", "jar", "bag", "package", "pack"
+        }
+        
+        if "ingredientGroups" in normalized:
+            for group in normalized["ingredientGroups"]:
+                if isinstance(group, dict) and "ingredients" in group and isinstance(group["ingredients"], list):
+                    for ing in group["ingredients"]:
+                        if isinstance(ing, dict) and ing.get("name") and ing.get("raw"):
+                            name = ing.get("name", "").strip().lower()
+                            # Check if name is just a unit (allowing for "X of Y" structure if needed, but here simple check)
+                            # Remove punctuation from name for check
+                            name_clean = re.sub(r'[^\w\s]', '', name)
+                            
+                            if name_clean in common_units:
+                                raw = ing.get("raw", "")
+                                # Heuristic: if name is a unit, try to find the REAL name in raw
+                                # Logic: Remove the amount and the unit (current name) from raw, what matches is likely the name
+                                amount = ing.get("amount") or ""
+                                
+                                # Try to construct a better amount string
+                                # If amount is just a number (e.g. "2") and name is "cups", new amount should be "2 cups"
+                                new_amount = amount
+                                if amount and name not in amount:
+                                    new_amount = f"{amount} {ing.get('name')}"
+                                elif not amount:
+                                    new_amount = ing.get("name")
+                                
+                                # Try to extract product name from raw
+                                # Remove amount and unit from raw
+                                temp_raw = raw
+                                if amount:
+                                    temp_raw = temp_raw.replace(str(amount), "")
+                                temp_raw = temp_raw.replace(ing.get("name"), "")
+                                
+                                # Clean up formatting chars
+                                temp_raw = re.sub(r'[^\w\s]', ' ', temp_raw)
+                                new_name = temp_raw.strip()
+                                
+                                # If we found something meaningful remaining
+                                if len(new_name) > 1:
+                                    logger.info(f"Fixing ingredient parsing: '{ing.get('name')}' -> '{new_name}' (old amount: '{amount}' -> '{new_amount}')")
+                                    ing["name"] = new_name
+                                    ing["amount"] = new_amount
         
         # nutrition: normalize and filter to only allowed fields
         if "nutrition" in normalized and isinstance(normalized["nutrition"], dict):
