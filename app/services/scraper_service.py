@@ -815,6 +815,10 @@ class ScraperService:
             
             logger.info(f"Found {len(recipes)} JSON-LD Recipe object(s)")
             
+            # Log the entire JSON-LD object if exactly 1 recipe is found
+            if len(recipes) == 1:
+                logger.info(f"JSON-LD Recipe object: {json.dumps(recipes[0], indent=2)}")
+            
             # If multiple recipes, pick the best one
             if len(recipes) > 1:
                 best_recipe = max(recipes, key=self._score_jsonld_recipe)
