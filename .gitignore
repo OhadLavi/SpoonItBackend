@@ -37,3 +37,6 @@ build/
 # ONNX models (downloaded at runtime)
 models/
 
+# Local test artifacts
+tests/
+
