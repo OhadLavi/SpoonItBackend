@@ -33,7 +33,8 @@ class RecipeExtractor:
             ScrapingError: If extraction fails
         """
         try:
-            logger.info(f"Extracting recipe from URL: {url}")
+            # ScraperService already logs the extraction entry point; keep this at DEBUG to avoid duplicates
+            logger.debug(f"Extracting recipe from URL: {url}")
             return await self.scraper_service.extract_recipe_from_url(url)
         except ScrapingError:
             raise

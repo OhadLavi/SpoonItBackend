@@ -90,9 +90,13 @@ def setup_logging(log_level: str = "INFO") -> None:
         "gunicorn",
         "gunicorn.error",
         "gunicorn.access",
+        # AsyncIO
+        "asyncio",
     ]
     for name in noisy_loggers:
         logger = logging.getLogger(name)
         logger.setLevel(logging.WARNING)
+        # Also prevent propagation to avoid duplicate logs
+        logger.propagate = False
 
 

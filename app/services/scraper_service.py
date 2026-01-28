@@ -503,7 +503,7 @@ class ScraperService:
         loop = asyncio.get_event_loop()
         
         # STEP 1: Fetch HTML (direct fast path, fallback to BrightData)
-        logger.info(f"Step 1: Fetching HTML for: {url}")
+        logger.debug(f"Step 1: Fetching HTML for: {url}")
         fetch_start = time.time()
 
         html_content: Optional[str] = None

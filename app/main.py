@@ -151,9 +151,15 @@ app.include_router(chat.router)
 @app.on_event("startup")
 async def startup_event():
     """Application startup event."""
-    logger.info("SpoonIt API starting up...")
-    logger.info(f"Log level: {settings.log_level}")
-    logger.info(f"Rate limit: {settings.rate_limit_per_hour} requests/hour")
+    # Log once per worker (gunicorn runs multiple workers, so this will appear multiple times)
+    # But combine into a single concise log line
+    logger.info(
+        "SpoonIt API started",
+        extra={
+            "log_level": settings.log_level,
+            "rate_limit_per_hour": settings.rate_limit_per_hour,
+        },
+    )
 
 
 @app.on_event("shutdown")
