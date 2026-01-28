@@ -510,7 +510,6 @@ class ScraperService:
         loop = asyncio.get_event_loop()
         
         # STEP 1: Fetch HTML (direct fast path, fallback to BrightData)
-        logger.debug(f"Step 1: Fetching HTML for: {url}")
         fetch_start = time.time()
 
         html_content: Optional[str] = None
@@ -525,70 +524,71 @@ class ScraperService:
             logger.warning(f"Direct fetch failed: {e}")
             html_content = None
 
-            if not html_content:
-                logger.info("Direct fetch unavailable/invalid; using BrightData API")
+        # If direct fetch failed or returned None, use BrightData API
+        if not html_content:
+            logger.info("Direct fetch unavailable/invalid; using BrightData API")
 
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {settings.brightdata_api_key}",
-                }
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {settings.brightdata_api_key}",
+            }
 
-                payload = {
-                    "zone": "spoonit_unlocker_api",
-                    "url": url,
-                    "format": "raw",
-                }
+            payload = {
+                "zone": "spoonit_unlocker_api",
+                "url": url,
+                "format": "raw",
+            }
 
-                brightdata_start = time.time()
-                logger.info(f"Starting BrightData API request for {url}")
-                
-                try:
-                    # Use a session to strictly control retries
-                    with requests.Session() as session:
-                        # Disable retries to avoid multiplying the timeout
-                        adapter = requests.adapters.HTTPAdapter(max_retries=0)
-                        session.mount("https://", adapter)
-                        session.mount("http://", adapter)
-                        
-                        response = await loop.run_in_executor(
-                            None,
-                            lambda: session.post(
-                                BRIGHTDATA_API_URL, 
-                                json=payload, 
-                                headers=headers, 
-                                timeout=50  # Increased to 50s (Cloud Run often has 60s+ timeout)
-                            ),
-                        )
-                        response.raise_for_status()
-                        
-                except requests.exceptions.Timeout:
-                    elapsed = time.time() - brightdata_start
-                    logger.error(f"BrightData API timed out after {elapsed:.2f}s")
-                    raise ScrapingError(f"BrightData API timed out after {elapsed:.2f}s")
-                except Exception as e:
-                    elapsed = time.time() - brightdata_start
-                    logger.error(f"BrightData API request failed after {elapsed:.2f}s: {e}")
-                    raise ScrapingError(f"Failed to fetch extracted HTML from BrightData API: {e}") from e
+            brightdata_start = time.time()
+            logger.info(f"Starting BrightData API request for {url}")
+            
+            try:
+                # Use a session to strictly control retries
+                with requests.Session() as session:
+                    # Disable retries to avoid multiplying the timeout
+                    adapter = requests.adapters.HTTPAdapter(max_retries=0)
+                    session.mount("https://", adapter)
+                    session.mount("http://", adapter)
+                    
+                    response = await loop.run_in_executor(
+                        None,
+                        lambda: session.post(
+                            BRIGHTDATA_API_URL, 
+                            json=payload, 
+                            headers=headers, 
+                            timeout=50  # Increased to 50s (Cloud Run often has 60s+ timeout)
+                        ),
+                    )
+                    response.raise_for_status()
+                    
+            except requests.exceptions.Timeout:
+                elapsed = time.time() - brightdata_start
+                logger.error(f"BrightData API timed out after {elapsed:.2f}s")
+                raise ScrapingError(f"BrightData API timed out after {elapsed:.2f}s")
+            except Exception as e:
+                elapsed = time.time() - brightdata_start
+                logger.error(f"BrightData API request failed after {elapsed:.2f}s: {e}")
+                raise ScrapingError(f"Failed to fetch extracted HTML from BrightData API: {e}") from e
 
-                timings["brightdata_api"] = time.time() - brightdata_start
-                logger.info(f"BrightData API success in {timings['brightdata_api']:.2f}s")
+            timings["brightdata_api"] = time.time() - brightdata_start
+            logger.info(f"BrightData API success in {timings['brightdata_api']:.2f}s")
 
-                # Validate response content
-                if not response.content:
-                    logger.error("BrightData API returned empty response content")
-                    raise ScrapingError("BrightData API returned empty HTML content")
+            # Validate response content
+            if not response.content:
+                logger.error("BrightData API returned empty response content")
+                raise ScrapingError("BrightData API returned empty HTML content")
 
-                # Decode HTML content
-                try:
-                    html_content = response.content.decode("utf-8", errors="replace")
-                except Exception as e:
-                    logger.error(f"Failed to decode HTML content: {e}")
-                    raise ScrapingError(f"Failed to decode HTML content from BrightData: {e}") from e
+            # Decode HTML content
+            try:
+                html_content = response.content.decode("utf-8", errors="replace")
+            except Exception as e:
+                logger.error(f"Failed to decode HTML content: {e}")
+                raise ScrapingError(f"Failed to decode HTML content from BrightData: {e}") from e
 
-                if not self._looks_like_html(html_content):
-                    logger.warning("BrightData returned content that doesn't look like HTML; refusing to pass to Gemini")
-                    logger.debug(f"BrightData content preview: {html_content[:2000]}")
-                    raise ScrapingError("BrightData returned non-HTML or corrupted content")
+            if not self._looks_like_html(html_content):
+                logger.warning("BrightData returned content that doesn't look like HTML; refusing to pass to Gemini")
+                logger.debug(f"BrightData content preview: {html_content[:2000]}")
+                raise ScrapingError("BrightData returned non-HTML or corrupted content")
 
         # Timings for fetch step
         timings.setdefault("brightdata_api", 0.0)
@@ -601,14 +601,20 @@ class ScraperService:
         parse_start = time.time()
         
         # Validate HTML content (should already be a decoded string at this point)
+        if not html_content or not isinstance(html_content, str):
+            logger.error(f"HTML content is None or invalid type - both direct fetch and BrightData failed (type: {type(html_content)})")
+            raise ScrapingError("Failed to fetch HTML content: both direct fetch and BrightData API failed")
+        
+        # Additional defensive check - ensure html_content is a non-empty string
+        html_content = html_content.strip() if isinstance(html_content, str) else ""
+        if not html_content or len(html_content) < 50:
+            logger.error(f"HTML content is too short or empty: {len(html_content)} characters")
+            raise ScrapingError("HTML content is empty or too short")
+        
         logger.info(f"HTML content length: {len(html_content)} characters")
-        if len(html_content.strip()) < 100:
+        if len(html_content) < 100:
             logger.warning(f"HTML content is very short ({len(html_content)} chars), might be empty or an error page")
             logger.debug(f"HTML content preview: {html_content[:1000]}")
-
-        if not html_content or len(html_content.strip()) < 50:
-            logger.error(f"HTML content is too short or empty: {len(html_content) if html_content else 0} characters")
-            raise ScrapingError("HTML content is empty or too short")
         
         # Parse BeautifulSoup once (will be reused by multiple extractors)
         soup = BeautifulSoup(html_content, "html.parser")

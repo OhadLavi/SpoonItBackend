@@ -1,6 +1,9 @@
 """FastAPI application entry point."""
 
 import logging
+import os
+import tempfile
+from pathlib import Path
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
@@ -148,35 +151,38 @@ app.include_router(recipes.router)
 app.include_router(chat.router)
 
 
-# Module-level flag to log startup only once (across all workers)
+# Module-level flags to log startup/shutdown only once per process (each worker is a separate process)
 _startup_logged = False
+_shutdown_logged = False
 
 @app.on_event("startup")
 async def startup_event():
     """Application startup event."""
     global _startup_logged
-    # Only log startup once to avoid duplicate logs from multiple workers
+    # Only log startup once per process (each gunicorn worker is a separate process)
+    # This prevents duplicate logs within the same process, but allows each worker to log once
     if not _startup_logged:
         logger.info(
             "SpoonIt API started",
             extra={
                 "log_level": settings.log_level,
                 "rate_limit_per_hour": settings.rate_limit_per_hour,
+                "process_id": os.getpid(),
             },
         )
         _startup_logged = True
 
 
-# Module-level flag to log shutdown only once
-_shutdown_logged = False
-
 @app.on_event("shutdown")
 async def shutdown_event():
     """Application shutdown event."""
     global _shutdown_logged
-    # Only log shutdown once to avoid duplicate logs from multiple workers
+    # Only log shutdown once per process
     if not _shutdown_logged:
-        logger.info("SpoonIt API shutting down...")
+        logger.info(
+            "SpoonIt API shutting down...",
+            extra={"process_id": os.getpid()},
+        )
         _shutdown_logged = True
 
 
