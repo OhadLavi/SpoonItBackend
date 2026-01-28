@@ -104,9 +104,8 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         client_ip = request.client.host if request.client else None
         user_agent = request.headers.get("user-agent", "Unknown")
 
-        logger.info(
-            f"API Request: {method} {path}",
-            extra={
+        log_kwargs = {
+            "extra": {
                 "request_id": request_id,
                 "method": method,
                 "path": path,
@@ -114,16 +113,22 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 "params": masked_params,
                 "client_ip": client_ip,
                 "user_agent": user_agent,
-            },
-        )
+            }
+        }
+
+        # Keep high‑volume endpoints (like image proxy) out of INFO logs
+        if path == "/proxy_image":
+            logger.debug(f"API Request: {method} {path}", **log_kwargs)
+        else:
+            logger.debug(f"API Request: {method} {path}", **log_kwargs)
 
         # Process request
         try:
             response = await call_next(request)
             process_time = time.time() - start_time
 
-            # Log response
-            logger.info(
+            # Log response at DEBUG – PerformanceMiddleware handles INFO summary
+            logger.debug(
                 f"API Response: {method} {path} - {response.status_code}",
                 extra={
                     "request_id": request_id,

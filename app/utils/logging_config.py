@@ -50,23 +50,49 @@ def setup_logging(log_level: str = "INFO") -> None:
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     """
     # Get root logger
-    logger = logging.getLogger()
-    logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
+    root = logging.getLogger()
+    root.setLevel(getattr(logging, log_level.upper(), logging.INFO))
 
     # Remove existing handlers
-    logger.handlers.clear()
+    root.handlers.clear()
 
     # Create console handler (stdout for Cloud Run)
     handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(logging.DEBUG)
+    # Let the root logger control effective level; keep handler permissive
+    handler.setLevel(logging.NOTSET)
 
     # Set JSON formatter
     formatter = CloudRunJSONFormatter()
     handler.setFormatter(formatter)
 
-    # Add handler to logger
-    logger.addHandler(handler)
+    # Add handler to root logger
+    root.addHandler(handler)
 
-    # Prevent propagation to root logger
-    logger.propagate = False
+    # Prevent accidental double-printing from other handlers
+    root.propagate = False
+
+    # Quiet noisy third‑party libraries and server frameworks unless explicitly overridden
+    noisy_loggers = [
+        # HTTP clients / low-level network
+        "httpx",
+        "httpcore",
+        "urllib3",
+        # Playwright / browser automation
+        "playwright",
+        # Google client stack
+        "google",
+        "google.genai",
+        "google.auth",
+        # ASGI / server runtimes
+        "uvicorn",
+        "uvicorn.error",
+        "uvicorn.access",
+        "gunicorn",
+        "gunicorn.error",
+        "gunicorn.access",
+    ]
+    for name in noisy_loggers:
+        logger = logging.getLogger(name)
+        logger.setLevel(logging.WARNING)
+
 

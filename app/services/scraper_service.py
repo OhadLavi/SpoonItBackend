@@ -881,15 +881,22 @@ class ScraperService:
         # Remove ingredients field before creating Recipe (it's computed, not stored)
         recipe_data.pop("ingredients", None)
         
-        # Log the final normalized data being sent to Recipe
-        logger.info(f"=== FINAL NORMALIZED DATA FOR RECIPE ===")
-        logger.info(f"Final data: {json.dumps(recipe_data, indent=2, ensure_ascii=False, default=str)}")
+        # Log the final normalized data being sent to Recipe (summary only at INFO)
+        logger.debug("=== FINAL NORMALIZED DATA FOR RECIPE ===")
+        logger.debug(json.dumps(recipe_data, indent=2, ensure_ascii=False, default=str))
         
         recipe = Recipe(**recipe_data)
         
         # Log recipe metadata (avoid expensive serialization)
-        logger.info(f"=== RECIPE RETURNED TO FRONTEND ===")
-        logger.info(f"Recipe summary: title='{recipe.title}', {len(recipe.ingredient_groups)} ingredient groups, {len(recipe.instruction_groups)} instruction groups, {len(recipe.images)} images")
+        logger.info(
+            "Recipe returned to frontend",
+            extra={
+                "title": recipe.title,
+                "ingredient_groups": len(recipe.ingredient_groups),
+                "instruction_groups": len(recipe.instruction_groups),
+                "images": len(recipe.images),
+            },
+        )
         
         
         # Measure strictly local processing time
@@ -938,16 +945,37 @@ class ScraperService:
             response_schema=cleaned_schema,
         )
         
-        logger.info(f"Sending to Gemini (_extract_social):")
-        logger.info(f"  Model: {GEMINI_MODEL}")
-        logger.info(f"  Prompt: {prompt}")
-        logger.info(f"  Config: temperature={config.temperature}, top_p={config.top_p}, response_mime_type={config.response_mime_type}")
-        logger.info(f"  Response schema: {json.dumps(cleaned_schema, indent=2, ensure_ascii=False)}")
+        logger.info(
+            f"Sending to Gemini (_extract_social)",
+            extra={
+                "url": url,
+                "model": GEMINI_MODEL,
+            },
+        )
+        logger.debug(f"  Prompt: {prompt}")
+        logger.debug(
+            "  Config",
+            extra={
+                "temperature": config.temperature,
+                "top_p": config.top_p,
+                "response_mime_type": config.response_mime_type,
+            },
+        )
 
+        start = time.time()
         response = self.client.models.generate_content(
             model=GEMINI_MODEL,
             contents=prompt,
             config=config,
+        )
+        duration_ms = round((time.time() - start) * 1000.0, 2)
+        logger.info(
+            "Gemini social extraction completed",
+            extra={
+                "url": url,
+                "model": GEMINI_MODEL,
+                "duration_ms": duration_ms,
+            },
         )
 
         return self._parse_recipe_response(response, url)
@@ -987,9 +1015,9 @@ class ScraperService:
                 
                 # Log the actual response text (even if empty)
                 if response_text:
-                    logger.info(f"=== GEMINI RESPONSE TEXT FOR {url} ===")
-                    logger.info(response_text)
-                    logger.info(f"=== END GEMINI RESPONSE TEXT ===")
+                    logger.debug(f"=== GEMINI RESPONSE TEXT FOR {url} ===")
+                    logger.debug(response_text)
+                    logger.debug(f"=== END GEMINI RESPONSE TEXT ===")
                 else:
                     # If text is empty/missing, log detailed candidate info
                     logger.error(f"Gemini returned empty text for {url}")
@@ -1011,13 +1039,13 @@ class ScraperService:
             import traceback
             logger.warning(f"Traceback: {traceback.format_exc()}")
 
-        # Also log raw response object for debugging
+        # Also log raw response object for debugging (DEBUG only)
         try:
-            logger.info(f"=== GEMINI RAW RESPONSE OBJECT FOR {url} ===")
-            logger.info(f"Response type: {type(response)}")
-            logger.info(f"Response.text: {getattr(response, 'text', 'N/A')}")
-            logger.info(f"Response.candidates count: {len(response.candidates) if hasattr(response, 'candidates') else 'N/A'}")
-            logger.info(f"=== END GEMINI RAW RESPONSE OBJECT ===")
+            logger.debug(f"=== GEMINI RAW RESPONSE OBJECT FOR {url} ===")
+            logger.debug(f"Response type: {type(response)}")
+            logger.debug(f"Response.text: {getattr(response, 'text', 'N/A')}")
+            logger.debug(f"Response.candidates count: {len(response.candidates) if hasattr(response, 'candidates') else 'N/A'}")
+            logger.debug(f"=== END GEMINI RAW RESPONSE OBJECT ===")
         except Exception as e:
             logger.warning(f"Could not log raw response object: {e}")
 
@@ -1035,11 +1063,15 @@ class ScraperService:
         json_text = extract_first_json_object(response.text)
         data = json.loads(json_text)
         
-        # Log raw response for debugging
-        logger.info(f"Gemini raw response for {url}: instructionGroups count={len(data.get('instructionGroups', []))}")
-        if data.get('instructionGroups'):
-            for i, group in enumerate(data.get('instructionGroups', [])):
-                logger.info(f"  Group {i}: name='{group.get('name')}', instructions count={len(group.get('instructions', []))}")
+        # Log raw response for debugging (compact)
+        logger.info(
+            "Gemini recipe response summary",
+            extra={
+                "url": url,
+                "instruction_groups": len(data.get("instructionGroups", [])),
+                "ingredient_groups": len(data.get("ingredientGroups", [])),
+            },
+        )
 
         # Normalize data to match Recipe model
         data = self._normalize_recipe_data(data)

@@ -143,11 +143,21 @@ class GeminiService:
                 response_schema=schema,
             )
             
-            logger.info(f"Sending to Gemini (generate_recipe_from_ingredients):")
-            logger.info(f"  Model: {settings.gemini_model}")
-            logger.info(f"  Prompt: {prompt}")
-            logger.info(f"  Config: temperature={config.temperature}, response_mime_type={config.response_mime_type}")
-            logger.info(f"  Response schema: {json.dumps(schema, indent=2, ensure_ascii=False)}")
+            logger.info(
+                "Sending to Gemini (generate_recipe_from_ingredients)",
+                extra={
+                    "model": settings.gemini_model,
+                    "ingredients_count": len(ingredients),
+                },
+            )
+            logger.debug(f"  Prompt: {prompt}")
+            logger.debug(
+                "  Config / schema",
+                extra={
+                    "temperature": config.temperature,
+                    "response_mime_type": config.response_mime_type,
+                },
+            )
             
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
@@ -179,11 +189,20 @@ class GeminiService:
                 response_schema=schema,
             )
             
-            logger.info(f"Sending to Gemini (generate_recipe_from_text):")
-            logger.info(f"  Model: {settings.gemini_model}")
-            logger.info(f"  Prompt: {prompt}")
-            logger.info(f"  Config: temperature={config.temperature}, response_mime_type={config.response_mime_type}")
-            logger.info(f"  Response schema: {json.dumps(schema, indent=2, ensure_ascii=False)}")
+            logger.info(
+                "Sending to Gemini (generate_recipe_from_text)",
+                extra={
+                    "model": settings.gemini_model,
+                },
+            )
+            logger.debug(f"  Prompt: {prompt}")
+            logger.debug(
+                "  Config / schema",
+                extra={
+                    "temperature": config.temperature,
+                    "response_mime_type": config.response_mime_type,
+                },
+            )
             
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
@@ -269,11 +288,20 @@ class GeminiService:
             response_schema=schema,
         )
         
-        logger.info(f"Sending to Gemini (_structure_recipe_from_text):")
-        logger.info(f"  Model: {settings.gemini_model}")
-        logger.info(f"  Prompt: {prompt}")
-        logger.info(f"  Config: temperature={config.temperature}, response_mime_type={config.response_mime_type}")
-        logger.info(f"  Response schema: {json.dumps(schema, indent=2, ensure_ascii=False)}")
+        logger.info(
+            "Sending to Gemini (_structure_recipe_from_text)",
+            extra={
+                "model": settings.gemini_model,
+            },
+        )
+        logger.debug(f"  Prompt: {prompt}")
+        logger.debug(
+            "  Config / schema",
+            extra={
+                "temperature": config.temperature,
+                "response_mime_type": config.response_mime_type,
+            },
+        )
         
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
@@ -344,12 +372,22 @@ class GeminiService:
             response_schema=transcript_schema,
         )
         
-        logger.info(f"Sending to Gemini (_transcribe_recipe_text_from_image):")
-        logger.info(f"  Model: {model_for_ocr}")
-        logger.info(f"  Prompt: {prompt}")
-        logger.info(f"  Image: mime_type={mime_type}, data_length={len(image_base64)} chars (base64)")
-        logger.info(f"  Config: temperature={config.temperature}, response_mime_type={config.response_mime_type}")
-        logger.info(f"  Response schema: {json.dumps(transcript_schema, indent=2, ensure_ascii=False)}")
+        logger.info(
+            "Sending to Gemini (_transcribe_recipe_text_from_image)",
+            extra={
+                "model": model_for_ocr,
+                "mime_type": mime_type,
+            },
+        )
+        logger.debug(f"  Prompt: {prompt}")
+        logger.debug(
+            "  Image / config / schema",
+            extra={
+                "image_base64_len": len(image_base64),
+                "temperature": config.temperature,
+                "response_mime_type": config.response_mime_type,
+            },
+        )
 
         response = await loop.run_in_executor(
             None,
@@ -423,11 +461,20 @@ class GeminiService:
             response_schema=schema,
         )
         
-        logger.info(f"Sending to Gemini (_structure_recipe_from_transcript):")
-        logger.info(f"  Model: {settings.gemini_model}")
-        logger.info(f"  Prompt: {prompt}")
-        logger.info(f"  Config: temperature={config.temperature}, response_mime_type={config.response_mime_type}")
-        logger.info(f"  Response schema: {json.dumps(schema, indent=2, ensure_ascii=False)}")
+        logger.info(
+            "Sending to Gemini (_structure_recipe_from_transcript)",
+            extra={
+                "model": settings.gemini_model,
+            },
+        )
+        logger.debug(f"  Prompt: {prompt}")
+        logger.debug(
+            "  Config / schema",
+            extra={
+                "temperature": config.temperature,
+                "response_mime_type": config.response_mime_type,
+            },
+        )
         
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
