@@ -525,49 +525,70 @@ class ScraperService:
             logger.warning(f"Direct fetch failed: {e}")
             html_content = None
 
-        if not html_content:
-            logger.info("Direct fetch unavailable/invalid; using BrightData API")
+            if not html_content:
+                logger.info("Direct fetch unavailable/invalid; using BrightData API")
 
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {settings.brightdata_api_key}",
-            }
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {settings.brightdata_api_key}",
+                }
 
-            payload = {
-                "zone": "spoonit_unlocker_api",
-                "url": url,
-                "format": "raw",
-            }
+                payload = {
+                    "zone": "spoonit_unlocker_api",
+                    "url": url,
+                    "format": "raw",
+                }
 
-            brightdata_start = time.time()
-            try:
-                response = await loop.run_in_executor(
-                    None,
-                    lambda: requests.post(BRIGHTDATA_API_URL, json=payload, headers=headers, timeout=30),
-                )
-                response.raise_for_status()
-            except Exception as e:
-                logger.error(f"BrightData API request failed: {e}")
-                raise ScrapingError(f"Failed to fetch HTML from BrightData API: {e}") from e
+                brightdata_start = time.time()
+                logger.info(f"Starting BrightData API request for {url}")
+                
+                try:
+                    # Use a session to strictly control retries
+                    with requests.Session() as session:
+                        # Disable retries to avoid multiplying the timeout
+                        adapter = requests.adapters.HTTPAdapter(max_retries=0)
+                        session.mount("https://", adapter)
+                        session.mount("http://", adapter)
+                        
+                        response = await loop.run_in_executor(
+                            None,
+                            lambda: session.post(
+                                BRIGHTDATA_API_URL, 
+                                json=payload, 
+                                headers=headers, 
+                                timeout=50  # Increased to 50s (Cloud Run often has 60s+ timeout)
+                            ),
+                        )
+                        response.raise_for_status()
+                        
+                except requests.exceptions.Timeout:
+                    elapsed = time.time() - brightdata_start
+                    logger.error(f"BrightData API timed out after {elapsed:.2f}s")
+                    raise ScrapingError(f"BrightData API timed out after {elapsed:.2f}s")
+                except Exception as e:
+                    elapsed = time.time() - brightdata_start
+                    logger.error(f"BrightData API request failed after {elapsed:.2f}s: {e}")
+                    raise ScrapingError(f"Failed to fetch extracted HTML from BrightData API: {e}") from e
 
-            timings["brightdata_api"] = time.time() - brightdata_start
+                timings["brightdata_api"] = time.time() - brightdata_start
+                logger.info(f"BrightData API success in {timings['brightdata_api']:.2f}s")
 
-            # Validate response content
-            if not response.content:
-                logger.error("BrightData API returned empty response content")
-                raise ScrapingError("BrightData API returned empty HTML content")
+                # Validate response content
+                if not response.content:
+                    logger.error("BrightData API returned empty response content")
+                    raise ScrapingError("BrightData API returned empty HTML content")
 
-            # Decode HTML content
-            try:
-                html_content = response.content.decode("utf-8", errors="replace")
-            except Exception as e:
-                logger.error(f"Failed to decode HTML content: {e}")
-                raise ScrapingError(f"Failed to decode HTML content from BrightData: {e}") from e
+                # Decode HTML content
+                try:
+                    html_content = response.content.decode("utf-8", errors="replace")
+                except Exception as e:
+                    logger.error(f"Failed to decode HTML content: {e}")
+                    raise ScrapingError(f"Failed to decode HTML content from BrightData: {e}") from e
 
-            if not self._looks_like_html(html_content):
-                logger.warning("BrightData returned content that doesn't look like HTML; refusing to pass to Gemini")
-                logger.debug(f"BrightData content preview: {html_content[:2000]}")
-                raise ScrapingError("BrightData returned non-HTML or corrupted content")
+                if not self._looks_like_html(html_content):
+                    logger.warning("BrightData returned content that doesn't look like HTML; refusing to pass to Gemini")
+                    logger.debug(f"BrightData content preview: {html_content[:2000]}")
+                    raise ScrapingError("BrightData returned non-HTML or corrupted content")
 
         # Timings for fetch step
         timings.setdefault("brightdata_api", 0.0)
