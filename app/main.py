@@ -148,24 +148,36 @@ app.include_router(recipes.router)
 app.include_router(chat.router)
 
 
+# Module-level flag to log startup only once (across all workers)
+_startup_logged = False
+
 @app.on_event("startup")
 async def startup_event():
     """Application startup event."""
-    # Log once per worker (gunicorn runs multiple workers, so this will appear multiple times)
-    # But combine into a single concise log line
-    logger.info(
-        "SpoonIt API started",
-        extra={
-            "log_level": settings.log_level,
-            "rate_limit_per_hour": settings.rate_limit_per_hour,
-        },
-    )
+    global _startup_logged
+    # Only log startup once to avoid duplicate logs from multiple workers
+    if not _startup_logged:
+        logger.info(
+            "SpoonIt API started",
+            extra={
+                "log_level": settings.log_level,
+                "rate_limit_per_hour": settings.rate_limit_per_hour,
+            },
+        )
+        _startup_logged = True
 
+
+# Module-level flag to log shutdown only once
+_shutdown_logged = False
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Application shutdown event."""
-    logger.info("SpoonIt API shutting down...")
+    global _shutdown_logged
+    # Only log shutdown once to avoid duplicate logs from multiple workers
+    if not _shutdown_logged:
+        logger.info("SpoonIt API shutting down...")
+        _shutdown_logged = True
 
 
 @app.get("/")

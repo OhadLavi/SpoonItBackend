@@ -90,6 +90,8 @@ def setup_logging(log_level: str = "INFO") -> None:
         "gunicorn",
         "gunicorn.error",
         "gunicorn.access",
+        "gunicorn.workers",
+        "gunicorn.workers.uvicorn",
         # AsyncIO
         "asyncio",
     ]

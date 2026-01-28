@@ -407,6 +407,9 @@ class ScraperService:
             text = r.text or ""
             return text if self._looks_like_html(text) else None
 
+        errors = []
+        
+        # First attempt: gzip/deflate
         try:
             text = _get(base_headers)
             
@@ -423,7 +426,7 @@ class ScraperService:
             elif text:
                 logger.warning(f"Direct fetch returned short/invalid content ({len(text)} chars); treating as failed to force fallback")
         except Exception as e:
-            logger.debug(f"Direct fetch failed (gzip/deflate): {e}")
+            errors.append(f"gzip/deflate: {e}")
 
         # Retry: force no compression. This often fixes sites that otherwise respond with br/unknown encodings.
         try:
@@ -440,10 +443,14 @@ class ScraperService:
             
             if text and len(text) >= 600:
                 return text
-            return None
         except Exception as e:
-            logger.debug(f"Direct fetch failed (identity): {e}")
-            return None
+            errors.append(f"identity: {e}")
+        
+        # Log consolidated error message only if both attempts failed
+        if errors:
+            logger.debug(f"Direct fetch failed ({', '.join(errors)})")
+        
+        return None
     
     def _clean_schema_for_gemini(self, schema: Dict[str, Any]) -> Dict[str, Any]:
         """
