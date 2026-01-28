@@ -479,21 +479,94 @@ class ScraperService:
         
         return cleaned
     
+    def _log_flow_summary(self, flow_info: Dict[str, Any]) -> None:
+        """Log comprehensive flow summary in a single log entry for Cloud Logging."""
+        total_time = time.time() - flow_info["start_time"]
+        flow_info["timings"]["total"] = total_time
+        
+        # Build structured summary for Cloud Logging
+        summary_lines = []
+        summary_lines.append("=" * 80)
+        summary_lines.append(f"RECIPE EXTRACTION FLOW SUMMARY")
+        summary_lines.append("=" * 80)
+        summary_lines.append(f"Type: {'SOCIAL' if flow_info['is_social'] else 'REGULAR'}")
+        summary_lines.append(f"URL: {flow_info['url']}")
+        summary_lines.append("")
+        
+        if not flow_info["is_social"]:
+            summary_lines.append("HTML Fetch:")
+            summary_lines.append(f"  Direct Fetch: {'✓ SUCCESS' if flow_info['direct_fetch_success'] else '✗ FAILED'}")
+            summary_lines.append(f"  BrightData Used: {'✓ YES' if flow_info['brightdata_used'] else '✗ NO'}")
+            if flow_info["brightdata_used"]:
+                summary_lines.append(f"  BrightData Success: {'✓ YES' if flow_info['brightdata_success'] else '✗ NO'}")
+            summary_lines.append("")
+            summary_lines.append("Content Extraction:")
+            summary_lines.append(f"  Has JSON-LD: {'✓ YES' if flow_info['has_json_ld'] else '✗ NO'}")
+            if flow_info["has_json_ld"]:
+                summary_lines.append(f"  JSON-LD Used: {'✓ YES (skipped Gemini)' if flow_info['json_ld_used'] else '✗ NO (incomplete, used Gemini)'}")
+            summary_lines.append("")
+        else:
+            summary_lines.append("Social Extraction:")
+            summary_lines.append(f"  Method: Playwright headless browser")
+            summary_lines.append("")
+        
+        summary_lines.append("AI Processing:")
+        summary_lines.append(f"  Gemini Used: {'✓ YES' if flow_info['gemini_used'] else '✗ NO'}")
+        summary_lines.append("")
+        
+        summary_lines.append("TIMINGS (seconds):")
+        # Sort timings for consistent output
+        sorted_timings = sorted(flow_info["timings"].items(), key=lambda x: x[1], reverse=True)
+        for step, duration in sorted_timings:
+            summary_lines.append(f"  {step}: {duration:.2f}s")
+        summary_lines.append("")
+        summary_lines.append(f"TOTAL TIME: {total_time:.2f}s")
+        
+        if "error" in flow_info:
+            summary_lines.append("")
+            summary_lines.append(f"ERROR: {flow_info['error']}")
+        
+        summary_lines.append("=" * 80)
+        
+        # Log as single entry with structured data
+        logger.info("\n".join(summary_lines), extra={"flow_info": flow_info})
+    
     async def extract_recipe_from_url(self, url: str) -> Recipe:
-        if is_social_url(url):
-            logger.info(f"[social] Using headless browser for: {url}")
-            return await self._extract_social(url)
-
-        # Regular website - use BrightData API approach
-        logger.info(f"[brightdata] Extracting recipe from: {url}")
-        return await self._extract_with_brightdata(url)
+        """Main entry point for recipe extraction with comprehensive flow logging."""
+        flow_info = {
+            "url": url,
+            "is_social": is_social_url(url),
+            "start_time": time.time(),
+            "direct_fetch_success": False,
+            "brightdata_used": False,
+            "brightdata_success": False,
+            "has_json_ld": False,
+            "json_ld_used": False,
+            "gemini_used": False,
+            "timings": {},
+        }
+        
+        try:
+            if flow_info["is_social"]:
+                recipe = await self._extract_social(url, flow_info)
+            else:
+                recipe = await self._extract_with_brightdata(url, flow_info)
+            
+            # Log comprehensive flow summary
+            self._log_flow_summary(flow_info)
+            return recipe
+        except Exception as e:
+            # Log flow summary even on error
+            flow_info["error"] = str(e)
+            self._log_flow_summary(flow_info)
+            raise
 
 
 
     # -------------------------
     # Regular URLs - BrightData API Approach
     # -------------------------
-    async def _extract_with_brightdata(self, url: str) -> Recipe:
+    async def _extract_with_brightdata(self, url: str, flow_info: Dict[str, Any]) -> Recipe:
         """
         Extract recipe using BrightData API to fetch HTML, parse to markdown,
         and send to Gemini with recipe schema.
@@ -516,16 +589,21 @@ class ScraperService:
 
         # Try a direct fetch first to avoid BrightData latency/cost.
         # If the direct response is not valid HTML (e.g., compressed bytes / binary), we fall back.
+        direct_fetch_start = time.time()
         try:
             html_content = await loop.run_in_executor(None, lambda: self._try_direct_fetch_html(url))
             if html_content:
+                flow_info["direct_fetch_success"] = True
+                flow_info["timings"]["direct_fetch"] = time.time() - direct_fetch_start
                 logger.info(f"Direct fetch successful (fast path): {len(html_content)} chars")
         except Exception as e:
+            flow_info["timings"]["direct_fetch"] = time.time() - direct_fetch_start
             logger.warning(f"Direct fetch failed: {e}")
             html_content = None
 
         # If direct fetch failed or returned None, use BrightData API
         if not html_content:
+            flow_info["brightdata_used"] = True
             logger.info("Direct fetch unavailable/invalid; using BrightData API")
 
             headers = {
@@ -563,14 +641,18 @@ class ScraperService:
                     
             except requests.exceptions.Timeout:
                 elapsed = time.time() - brightdata_start
+                flow_info["timings"]["brightdata_api"] = elapsed
                 logger.error(f"BrightData API timed out after {elapsed:.2f}s")
                 raise ScrapingError(f"BrightData API timed out after {elapsed:.2f}s")
             except Exception as e:
                 elapsed = time.time() - brightdata_start
+                flow_info["timings"]["brightdata_api"] = elapsed
                 logger.error(f"BrightData API request failed after {elapsed:.2f}s: {e}")
                 raise ScrapingError(f"Failed to fetch extracted HTML from BrightData API: {e}") from e
 
             timings["brightdata_api"] = time.time() - brightdata_start
+            flow_info["brightdata_success"] = True
+            flow_info["timings"]["brightdata_api"] = timings["brightdata_api"]
             logger.info(f"BrightData API success in {timings['brightdata_api']:.2f}s")
 
             # Validate response content
@@ -593,6 +675,7 @@ class ScraperService:
         # Timings for fetch step
         timings.setdefault("brightdata_api", 0.0)
         timings["html_fetch"] = time.time() - fetch_start
+        flow_info["timings"]["html_fetch"] = timings["html_fetch"]
         logger.info(f"BrightData API Time: {timings['brightdata_api']:.2f} seconds")
         logger.info(f"Total HTML Fetch Time: {timings['html_fetch']:.2f} seconds")
         
@@ -624,11 +707,15 @@ class ScraperService:
         
 
         # Try JSON-LD Recipe first (fast path). If incomplete, fall back to full extraction + Gemini.
+        jsonld_start = time.time()
         try:
             jsonld_recipe = self._extract_json_ld_recipe(soup)
+            if jsonld_recipe:
+                flow_info["has_json_ld"] = True
         except Exception as e:
             jsonld_recipe = None
             logger.debug(f"JSON-LD extraction error: {e}")
+        flow_info["timings"]["jsonld_check"] = time.time() - jsonld_start
 
         if jsonld_recipe:
             logger.info("Found JSON-LD Recipe, attempting direct mapping (fast path)")
@@ -654,6 +741,8 @@ class ScraperService:
                 if self._is_recipe_data_sufficient(jsonld_data):
                     jsonld_data.pop("ingredients", None)
                     recipe = Recipe(**jsonld_data)
+                    flow_info["json_ld_used"] = True
+                    flow_info["timings"]["jsonld_mapping"] = time.time() - jsonld_start
                     logger.info("JSON-LD mapping succeeded, skipping Gemini extraction")
                     return recipe
                 else:
@@ -787,6 +876,7 @@ class ScraperService:
             logger.info(f"Added title to content. New content length: {len(main_markdown)} characters")
         
         timings["html_parse"] = time.time() - parse_start
+        flow_info["timings"]["html_parse"] = timings["html_parse"]
         logger.info(f"Time for parallel extraction: {timings['html_parse']:.2f} seconds")
         logger.info(f"Final content length: {len(main_markdown)} characters")
         
@@ -844,6 +934,8 @@ class ScraperService:
             raise ScrapingError(f"Failed to extract recipe with Gemini: {e}") from e
         
         timings["gemini_api"] = time.time() - gemini_start
+        flow_info["gemini_used"] = True
+        flow_info["timings"]["gemini_api"] = timings["gemini_api"]
         logger.info(f"Time for Gemini API + food detection (parallel): {timings['gemini_api']:.2f} seconds")
         logger.info(f"Food detection filtered to {len(filtered_images)} images")
         
@@ -868,6 +960,7 @@ class ScraperService:
             raise ScrapingError(f"Failed to parse recipe JSON: {e}") from e
         
         timings["json_parse"] = time.time() - parse_json_start
+        flow_info["timings"]["json_parse"] = timings["json_parse"]
         logger.info(f"Time for JSON parsing: {timings['json_parse']:.4f} seconds")
         
         # STEP 5: Calculate total time and log summary
@@ -943,16 +1036,20 @@ class ScraperService:
     # -------------------------
     # Social URLs
     # -------------------------
-    async def _extract_social(self, url: str) -> Recipe:
+    async def _extract_social(self, url: str, flow_info: Dict[str, Any]) -> Recipe:
+        social_start = time.time()
         # Wrap in timeout to prevent hanging
         try:
             social = await asyncio.wait_for(
                 extract_social_text_headless(url),
                 timeout=15.0  # Max 15 seconds for entire extraction
             )
+            flow_info["timings"]["social_extraction"] = time.time() - social_start
         except asyncio.TimeoutError:
+            flow_info["timings"]["social_extraction"] = time.time() - social_start
             raise ScrapingError("Social media extraction timed out after 15 seconds")
         except Exception as e:
+            flow_info["timings"]["social_extraction"] = time.time() - social_start
             logger.error(f"Playwright social extraction failed: {e}")
             raise ScrapingError(f"Social media extraction failed: {e}") from e
 
@@ -996,13 +1093,16 @@ class ScraperService:
             },
         )
 
-        start = time.time()
+        gemini_start = time.time()
         response = self.client.models.generate_content(
             model=GEMINI_MODEL,
             contents=prompt,
             config=config,
         )
-        duration_ms = round((time.time() - start) * 1000.0, 2)
+        gemini_duration = time.time() - gemini_start
+        flow_info["gemini_used"] = True
+        flow_info["timings"]["gemini_api"] = gemini_duration
+        duration_ms = round(gemini_duration * 1000.0, 2)
         logger.info(
             "Gemini social extraction completed",
             extra={
