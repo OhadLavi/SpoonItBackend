@@ -701,7 +701,8 @@ class ScraperService:
             logger.debug(f"HTML content preview: {html_content[:1000]}")
         
         # Parse BeautifulSoup once (will be reused by multiple extractors)
-        soup = BeautifulSoup(html_content, "html.parser")
+        # Offload CPU-bound parsing to executor to avoid blocking the event loop
+        soup = await loop.run_in_executor(None, lambda: BeautifulSoup(html_content, "html.parser"))
         if not soup:
             logger.error("BeautifulSoup failed to parse HTML - soup is None")
             raise ScrapingError("Failed to parse HTML with BeautifulSoup")
@@ -724,7 +725,7 @@ class ScraperService:
                 jsonld_data = self._map_json_ld_recipe_to_data(jsonld_recipe, url, language=language)
 
                 # Extract and filter images (no Gemini call)
-                candidate_images = await self._extract_recipe_images(html_content, url)
+                candidate_images = self._extract_recipe_images(html_content, url, soup=soup)
                 if candidate_images:
                     filtered_images = await loop.run_in_executor(None, self._filter_images_with_food_detection, candidate_images)
                 else:
@@ -776,11 +777,11 @@ class ScraperService:
         
         async def extract_structured_content() -> str:
             """Extract recipe structured content (ingredients/instructions)."""
-            return self._extract_recipe_structured_content(html_content)
+            return self._extract_recipe_structured_content(html_content, soup=soup)
         
         async def extract_images() -> List[str]:
             """Extract candidate images from HTML."""
-            return self._extract_recipe_images(html_content, url)
+            return self._extract_recipe_images(html_content, url, soup=soup)
         
         async def extract_page_title() -> Optional[str]:
             """Extract page title from pre-parsed soup."""
@@ -1969,13 +1970,15 @@ CRITICAL RULES:
 CONTENT:
 {markdown_content}
 """
-    def _extract_recipe_structured_content(self, html_content: str) -> str:
+    def _extract_recipe_structured_content(self, html_content: str, soup: Optional[BeautifulSoup] = None) -> str:
         """
         Extract recipe-specific structured content (ingredients, instructions) from HTML.
         Uses generic patterns - Schema.org, common class/id patterns, and list structures.
         """
         try:
-            soup = BeautifulSoup(html_content, "html.parser")
+            if soup is None:
+                soup = BeautifulSoup(html_content, "html.parser")
+
             extracted_parts = []
             
             # Generic selectors for recipe ingredients (priority order)
@@ -2083,7 +2086,7 @@ CONTENT:
             logger.warning(f"Failed to extract recipe structured content: {e}")
             return ""
 
-    def _extract_recipe_images(self, html_content: str, page_url: str) -> List[str]:
+    def _extract_recipe_images(self, html_content: str, page_url: str, soup: Optional[BeautifulSoup] = None) -> List[str]:
         """
         Extract recipe-related image URLs from HTML using generic approaches.
         Focuses on images within recipe content areas and filters out icons, ads, and non-recipe images.
@@ -2091,9 +2094,12 @@ CONTENT:
         Args:
             html_content: The HTML content of the page
             page_url: The URL of the page (used to resolve relative URLs)
+            soup: Optional pre-parsed BeautifulSoup object
         """
         try:
-            soup = BeautifulSoup(html_content, "html.parser")
+            if soup is None:
+                soup = BeautifulSoup(html_content, "html.parser")
+
             image_extensions = ('.jpg', '.jpeg', '.png', '.webp', '.avif')  # Exclude .gif
             # List of (source_type, url, priority) - lower priority number = higher priority
             found_images: List[Tuple[str, str, int]] = []
