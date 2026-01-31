@@ -9,7 +9,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 import numpy as np
@@ -178,12 +178,12 @@ class FoodDetector:
         # Return True if food score exceeds threshold
         return food_score > threshold, food_score
     
-    async def detect_food_in_image(self, image_data: bytes, threshold: float = 0.25) -> Tuple[bool, float]:
+    async def detect_food_in_image(self, image_input: Union[bytes, Image.Image], threshold: float = 0.25) -> Tuple[bool, float]:
         """
         Detect if an image contains food.
         
         Args:
-            image_data: Raw image bytes
+            image_input: Raw image bytes or PIL Image object
             threshold: Food detection threshold (default: 0.25)
             
         Returns:
@@ -196,8 +196,11 @@ class FoodDetector:
             return True, 0.5
         
         try:
-            # Load image
-            image = Image.open(BytesIO(image_data))
+            # Load image if needed
+            if isinstance(image_input, bytes):
+                image = Image.open(BytesIO(image_input))
+            else:
+                image = image_input
             
             # Preprocess
             input_tensor = self._preprocess_image(image)
@@ -235,12 +238,16 @@ class FoodDetector:
         exp_x = np.exp(x - np.max(x))
         return exp_x / exp_x.sum()
     
-    def _calculate_image_hash_and_size(self, image_data: bytes) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
+    def _calculate_image_hash_and_size(self, image_input: Union[bytes, Image.Image]) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
         """Calculate perceptual hash and dimensions for image deduplication."""
         if not _IMAGEHASH_AVAILABLE:
             return None, None
         try:
-            image = Image.open(BytesIO(image_data))
+            if isinstance(image_input, bytes):
+                image = Image.open(BytesIO(image_input))
+            else:
+                image = image_input
+
             # Use average hash (aHash) - good for detecting similar images
             img_hash = imagehash.average_hash(image, hash_size=16)
             # Get image dimensions
@@ -373,6 +380,7 @@ class FoodDetector:
                 response.raise_for_status()
                 
                 image_data = response.content
+                image = None
                 
                 # Check image format - filter out GIFs
                 try:
@@ -392,15 +400,18 @@ class FoodDetector:
                 except Exception as e:
                     logger.debug(f"Failed to check image format/size for {url}: {e}")
                     # If we can't check, continue anyway (better to include than miss)
+                    # Use raw image data if image object creation failed but we still have bytes
                 
                 # Detect food (use default threshold 0.25, then filter by min_score)
                 detect_start = time.time()
-                is_food, score = await self.detect_food_in_image(image_data)
+                input_data = image if image else image_data
+                is_food, score = await self.detect_food_in_image(input_data)
                 detect_time = time.time() - detect_start
                 
                 # Calculate hash and dimensions for deduplication
                 hash_start = time.time()
-                img_hash, dimensions = self._calculate_image_hash_and_size(image_data)
+                input_data = image if image else image_data
+                img_hash, dimensions = self._calculate_image_hash_and_size(input_data)
                 hash_time = time.time() - hash_start
                 
                 # Double-check dimensions after hash calculation (in case format check failed)
