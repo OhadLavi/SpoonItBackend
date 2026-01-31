@@ -29,6 +29,14 @@ from app.services.food_detector import get_food_detector
 
 logger = logging.getLogger(__name__)
 
+# Create a shared session for BrightData requests to enable connection pooling
+_brightdata_session = requests.Session()
+# Disable retries to avoid multiplying the timeout
+# Set pool size to handle concurrent requests efficiently
+_adapter = requests.adapters.HTTPAdapter(max_retries=0, pool_connections=20, pool_maxsize=20)
+_brightdata_session.mount("https://", _adapter)
+_brightdata_session.mount("http://", _adapter)
+
 SOCIAL_DOMAINS = ("instagram.com", "tiktok.com")
 GEMINI_MODEL = "gemini-2.5-flash-lite"
 BRIGHTDATA_API_URL = "https://api.brightdata.com/request"
@@ -621,23 +629,16 @@ class ScraperService:
             logger.info(f"Starting BrightData API request for {url}")
             
             try:
-                # Use a session to strictly control retries
-                with requests.Session() as session:
-                    # Disable retries to avoid multiplying the timeout
-                    adapter = requests.adapters.HTTPAdapter(max_retries=0)
-                    session.mount("https://", adapter)
-                    session.mount("http://", adapter)
-                    
-                    response = await loop.run_in_executor(
-                        None,
-                        lambda: session.post(
-                            BRIGHTDATA_API_URL, 
-                            json=payload, 
-                            headers=headers, 
-                            timeout=50  # Increased to 50s (Cloud Run often has 60s+ timeout)
-                        ),
-                    )
-                    response.raise_for_status()
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: _brightdata_session.post(
+                        BRIGHTDATA_API_URL,
+                        json=payload,
+                        headers=headers,
+                        timeout=50  # Increased to 50s (Cloud Run often has 60s+ timeout)
+                    ),
+                )
+                response.raise_for_status()
                     
             except requests.exceptions.Timeout:
                 elapsed = time.time() - brightdata_start
