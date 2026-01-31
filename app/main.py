@@ -14,6 +14,7 @@ from slowapi.errors import RateLimitExceeded
 
 from app.api.routes import chat, health, recipes
 from app.config import settings
+from app.services.scraper_service import get_browser_manager
 from app.core.request_id import get_request_id
 from app.middleware.logging import RequestLoggingMiddleware
 from app.middleware.performance import PerformanceMiddleware
@@ -64,6 +65,7 @@ async def lifespan(app: FastAPI):
             "SpoonIt API shutting down...",
             extra={"process_id": os.getpid()},
         )
+        await get_browser_manager().shutdown()
         _shutdown_logged = True
 
 
