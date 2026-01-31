@@ -1,5 +1,7 @@
 """Input validation utilities."""
 
+import ipaddress
+import socket
 from urllib.parse import urlparse
 from app.utils.exceptions import ValidationError
 
@@ -32,33 +34,59 @@ def validate_url(url: str) -> str:
     if parsed.scheme not in ("http", "https"):
         raise ValidationError("URL must use http or https protocol")
 
-    # Check for localhost/private IPs (SSRF protection)
     hostname = parsed.hostname
     if not hostname:
         raise ValidationError("URL must have a valid hostname")
 
-    # Block localhost and private IPs
-    blocked_hosts = {
-        "localhost",
-        "127.0.0.1",
-        "0.0.0.0",
-        "::1",
-    }
+    # Explicitly block "localhost" string
+    if hostname.lower() == "localhost":
+        raise ValidationError("URL cannot point to localhost")
 
-    if hostname.lower() in blocked_hosts:
-        raise ValidationError("URL cannot point to localhost or private IPs")
+    # Validate IP address/Hostname
+    ips_to_check = []
 
-    # Block private IP ranges
-    if hostname.startswith("10.") or hostname.startswith("192.168.") or hostname.startswith("172."):
-        # More thorough check for 172.16-31.x.x range
-        parts = hostname.split(".")
-        if len(parts) >= 2 and parts[0] == "172":
-            try:
-                second_octet = int(parts[1])
-                if 16 <= second_octet <= 31:
-                    raise ValidationError("URL cannot point to private IP ranges")
-            except ValueError:
-                pass
+    try:
+        # First check if the hostname is an IP literal
+        # strip brackets for IPv6 [::1] -> ::1
+        clean_hostname = hostname.strip("[]")
+        ip = ipaddress.ip_address(clean_hostname)
+        ips_to_check.append(ip)
+    except ValueError:
+        # Not an IP literal, try to resolve it to catch domains pointing to private IPs
+        try:
+            # getaddrinfo handles both IPv4 and IPv6
+            # We use proto=socket.IPPROTO_TCP to filter slightly
+            addr_infos = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
+            seen_ips = set()
+            for info in addr_infos:
+                # info[4] is the sockaddr, info[4][0] is the IP string
+                ip_str = info[4][0]
+                if ip_str not in seen_ips:
+                    ips_to_check.append(ipaddress.ip_address(ip_str))
+                    seen_ips.add(ip_str)
+        except (socket.gaierror, ValueError):
+            # DNS resolution failed or result invalid.
+            # We continue but if it was an internal domain it might fail later.
+            pass
+
+    # Validate all IPs
+    for ip in ips_to_check:
+        if (ip.is_private or
+            ip.is_loopback or
+            ip.is_link_local or
+            ip.is_multicast or
+            ip.is_reserved):
+            raise ValidationError(f"URL resolves to restricted IP: {ip}")
+
+        # Check IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1)
+        if ip.version == 6 and ip.ipv4_mapped:
+            mapped = ip.ipv4_mapped
+            if (mapped.is_private or
+                mapped.is_loopback or
+                mapped.is_link_local or
+                mapped.is_multicast or
+                mapped.is_reserved):
+                raise ValidationError(f"URL resolves to restricted IP: {ip}")
 
     return url
 
@@ -100,4 +128,3 @@ def validate_ingredients_list(ingredients: list) -> list:
         raise ValidationError("At least one valid ingredient is required")
 
     return validated
-
