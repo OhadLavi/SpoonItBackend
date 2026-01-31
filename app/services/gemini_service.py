@@ -245,10 +245,14 @@ class GeminiService:
             
             # Run OCR with Hebrew and English languages
             # Tesseract language codes: 'heb' for Hebrew, 'eng' for English
-            extracted_text = pytesseract.image_to_string(
-                image,
-                lang='heb+eng',  # Hebrew + English
-                config='--psm 6'  # Assume a single uniform block of text
+            loop = asyncio.get_running_loop()
+            extracted_text = await loop.run_in_executor(
+                None,
+                lambda: pytesseract.image_to_string(
+                    image,
+                    lang='heb+eng',  # Hebrew + English
+                    config='--psm 6'  # Assume a single uniform block of text
+                )
             )
             
             return extracted_text.strip()
