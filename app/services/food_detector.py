@@ -165,6 +165,11 @@ class FoodDetector:
         
         return img_array
     
+    def _load_and_preprocess(self, image_data: bytes) -> np.ndarray:
+        """Helper to load and preprocess image in executor."""
+        image = Image.open(BytesIO(image_data))
+        return self._preprocess_image(image)
+
     def _is_food_class(self, class_ids: List[int], probabilities: np.ndarray, threshold: float = 0.25) -> Tuple[bool, float]:
         """Check if any of the top predicted classes are food-related."""
         food_score = 0.0
@@ -196,17 +201,17 @@ class FoodDetector:
             return True, 0.5
         
         try:
-            # Load image
-            image = Image.open(BytesIO(image_data))
-            
-            # Preprocess
-            input_tensor = self._preprocess_image(image)
+            # Run image loading and preprocessing in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            input_tensor = await loop.run_in_executor(
+                None,
+                lambda: self._load_and_preprocess(image_data)
+            )
             
             # Get the input name from the model (different models use different names)
             input_name = self._session.get_inputs()[0].name
             
             # Run inference
-            loop = asyncio.get_event_loop()
             outputs = await loop.run_in_executor(
                 None,
                 lambda: self._session.run(None, {input_name: input_tensor})
