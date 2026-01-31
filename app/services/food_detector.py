@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 import numpy as np
 import requests
+import httpx
 from PIL import Image
 from io import BytesIO
 
@@ -96,9 +97,10 @@ class FoodDetector:
     
     def __init__(self):
         """Initialize the food detector (lazy loading)."""
-        pass
+        if not hasattr(self, '_init_lock'):
+            self._init_lock = asyncio.Lock()
     
-    def _ensure_model_downloaded(self) -> Path:
+    async def _ensure_model_downloaded(self) -> Path:
         """Download the ONNX model if not already present."""
         MODEL_DIR.mkdir(parents=True, exist_ok=True)
         model_path = MODEL_DIR / MODEL_FILENAME
@@ -109,40 +111,50 @@ class FoodDetector:
         
         logger.info(f"Downloading MobileNetV2 ONNX model to {model_path}...")
         try:
-            response = requests.get(MODEL_URL, timeout=60)
-            response.raise_for_status()
-            model_path.write_bytes(response.content)
-            logger.info(f"Model downloaded successfully ({len(response.content) / 1024 / 1024:.1f} MB)")
+            async with httpx.AsyncClient() as client:
+                response = await client.get(MODEL_URL, timeout=60.0, follow_redirects=True)
+                response.raise_for_status()
+                content = response.content
+
+            model_path.write_bytes(content)
+            logger.info(f"Model downloaded successfully ({len(content) / 1024 / 1024:.1f} MB)")
             return model_path
         except Exception as e:
             logger.error(f"Failed to download model: {e}")
             raise
     
-    def _initialize_session(self):
+    async def _initialize_session(self):
         """Initialize the ONNX Runtime session."""
         if self._initialized:
             return
-        
-        try:
-            import onnxruntime as ort
+
+        async with self._init_lock:
+            if self._initialized:
+                return
             
-            model_path = self._ensure_model_downloaded()
-            
-            # Use CPU execution provider (lightweight)
-            self._session = ort.InferenceSession(
-                str(model_path),
-                providers=['CPUExecutionProvider']
-            )
-            self._initialized = True
-            logger.info("ONNX Runtime session initialized")
-        except ImportError:
-            logger.warning("onnxruntime not installed, food detection disabled")
-            self._session = None
-            self._initialized = True
-        except Exception as e:
-            logger.error(f"Failed to initialize ONNX session: {e}")
-            self._session = None
-            self._initialized = True
+            try:
+                import onnxruntime as ort
+
+                model_path = await self._ensure_model_downloaded()
+
+                # Use CPU execution provider (lightweight)
+                self._session = await asyncio.get_running_loop().run_in_executor(
+                    None,
+                    lambda: ort.InferenceSession(
+                        str(model_path),
+                        providers=['CPUExecutionProvider']
+                    )
+                )
+                self._initialized = True
+                logger.info("ONNX Runtime session initialized")
+            except ImportError:
+                logger.warning("onnxruntime not installed, food detection disabled")
+                self._session = None
+                self._initialized = True
+            except Exception as e:
+                logger.error(f"Failed to initialize ONNX session: {e}")
+                self._session = None
+                self._initialized = True
     
     def _preprocess_image(self, image: Image.Image) -> np.ndarray:
         """Preprocess image for MobileNetV2 input."""
@@ -189,7 +201,7 @@ class FoodDetector:
         Returns:
             Tuple of (is_food, confidence_score)
         """
-        self._initialize_session()
+        await self._initialize_session()
         
         if self._session is None:
             # If ONNX not available, assume all images might be food
