@@ -12,7 +12,6 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import httpx
 import numpy as np
-import requests
 from PIL import Image
 
 try:
@@ -443,83 +442,81 @@ class FoodDetector:
         filter_start_time = time.time()
         total_images = len(image_urls[:10])  # Limit to 10 images
 
-        async def analyze_image(
-            url: str,
-        ) -> Tuple[str, bool, float, Optional[str], Optional[Tuple[int, int]]]:
-            """Download and analyze a single image."""
-            image_start_time = time.time()
-            try:
-                url_lower = url.lower()
-                if url_lower.endswith(".gif") or ".gif?" in url_lower:
-                    logger.debug(f"Skipping GIF image: {url}")
-                    return url, False, 0.0, None, None
+        async with httpx.AsyncClient() as client:
+            async def analyze_image(
+                url: str,
+            ) -> Tuple[str, bool, float, Optional[str], Optional[Tuple[int, int]]]:
+                """Download and analyze a single image."""
+                image_start_time = time.time()
+                try:
+                    url_lower = url.lower()
+                    if url_lower.endswith(".gif") or ".gif?" in url_lower:
+                        logger.debug(f"Skipping GIF image: {url}")
+                        return url, False, 0.0, None, None
 
-                loop = asyncio.get_running_loop()
-                response = await loop.run_in_executor(
-                    None,
-                    lambda: requests.get(
+                    response = await client.get(
                         url,
                         timeout=timeout,
+                        follow_redirects=True,
                         headers={
                             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
                         },
-                    ),
-                )
-                response.raise_for_status()
-                image_data = response.content
+                    )
+                    response.raise_for_status()
+                    image_data = response.content
 
-                image: Optional[Image.Image] = None
+                    image: Optional[Image.Image] = None
 
-                # Check format + size
-                try:
-                    image = Image.open(BytesIO(image_data))
-                    if image.format == "GIF":
-                        logger.debug(f"Skipping GIF image (format detected): {url}")
-                        return url, False, 0.0, None, None
+                    # Check format + size
+                    try:
+                        image = Image.open(BytesIO(image_data))
+                        if image.format == "GIF":
+                            logger.debug(f"Skipping GIF image (format detected): {url}")
+                            return url, False, 0.0, None, None
 
-                    width, height = image.size
-                    if width < min_width or height < min_height:
-                        logger.debug(
-                            f"Skipping small image {url} ({width}x{height}, min: {min_width}x{min_height})"
-                        )
-                        return url, False, 0.0, None, None
+                        width, height = image.size
+                        if width < min_width or height < min_height:
+                            logger.debug(
+                                f"Skipping small image {url} ({width}x{height}, min: {min_width}x{min_height})"
+                            )
+                            return url, False, 0.0, None, None
+
+                    except Exception as e:
+                        logger.debug(f"Failed to check image format/size for {url}: {e}")
+
+                    # Detect food (prefer passing PIL if available to avoid double decode)
+                    detect_start = time.time()
+                    input_data = image if image is not None else image_data
+                    is_food, score = await self.detect_food_in_image(input_data)
+                    detect_time = time.time() - detect_start
+
+                    # Hash for dedup
+                    hash_start = time.time()
+                    img_hash, dimensions = self._calculate_image_hash_and_size(input_data)
+                    hash_time = time.time() - hash_start
+
+                    # Re-check size if needed
+                    if dimensions:
+                        w, h = dimensions
+                        if w < min_width or h < min_height:
+                            logger.debug(f"Skipping small image {url} ({w}x{h})")
+                            return url, False, 0.0, None, None
+
+                    image_time = time.time() - image_start_time
+                    logger.debug(
+                        f"Image processed: {url[:60]}... | "
+                        f"is_food={is_food}, score={score:.3f} | "
+                        f"time={image_time:.3f}s (detect={detect_time:.3f}s, hash={hash_time:.3f}s)"
+                    )
+
+                    return url, is_food, score, img_hash, dimensions
 
                 except Exception as e:
-                    logger.debug(f"Failed to check image format/size for {url}: {e}")
+                    logger.debug(f"Failed to analyze image {url}: {e}")
+                    return url, False, 0.0, None, None
 
-                # Detect food (prefer passing PIL if available to avoid double decode)
-                detect_start = time.time()
-                input_data = image if image is not None else image_data
-                is_food, score = await self.detect_food_in_image(input_data)
-                detect_time = time.time() - detect_start
-
-                # Hash for dedup
-                hash_start = time.time()
-                img_hash, dimensions = self._calculate_image_hash_and_size(input_data)
-                hash_time = time.time() - hash_start
-
-                # Re-check size if needed
-                if dimensions:
-                    w, h = dimensions
-                    if w < min_width or h < min_height:
-                        logger.debug(f"Skipping small image {url} ({w}x{h})")
-                        return url, False, 0.0, None, None
-
-                image_time = time.time() - image_start_time
-                logger.debug(
-                    f"Image processed: {url[:60]}... | "
-                    f"is_food={is_food}, score={score:.3f} | "
-                    f"time={image_time:.3f}s (detect={detect_time:.3f}s, hash={hash_time:.3f}s)"
-                )
-
-                return url, is_food, score, img_hash, dimensions
-
-            except Exception as e:
-                logger.debug(f"Failed to analyze image {url}: {e}")
-                return url, False, 0.0, None, None
-
-        tasks = [analyze_image(url) for url in image_urls[:10]]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+            tasks = [analyze_image(url) for url in image_urls[:10]]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
         food_images: List[Tuple[str, float, Optional[str], Optional[Tuple[int, int]]]] = []
         for result in results:
