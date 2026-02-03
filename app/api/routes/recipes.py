@@ -229,7 +229,9 @@ async def extract_from_image(
 
         # ✅ Speed-up: resize/compress BEFORE Gemini
         t0 = time.perf_counter()
-        optimized_bytes = _maybe_resize_for_vision(validated_bytes)
+        # Offload CPU-bound image processing to executor to avoid blocking the event loop
+        loop = asyncio.get_running_loop()
+        optimized_bytes = await loop.run_in_executor(None, _maybe_resize_for_vision, validated_bytes)
         t_resize_ms = (time.perf_counter() - t0) * 1000.0
 
         if len(optimized_bytes) != len(validated_bytes):
