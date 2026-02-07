@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from slowapi.errors import RateLimitExceeded
 
-from app.api.routes import chat, health, recipes
+from app.api.routes import chat, health, recipes, subscriptions, webhooks
 from app.config import settings
 from app.core.request_id import get_request_id
 from app.middleware.logging import RequestLoggingMiddleware
@@ -184,6 +184,8 @@ setup_cors(app)
 app.include_router(health.router)
 app.include_router(recipes.router)
 app.include_router(chat.router)
+app.include_router(subscriptions.router)
+app.include_router(webhooks.router)
 
 
 @app.get("/")
