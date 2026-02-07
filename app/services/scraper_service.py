@@ -26,6 +26,8 @@ except ImportError:
 from app.config import settings
 from app.models.recipe import Recipe
 from app.utils.exceptions import ScrapingError
+from app.utils.gemini_helpers import get_clean_recipe_schema
+from app.utils.recipe_normalization import normalize_recipe_data
 from app.services.food_detector import get_food_detector
 
 logger = logging.getLogger(__name__)
@@ -38,9 +40,15 @@ _adapter = requests.adapters.HTTPAdapter(max_retries=0, pool_connections=20, poo
 _brightdata_session.mount("https://", _adapter)
 _brightdata_session.mount("http://", _adapter)
 
+# Shared session for direct fetch (fast path) to enable connection pooling
+_direct_fetch_session = requests.Session()
+_direct_adapter = requests.adapters.HTTPAdapter(max_retries=0, pool_connections=10, pool_maxsize=10)
+_direct_fetch_session.mount("https://", _direct_adapter)
+_direct_fetch_session.mount("http://", _direct_adapter)
+
 SOCIAL_DOMAINS = ("instagram.com", "tiktok.com")
-GEMINI_MODEL = "gemini-2.5-flash-lite"
 BRIGHTDATA_API_URL = "https://api.brightdata.com/request"
+GEMINI_CALL_TIMEOUT_S = 90.0  # Hard timeout for individual Gemini generate_content calls
 
 # Some sites respond with Brotli (Content-Encoding: br) if you advertise it via Accept-Encoding.
 # On minimal Cloud Run images, Brotli decoding is often unavailable. If that happens, the HTTP client
@@ -468,7 +476,7 @@ class ScraperService:
         }
 
         def _get(hdrs: Dict[str, str]) -> str | None:
-            r = requests.get(url, headers=hdrs, timeout=(2, timeout_seconds), allow_redirects=True)
+            r = _direct_fetch_session.get(url, headers=hdrs, timeout=(2, timeout_seconds), allow_redirects=True)
             if not (200 <= r.status_code < 300):
                 return None
             text = r.text or ""
@@ -518,33 +526,6 @@ class ScraperService:
             logger.debug(f"Direct fetch failed ({', '.join(errors)})")
         
         return None
-    
-    def _clean_schema_for_gemini(self, schema: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Remove fields that Gemini API doesn't accept in response_schema.
-        Specifically removes 'additionalProperties' and 'additional_properties'.
-        """
-        if not isinstance(schema, dict):
-            return schema
-        
-        cleaned = {}
-        for key, value in schema.items():
-            # Skip additionalProperties fields
-            if key in ("additionalProperties", "additional_properties"):
-                continue
-            
-            # Recursively clean nested dictionaries
-            if isinstance(value, dict):
-                cleaned[key] = self._clean_schema_for_gemini(value)
-            elif isinstance(value, list):
-                cleaned[key] = [
-                    self._clean_schema_for_gemini(item) if isinstance(item, dict) else item
-                    for item in value
-                ]
-            else:
-                cleaned[key] = value
-        
-        return cleaned
     
     def _log_flow_summary(self, flow_info: Dict[str, Any]) -> None:
         """Log comprehensive flow summary in a single log entry for Cloud Logging."""
@@ -767,6 +748,9 @@ class ScraperService:
             raise ScrapingError("Failed to parse HTML with BeautifulSoup")
         
 
+        # Default language for extraction (used by both JSON-LD fast path and Gemini path)
+        language = "he"
+
         # Try JSON-LD Recipe first (fast path). If incomplete, fall back to full extraction + Gemini.
         jsonld_start = time.time()
         try:
@@ -786,7 +770,8 @@ class ScraperService:
                 # Extract and filter images (no Gemini call)
                 candidate_images = self._extract_recipe_images(html_content, url, soup=soup)
                 if candidate_images:
-                    filtered_images = await loop.run_in_executor(None, self._filter_images_with_food_detection, candidate_images)
+                    food_detector = get_food_detector()
+                    filtered_images = await food_detector.filter_food_images(candidate_images)
                 else:
                     filtered_images = []
                 if filtered_images:
@@ -797,7 +782,7 @@ class ScraperService:
                 if not jsonld_data.get("title") and page_title:
                     jsonld_data["title"] = page_title.split("|")[0].strip() or None
 
-                jsonld_data = self._normalize_recipe_data(jsonld_data)
+                jsonld_data = normalize_recipe_data(jsonld_data)
 
                 if self._is_recipe_data_sufficient(jsonld_data):
                     jsonld_data.pop("ingredients", None)
@@ -809,7 +794,7 @@ class ScraperService:
                 else:
                     logger.warning("JSON-LD Recipe seems incomplete after normalization; falling back to Gemini extraction")
             except Exception as e:
-                logger.warning(f"JSON-LD mapping failed, falling back to Gemini extraction: {e}")
+                logger.warning(f"JSON-LD mapping failed, falling back to Gemini extraction: {e}", exc_info=True)
 
 
         # Define parallel extraction tasks
@@ -857,8 +842,7 @@ class ScraperService:
         
         async def prepare_gemini_config() -> Tuple[Dict[str, Any], Any]:
             """Prepare Gemini schema and config (doesn't depend on content)."""
-            schema = self._get_recipe_response_schema()
-            cleaned = self._clean_schema_for_gemini(schema)
+            cleaned = get_clean_recipe_schema()
             config = types.GenerateContentConfig(
                 temperature=0.0,
                 top_p=0.0,
@@ -927,9 +911,10 @@ class ScraperService:
                     main_markdown = f"{main_markdown}\n\n--- Recipe Structured Data ---\n{structured_content}"
         
         # Limit content size
-        if len(main_markdown) > 50000:
-            logger.warning(f"Content too long ({len(main_markdown)} chars), truncating to 50000")
-            main_markdown = main_markdown[:50000] + "\n\n[... content truncated ...]"
+        max_chars = settings.gemini_max_content_chars
+        if len(main_markdown) > max_chars:
+            logger.warning(f"Content too long ({len(main_markdown)} chars), truncating to {max_chars}")
+            main_markdown = main_markdown[:max_chars] + "\n\n[... content truncated ...]"
         
         # Prepend title to content
         if page_title:
@@ -949,12 +934,11 @@ class ScraperService:
             logger.error(f"Content validation failed")
             raise ScrapingError("No content extracted from the page - cannot extract recipe")
         
-        # Build prompt
-        language = "he"
+        # Build prompt (language was defined before JSON-LD block above)
         prompt = self._build_markdown_extraction_prompt(url, main_markdown, language)
         
         logger.info(f"Sending to Gemini (_extract_with_brightdata):")
-        logger.info(f"  Model: {GEMINI_MODEL}")
+        logger.info(f"  Model: {settings.gemini_model}")
         logger.debug(f"  Prompt: {prompt}")
         logger.info(f"  Config: temperature={gemini_config.temperature}, top_p={gemini_config.top_p}")
         
@@ -966,7 +950,7 @@ class ScraperService:
             return await loop.run_in_executor(
                 None,
                 lambda: self.client.models.generate_content(
-                    model=GEMINI_MODEL,
+                    model=settings.gemini_model,
                     contents=prompt,
                     config=gemini_config,
                 ),
@@ -983,13 +967,16 @@ class ScraperService:
                 logger.warning(f"Food detection failed, using all candidate images: {e}")
                 return candidate_images
         
-        # Run both tasks in parallel
+        # Run both tasks in parallel (with hard timeout on Gemini call)
         try:
             gemini_response, filtered_images = await asyncio.gather(
-                call_gemini(),
+                asyncio.wait_for(call_gemini(), timeout=GEMINI_CALL_TIMEOUT_S),
                 filter_food_images(),
                 return_exceptions=False
             )
+        except asyncio.TimeoutError:
+            logger.error(f"Gemini API call timed out after {GEMINI_CALL_TIMEOUT_S}s")
+            raise ScrapingError(f"Gemini API call timed out after {GEMINI_CALL_TIMEOUT_S}s")
         except Exception as e:
             logger.error(f"Gemini API extraction failed: {e}")
             raise ScrapingError(f"Failed to extract recipe with Gemini: {e}") from e
@@ -1039,7 +1026,7 @@ class ScraperService:
         logger.info("="*60)
         
         # Normalize data to match Recipe model
-        recipe_data = self._normalize_recipe_data(recipe_data)
+        recipe_data = normalize_recipe_data(recipe_data)
         recipe_data["source"] = url
         
         # Fallback: Use page title if Gemini didn't extract a title
@@ -1126,9 +1113,8 @@ class ScraperService:
 
         prompt = self._build_text_prompt(url, text)
 
-        # Use the same schema enforcement as _extract_with_brightdata
-        response_schema = self._get_recipe_response_schema()
-        cleaned_schema = self._clean_schema_for_gemini(response_schema)
+        # Use the same cached schema as _extract_with_brightdata
+        cleaned_schema = get_clean_recipe_schema()
         
         config = types.GenerateContentConfig(
             temperature=0.0,
@@ -1141,7 +1127,7 @@ class ScraperService:
             f"Sending to Gemini (_extract_social)",
             extra={
                 "url": url,
-                "model": GEMINI_MODEL,
+                "model": settings.gemini_model,
             },
         )
         logger.debug(f"  Prompt: {prompt}")
@@ -1155,11 +1141,22 @@ class ScraperService:
         )
 
         gemini_start = time.time()
-        response = self.client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config=config,
-        )
+        loop = asyncio.get_running_loop()
+        try:
+            response = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: self.client.models.generate_content(
+                        model=settings.gemini_model,
+                        contents=prompt,
+                        config=config,
+                    ),
+                ),
+                timeout=GEMINI_CALL_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Gemini social extraction timed out after {GEMINI_CALL_TIMEOUT_S}s for {url}")
+            raise ScrapingError(f"Gemini API call timed out after {GEMINI_CALL_TIMEOUT_S}s")
         gemini_duration = time.time() - gemini_start
         flow_info["gemini_used"] = True
         flow_info["timings"]["gemini_api"] = gemini_duration
@@ -1168,7 +1165,7 @@ class ScraperService:
             "Gemini social extraction completed",
             extra={
                 "url": url,
-                "model": GEMINI_MODEL,
+                "model": settings.gemini_model,
                 "duration_ms": duration_ms,
             },
         )
@@ -1269,7 +1266,7 @@ class ScraperService:
         )
 
         # Normalize data to match Recipe model
-        data = self._normalize_recipe_data(data)
+        data = normalize_recipe_data(data)
         
         data["source"] = url
         
@@ -1286,432 +1283,22 @@ class ScraperService:
         # Remove ingredients field before creating Recipe (it's computed, not stored)
         data.pop("ingredients", None)
         
-        # Log the final normalized data being sent to Recipe
-        logger.info(f"=== FINAL NORMALIZED DATA FOR RECIPE ===")
-        logger.info(f"Final data: {json.dumps(data, indent=2, ensure_ascii=False, default=str)}")
+        # Log summary at INFO; full data only at DEBUG to reduce log volume/cost
+        logger.info(f"Normalized recipe data: title='{data.get('title')}', "
+                     f"{len(data.get('ingredientGroups', []))} ingredient groups, "
+                     f"{len(data.get('instructionGroups', []))} instruction groups, "
+                     f"{len(data.get('images', []))} images")
+        logger.debug(f"Full normalized data: {json.dumps(data, indent=2, ensure_ascii=False, default=str)}")
         
         recipe = Recipe(**data)
         
-        # Log recipe metadata (avoid expensive serialization)
-        logger.info(f"=== RECIPE RETURNED TO FRONTEND ===")
-        logger.info(f"Recipe summary: title='{recipe.title}', {len(recipe.ingredient_groups)} ingredient groups, {len(recipe.instruction_groups)} instruction groups, {len(recipe.images)} images")
+        logger.info(f"Recipe returned: title='{recipe.title}', "
+                     f"{len(recipe.ingredient_groups)} ingredient groups, "
+                     f"{len(recipe.instruction_groups)} instruction groups, "
+                     f"{len(recipe.images)} images")
         
         return recipe
     
-    def _normalize_recipe_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Normalize recipe data from Gemini to match Recipe model."""
-        # Handle wrapped responses (e.g. {"Recipe": {...}} or {"recipe": {...}})
-        if len(data) == 1 and isinstance(list(data.values())[0], dict):
-             key = list(data.keys())[0].lower()
-             inner = list(data.values())[0]
-             # If strictly one key, and inner has recipe-like fields, unwrap it
-             if "recipe" in key or "instructiongroups" in inner or "ingredients" in inner:
-                 logger.info(f"Unwrapping nested JSON response from key: {list(data.keys())[0]}")
-                 data = inner
-
-        normalized = dict(data)
-
-        
-        # servings: normalize to Servings object structure
-        if "servings" in normalized:
-            servings = normalized["servings"]
-            if isinstance(servings, dict):
-                # Already a structured object, ensure it has the right fields
-                if "amount" not in servings and "unit" not in servings and "raw" not in servings:
-                    # Might be old format, try to convert
-                    if isinstance(servings.get("value"), (int, float, str)):
-                        normalized["servings"] = {
-                            "amount": str(servings.get("value")),
-                            "unit": servings.get("unit"),
-                            "raw": servings.get("raw") or str(servings.get("value", ""))
-                        }
-            elif isinstance(servings, (int, float)):
-                # Convert number to Servings object
-                normalized["servings"] = {
-                    "amount": str(int(servings)),
-                    "unit": None,
-                    "raw": str(int(servings))
-                }
-            elif isinstance(servings, str):
-                # String format - try to parse or use as raw
-                normalized["servings"] = {
-                    "amount": None,
-                    "unit": None,
-                    "raw": servings
-                }
-            elif servings is None:
-                normalized["servings"] = None
-            else:
-                # Unknown format, set to None
-                normalized["servings"] = None
-        
-        # Convert flat ingredients list to ingredientGroups if ingredientGroups is missing/empty
-        if "ingredients" in normalized and isinstance(normalized["ingredients"], list) and len(normalized["ingredients"]) > 0:
-            # Check if ingredientGroups is missing or empty
-            if "ingredientGroups" not in normalized or not normalized["ingredientGroups"]:
-                logger.info("Converting flat 'ingredients' list to 'ingredientGroups'")
-                # Create a single group from the flat ingredients list
-                converted_ingredients = []
-                for ing in normalized["ingredients"]:
-                    if isinstance(ing, str):
-                        converted_ingredients.append({"name": ing, "amount": None, "preparation": None, "raw": ing})
-                    elif isinstance(ing, dict):
-                        # Extract amount from raw if possible
-                        raw = ing.get("raw", "")
-                        name = ing.get("name", "")
-                        amount = ing.get("amount")
-                        if amount is None:
-                            qty = ing.get("quantity")
-                            unit = ing.get("unit")
-                            if qty or unit:
-                                parts = []
-                                if qty:
-                                    parts.append(str(qty))
-                                if unit:
-                                    parts.append(str(unit))
-                                amount = " ".join(parts) if parts else None
-                        converted_ingredients.append({
-                            "name": name or raw or str(ing),
-                            "amount": amount,
-                            "preparation": ing.get("preparation"),
-                            "raw": raw or name or str(ing)
-                        })
-                    else:
-                        converted_ingredients.append({"name": str(ing), "amount": None, "preparation": None, "raw": str(ing)})
-                
-                normalized["ingredientGroups"] = [{"name": None, "ingredients": converted_ingredients}]
-                logger.info(f"Created ingredientGroups with {len(converted_ingredients)} ingredients")
-        
-        # ingredientGroups: normalize to new structured format, preserve if already structured
-        if "ingredientGroups" in normalized and isinstance(normalized["ingredientGroups"], list):
-            for group in normalized["ingredientGroups"]:
-                if isinstance(group, dict) and "ingredients" in group:
-                    if isinstance(group["ingredients"], list):
-                        normalized_ingredients = []
-                        for ing in group["ingredients"]:
-                            if isinstance(ing, str):
-                                # String format: convert to structured with raw
-                                normalized_ingredients.append({"name": ing, "raw": ing})
-                            elif isinstance(ing, dict):
-                                # Already an object - preserve structured format if it has 'name'
-                                if "name" in ing:
-                                    # New structured format - ensure it has required fields
-                                    # Handle amount: use existing amount, or combine quantity+unit
-                                    amount = ing.get("amount")
-                                    if amount is None:
-                                        qty = ing.get("quantity")
-                                        unit = ing.get("unit")
-                                        if qty or unit:
-                                            parts = []
-                                            if qty:
-                                                parts.append(str(qty))
-                                            if unit:
-                                                parts.append(str(unit))
-                                            amount = " ".join(parts) if parts else None
-                                    
-                                    normalized_ing = {
-                                        "name": ing.get("name", ""),
-                                        "amount": amount,
-                                        "preparation": ing.get("preparation"),
-                                        "raw": ing.get("raw")
-                                    }
-                                    normalized_ingredients.append(normalized_ing)
-                                elif "raw" in ing:
-                                    # Old format with just raw - keep it for backward compatibility
-                                    normalized_ingredients.append(ing)
-                                else:
-                                    # Unknown format - convert to raw
-                                    normalized_ingredients.append({"raw": str(ing)})
-                            else:
-                                normalized_ingredients.append({"raw": str(ing)})
-                        group["ingredients"] = normalized_ingredients
-        elif "ingredientGroups" not in normalized:
-            normalized["ingredientGroups"] = []
-
-        # Post-process ingredientGroups to fix common unit/name swaps (e.g., name="כפות", amount="2")
-        # by re-parsing from the raw line when possible.
-        normalized["ingredientGroups"] = self._repair_ingredient_units(normalized["ingredientGroups"])
-        
-        # nutrition: normalize and filter to only allowed fields
-        if "nutrition" in normalized and isinstance(normalized["nutrition"], dict):
-            nutrition = normalized["nutrition"]
-            # Map variant field names to correct schema fields and filter out extra fields
-            normalized_nutrition = {}
-            
-            # calories
-            calories = nutrition.get("calories")
-            if isinstance(calories, str):
-                try:
-                    cleaned = ''.join(c for c in calories if c.isdigit() or c == '.')
-                    normalized_nutrition["calories"] = float(cleaned) if cleaned else None
-                except (ValueError, TypeError):
-                    normalized_nutrition["calories"] = None
-            elif isinstance(calories, (int, float)):
-                normalized_nutrition["calories"] = float(calories) if calories >= 0 else None
-            else:
-                normalized_nutrition["calories"] = None
-            
-            # protein_g (map from protein or protein_g)
-            protein = nutrition.get("protein_g") or nutrition.get("protein")
-            if isinstance(protein, str):
-                try:
-                    cleaned = ''.join(c for c in protein if c.isdigit() or c == '.')
-                    normalized_nutrition["protein_g"] = float(cleaned) if cleaned else None
-                except (ValueError, TypeError):
-                    normalized_nutrition["protein_g"] = None
-            elif isinstance(protein, (int, float)):
-                normalized_nutrition["protein_g"] = float(protein) if protein >= 0 else None
-            else:
-                normalized_nutrition["protein_g"] = None
-            
-            # fat_g (map from fat or fat_g)
-            fat = nutrition.get("fat_g") or nutrition.get("fat")
-            if isinstance(fat, str):
-                try:
-                    cleaned = ''.join(c for c in fat if c.isdigit() or c == '.')
-                    normalized_nutrition["fat_g"] = float(cleaned) if cleaned else None
-                except (ValueError, TypeError):
-                    normalized_nutrition["fat_g"] = None
-            elif isinstance(fat, (int, float)):
-                normalized_nutrition["fat_g"] = float(fat) if fat >= 0 else None
-            else:
-                normalized_nutrition["fat_g"] = None
-            
-            # carbs_g (map from carbs, carbohydrates, or carbs_g)
-            carbs = nutrition.get("carbs_g") or nutrition.get("carbs") or nutrition.get("carbohydrates")
-            if isinstance(carbs, str):
-                try:
-                    cleaned = ''.join(c for c in carbs if c.isdigit() or c == '.')
-                    normalized_nutrition["carbs_g"] = float(cleaned) if cleaned else None
-                except (ValueError, TypeError):
-                    normalized_nutrition["carbs_g"] = None
-            elif isinstance(carbs, (int, float)):
-                normalized_nutrition["carbs_g"] = float(carbs) if carbs >= 0 else None
-            else:
-                normalized_nutrition["carbs_g"] = None
-            
-            # per
-            normalized_nutrition["per"] = nutrition.get("per") or "מנה"
-            
-            # Only keep allowed fields (remove extra fields like saturated_fat, sugar, fiber, sodium, etc.)
-            normalized["nutrition"] = normalized_nutrition
-        elif "nutrition" not in normalized:
-            normalized["nutrition"] = None
-        
-        # Remove ingredients field (it's computed, not stored)
-        normalized.pop("ingredients", None)
-        
-        # Remove extra fields not in Recipe model
-        normalized.pop("description", None)
-        normalized.pop("source_url", None)
-        if "source_url" in normalized:
-            normalized["source"] = normalized.pop("source_url")
-        
-        # Ensure required fields exist
-        if "ingredientGroups" not in normalized:
-            normalized["ingredientGroups"] = []
-        if "instructionGroups" not in normalized:
-            normalized["instructionGroups"] = []
-        elif isinstance(normalized["instructionGroups"], list):
-            # Normalize instructionGroups: handle both formats
-            # Format 1: [{"name": "...", "instructions": [...]}]
-            # Format 2: [{"instruction": "...", "step": 1}, ...] (wrong format from Gemini)
-            normalized_instruction_groups = []
-            for group in normalized["instructionGroups"]:
-                if isinstance(group, dict):
-                    # Check if it's the wrong format (has "instruction" and "step")
-                    if "instruction" in group and "step" in group:
-                        # Convert wrong format to correct format
-                        instruction_text = group.get("instruction")
-                        if instruction_text:
-                            # Add to a single group with all instructions
-                            if not normalized_instruction_groups:
-                                normalized_instruction_groups.append({"name": "הוראות הכנה", "instructions": []})
-                            normalized_instruction_groups[0]["instructions"].append(str(instruction_text))
-                    elif "instructions" in group:
-                        # Correct format - ensure it's a list
-                        instructions = group.get("instructions", [])
-                        if not isinstance(instructions, list):
-                            instructions = [instructions] if instructions else []
-                        # Remove extra fields like "step", "instruction"
-                        clean_group = {
-                            "name": group.get("name"),
-                            "instructions": [str(inst) for inst in instructions if inst]
-                        }
-                        normalized_instruction_groups.append(clean_group)
-                    elif "instruction" in group:
-                        # Single instruction without step
-                        instruction_text = group.get("instruction")
-                        if instruction_text:
-                            if not normalized_instruction_groups:
-                                normalized_instruction_groups.append({"name": "הוראות הכנה", "instructions": []})
-                            normalized_instruction_groups[0]["instructions"].append(str(instruction_text))
-            
-            # If we have normalized groups, use them; otherwise keep original structure
-            if normalized_instruction_groups:
-                normalized["instructionGroups"] = normalized_instruction_groups
-            else:
-                # Ensure instructionGroups is not empty - if empty, create default
-                if not normalized["instructionGroups"]:
-                    normalized["instructionGroups"] = [{"name": "הוראות הכנה", "instructions": []}]
-                # Ensure each group has instructions list
-                for group in normalized["instructionGroups"]:
-                    if isinstance(group, dict):
-                        if "instructions" not in group or not isinstance(group["instructions"], list):
-                            group["instructions"] = []
-                        # Ensure name exists
-                        if "name" not in group or not group["name"]:
-                            group["name"] = "הוראות הכנה"
-                        # Remove extra fields
-                        allowed_keys = {"name", "instructions"}
-                        group_keys = list(group.keys())
-                        for key in group_keys:
-                            if key not in allowed_keys:
-                                group.pop(key)
-
-
-        # Split multi-line ingredient raw strings into separate ingredients (some JSON-LD exporters do this)
-        try:
-            for group in normalized.get("ingredientGroups", []) or []:
-                if not isinstance(group, dict):
-                    continue
-                ings = group.get("ingredients") or []
-                new_ings = []
-                for ing in ings:
-                    if not isinstance(ing, dict):
-                        continue
-                    raw = ing.get("raw")
-                    if raw and isinstance(raw, str) and "\n" in raw:
-                        for line in [x.strip() for x in raw.split("\n") if x and x.strip()]:
-                            new_ings.append({
-                                "amount": None,
-                                "name": line,
-                                "preparation": None,
-                                "raw": line,
-                            })
-                    else:
-                        new_ings.append(ing)
-                group["ingredients"] = new_ings
-
-            # Also split plain ingredients list entries if present
-            if isinstance(normalized.get("ingredients"), list):
-                flat = []
-                for item in normalized.get("ingredients"):
-                    if isinstance(item, str) and "\n" in item:
-                        flat.extend([x.strip() for x in item.split("\n") if x and x.strip()])
-                    else:
-                        flat.append(item)
-                normalized["ingredients"] = flat
-        except Exception:
-            pass
-
-        # Remove URL-only instruction entries (some JSON-LD includes image URLs as a final instruction)
-        try:
-            for group in normalized.get("instructionGroups", []) or []:
-                if not isinstance(group, dict):
-                    continue
-                inst = group.get("instructions") or []
-                if not isinstance(inst, list):
-                    continue
-                cleaned = []
-                for s in inst:
-                    if not isinstance(s, str):
-                        continue
-                    ss = s.strip()
-                    if not ss:
-                        continue
-                    if re.match(r"^(https?:)?//\S+$", ss) or re.match(r"^https?://\S+$", ss, re.I):
-                        # drop URLs (including image URLs)
-                        continue
-                    cleaned.append(ss)
-                group["instructions"] = cleaned
-        except Exception:
-            pass
-
-        if "notes" not in normalized:
-            normalized["notes"] = []
-        if "images" not in normalized:
-            normalized["images"] = []
-        
-        # Filter images to only include valid image URLs
-        if normalized.get("images"):
-            valid_images = []
-            image_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif')
-            for img_url in normalized["images"]:
-                if isinstance(img_url, str) and img_url.strip():
-                    url_lower = img_url.lower()
-                    # Check if URL ends with image extension (ignore query params)
-                    base_url = url_lower.split('?')[0]
-                    if any(base_url.endswith(ext) for ext in image_extensions):
-                        valid_images.append(img_url.strip())
-                    # Also accept URLs with image extensions anywhere in path (e.g., /image.jpg?v=1)
-                    elif any(ext in url_lower for ext in image_extensions):
-                        valid_images.append(img_url.strip())
-            normalized["images"] = valid_images
-            if len(valid_images) != len(normalized.get("images", [])):
-                logger.info(f"Filtered images: kept {len(valid_images)} valid image URLs")
-        
-        return normalized
-
-    def _repair_ingredient_units(self, ingredient_groups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Repair common Hebrew parsing mistakes in ingredients using the raw line.
-
-        Example failure mode:
-          raw: "2 כפות סוכר" -> amount="2", name="כפות"
-        We rewrite to:
-          amount="2 כפות", name="סוכר"
-
-        This is intentionally conservative: we only act when we have a raw string and the current 'name'
-        looks like a *unit token*.
-        """
-        unit_tokens = {
-            "כפות", "כף", "כפית", "כפיות", "כוס", "כוסות", "מיכל", "קמצוץ",
-        }
-
-        # Matches: <qty> <unit> <ingredient...>
-        qty_unit_name = re.compile(r"^\s*(\d+(?:[\.,]\d+)?)\s+([^\s]+)\s+(.+?)\s*$")
-        # Matches: <unit> <ingredient...> (no explicit qty)
-        unit_name = re.compile(r"^\s*([^\s]+)\s+(.+?)\s*$")
-
-        for group in ingredient_groups or []:
-            ingredients = group.get("ingredients") or []
-            if not isinstance(ingredients, list):
-                continue
-
-            for ing in ingredients:
-                if not isinstance(ing, dict):
-                    continue
-
-                raw = (ing.get("raw") or "").strip()
-                if not raw:
-                    continue
-
-                name = (ing.get("name") or "").strip()
-                amount = ing.get("amount")
-
-                # Only attempt repair when name is a known unit token (or a short token like "כפות")
-                if name not in unit_tokens:
-                    continue
-
-                m = qty_unit_name.match(raw)
-                if m:
-                    qty, unit, rest = m.group(1), m.group(2), m.group(3)
-                    if unit in unit_tokens and rest:
-                        ing["amount"] = f"{qty} {unit}".strip()
-                        ing["name"] = rest.strip()
-                        continue
-
-                # Handle cases like: "קמצוץ מלח"
-                m = unit_name.match(raw)
-                if m:
-                    unit, rest = m.group(1), m.group(2)
-                    if unit in unit_tokens and rest and (amount is None or str(amount).strip() in {"", "1"}):
-                        ing["amount"] = unit
-                        ing["name"] = rest.strip()
-
-        return ingredient_groups
-
-
     # -------------------------
     # JSON-LD (Recipe) extraction (fast path)
     # -------------------------
@@ -2410,84 +1997,6 @@ CONTENT:
             logger.warning(f"Failed to extract recipe images: {e}")
             return []
 
-    def _get_recipe_response_schema(self) -> Dict[str, Any]:
-        """Get the recipe JSON schema from Pydantic model for Gemini responseSchema."""
-        # Get the JSON schema from the Recipe Pydantic model
-        schema = Recipe.model_json_schema()
-        
-        # Store $defs for resolving references
-        defs = schema.get("$defs", {})
-        
-        def resolve_ref(ref: str) -> Dict[str, Any]:
-            """Resolve a $ref to its definition."""
-            # ref looks like "#/$defs/IngredientGroup"
-            if ref.startswith("#/$defs/"):
-                def_name = ref[len("#/$defs/"):]
-                if def_name in defs:
-                    return defs[def_name]
-            return {}
-        
-        def clean_schema(s: Dict[str, Any]) -> Dict[str, Any]:
-            """Clean Pydantic JSON schema for Gemini responseSchema format, resolving $refs."""
-            # If this is a $ref, resolve it first
-            if "$ref" in s:
-                resolved = resolve_ref(s["$ref"])
-                return clean_schema(resolved)
-            
-            result: Dict[str, Any] = {}
-            
-            # Copy type
-            if "type" in s:
-                result["type"] = s["type"]
-            
-            # Handle properties
-            if "properties" in s:
-                result["properties"] = {}
-                for key, value in s["properties"].items():
-                    if isinstance(value, dict):
-                        cleaned = clean_schema(value)
-                        # Remove Pydantic-specific fields
-                        cleaned.pop("title", None)
-                        cleaned.pop("description", None)
-                        cleaned.pop("examples", None)
-                        result["properties"][key] = cleaned
-                    else:
-                        result["properties"][key] = value
-            
-            # Handle items (for arrays)
-            if "items" in s:
-                if isinstance(s["items"], dict):
-                    result["items"] = clean_schema(s["items"])
-                else:
-                    result["items"] = s["items"]
-            
-            # Handle anyOf/oneOf for Optional fields
-            if "anyOf" in s:
-                # Find the non-null type and use it
-                for option in s["anyOf"]:
-                    if isinstance(option, dict) and option.get("type") != "null":
-                        cleaned = clean_schema(option)
-                        result.update(cleaned)
-                        break
-                # If we didn't find a non-null type, just use the first option
-                if "type" not in result and s["anyOf"]:
-                    if isinstance(s["anyOf"][0], dict):
-                        result.update(clean_schema(s["anyOf"][0]))
-            
-            # Copy required fields
-            if "required" in s:
-                result["required"] = s["required"]
-            
-            return result
-        
-        cleaned = clean_schema(schema)
-        # Remove top-level Pydantic metadata
-        cleaned.pop("title", None)
-        cleaned.pop("description", None)
-        cleaned.pop("$defs", None)
-        cleaned.pop("example", None)
-        
-        return cleaned
 
 
 

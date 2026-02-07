@@ -59,6 +59,11 @@ USER appuser
 RUN playwright install chromium
 RUN playwright install-deps chromium || true
 
+# Pre-download the food detection ONNX model so it's baked into the image
+# (avoids runtime download latency and external dependency risk on first request)
+RUN mkdir -p /app/models && \
+    python3 -c "import httpx; r = httpx.get('https://github.com/onnx/models/raw/main/validated/vision/classification/mobilenet/model/mobilenetv2-7.onnx', timeout=120, follow_redirects=True); r.raise_for_status(); open('/app/models/mobilenetv2-7.onnx','wb').write(r.content); print(f'Downloaded {len(r.content)/1024/1024:.1f}MB')"
+
 # Expose port for Cloud Run
 EXPOSE 8080
 
@@ -70,4 +75,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # --access-logfile -: Disable access logs (we have our own request logging middleware)
 # --error-logfile -: Send errors to stderr (but we set gunicorn logger to WARNING to reduce noise)
 # --log-level warning: Only log warnings and above from gunicorn itself
-CMD ["gunicorn", "app.main:app", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8080", "--timeout", "300", "--graceful-timeout", "60", "--access-logfile", "-", "--error-logfile", "-", "--log-level", "warning"]
+CMD ["gunicorn", "app.main:app", "--workers", "2", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8080", "--timeout", "300", "--graceful-timeout", "60", "--access-logfile", "-", "--error-logfile", "-", "--log-level", "warning"]

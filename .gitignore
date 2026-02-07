@@ -37,6 +37,8 @@ build/
 # ONNX models (downloaded at runtime)
 models/
 
-# Local test artifacts
-tests/
+# Local test artifacts (but track test source files)
+tests/test_images/
+tests/testing/
+.pytest_cache/
 

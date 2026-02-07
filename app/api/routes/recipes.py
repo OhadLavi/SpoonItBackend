@@ -42,6 +42,7 @@ router = APIRouter(prefix="/recipes", tags=["recipes"])
 # Keep this LOWER than Cloud Run timeout, so *your app* returns a response (with CORS),
 # instead of the gateway killing it and returning 504 without headers.
 IMAGE_EXTRACT_TIMEOUT_S = 110.0
+URL_EXTRACT_TIMEOUT_S = 120.0
 
 # Resize/compress before sending to Gemini (big speed win)
 VISION_MAX_DIM = 1400
@@ -143,9 +144,23 @@ async def extract_from_url(
     )
 
     try:
-        validated_url = validate_url(recipe_url)
-        return await recipe_extractor.extract_from_url(validated_url)
+        # Run URL validation (includes DNS lookup) in executor to avoid blocking event loop
+        loop = asyncio.get_running_loop()
+        validated_url = await loop.run_in_executor(None, validate_url, recipe_url)
+        return await asyncio.wait_for(
+            recipe_extractor.extract_from_url(validated_url),
+            timeout=URL_EXTRACT_TIMEOUT_S,
+        )
 
+    except asyncio.TimeoutError as e:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail={
+                "error": "Timeout",
+                "detail": f"Recipe extraction took too long (> {URL_EXTRACT_TIMEOUT_S:.0f}s). "
+                          f"Try again or use a different URL.",
+            },
+        ) from e
     except ValidationError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

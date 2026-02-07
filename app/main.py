@@ -1,13 +1,12 @@
 """FastAPI application entry point."""
 
+import asyncio
 import logging
 import os
-import tempfile
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import FastAPI, HTTPException, Query, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from slowapi.errors import RateLimitExceeded
@@ -18,8 +17,8 @@ from app.services.scraper_service import get_browser_manager
 from app.core.request_id import get_request_id
 from app.middleware.logging import RequestLoggingMiddleware
 from app.middleware.performance import PerformanceMiddleware
-from app.middleware.rate_limit import get_rate_limit_exceeded_handler, limiter, rate_limit_dependency
-from app.middleware.security import SecurityHeadersMiddleware, setup_compression, setup_cors
+from app.middleware.rate_limit import get_rate_limit_exceeded_handler, limiter
+from app.middleware.security import SecurityHeadersMiddleware, setup_cors
 from app.utils.exceptions import (
     AuthenticationError,
     GeminiError,
@@ -38,6 +37,9 @@ logger = logging.getLogger(__name__)
 # Module-level flags to log startup/shutdown only once per process (each worker is a separate process)
 _startup_logged = False
 _shutdown_logged = False
+
+# Shared httpx client for the image proxy endpoint (connection-pooled)
+_proxy_http_client = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
 
 
 @asynccontextmanager
@@ -65,6 +67,7 @@ async def lifespan(app: FastAPI):
             "SpoonIt API shutting down...",
             extra={"process_id": os.getpid()},
         )
+        await _proxy_http_client.aclose()
         await get_browser_manager().shutdown()
         _shutdown_logged = True
 
@@ -179,7 +182,6 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(PerformanceMiddleware, slow_request_threshold=2.0, very_slow_request_threshold=5.0)
 app.add_middleware(RequestLoggingMiddleware)
-# setup_compression(app)
 setup_cors(app)
 
 # Include routers
@@ -208,32 +210,30 @@ async def proxy_image(url: str = Query(..., description="Image URL to proxy")):
     - **url**: Image URL to fetch and proxy
     - Returns the image with appropriate headers
     """
-    import httpx
-    
     try:
-        # Validate URL
-        validated_url = validate_url(url)
+        # Validate URL in executor to avoid blocking DNS lookup
+        loop = asyncio.get_event_loop()
+        validated_url = await loop.run_in_executor(None, validate_url, url)
         
-        # Fetch image
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            }
-            response = await client.get(validated_url, headers=headers)
-            response.raise_for_status()
-            
-            # Determine content type
-            content_type = response.headers.get("content-type", "image/jpeg")
-            
-            # Return image with appropriate headers
-            return Response(
-                content=response.content,
-                media_type=content_type,
-                headers={
-                    "Cache-Control": "public, max-age=3600",
-                    "Access-Control-Allow-Origin": "*",
-                },
-            )
+        # Fetch image using the shared connection-pooled client
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        }
+        response = await _proxy_http_client.get(validated_url, headers=headers)
+        response.raise_for_status()
+        
+        # Determine content type
+        content_type = response.headers.get("content-type", "image/jpeg")
+        
+        # Return image with appropriate headers
+        return Response(
+            content=response.content,
+            media_type=content_type,
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
             
     except Exception as e:
         logger.error(f"Failed to proxy image from {url}: {str(e)}", exc_info=True)

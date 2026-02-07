@@ -1,9 +1,8 @@
 """Request/response logging middleware."""
 
-import json
 import logging
 import time
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -116,11 +115,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             }
         }
 
-        # Keep high‑volume endpoints (like image proxy) out of INFO logs
-        if path == "/proxy_image":
-            logger.debug(f"API Request: {method} {path}", **log_kwargs)
-        else:
-            logger.debug(f"API Request: {method} {path}", **log_kwargs)
+        logger.debug(f"API Request: {method} {path}", **log_kwargs)
 
         # Process request
         try:

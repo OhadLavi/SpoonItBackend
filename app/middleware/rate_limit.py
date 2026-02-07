@@ -52,11 +52,11 @@ def get_api_key_for_rate_limit(request) -> str:
         return api_key or get_remote_address(request)
 
 
-# Initialize limiter
+# Initialize limiter (use settings.rate_limit_storage_uri for shared backends e.g. Redis)
 limiter = Limiter(
     key_func=get_api_key_for_rate_limit,
     default_limits=[f"{settings.rate_limit_per_hour}/hour"],
-    storage_uri="memory://",  # In-memory storage
+    storage_uri=settings.rate_limit_storage_uri,
 )
 
 

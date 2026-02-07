@@ -1,23 +1,24 @@
 # SpoonIt Backend
 
-A FastAPI-based backend server for the SpoonIt recipe application. Provides recipe extraction from URLs and images, recipe generation from ingredients, and AI-powered chat functionality using Google's Gemini API with built-in URL context fetching.
+A FastAPI-based backend server for the SpoonIt recipe application. Provides recipe extraction from URLs and images, recipe generation from ingredients, and AI-powered chat functionality using Google's Gemini API.
 
 ## Features
 
-- 🍳 **Recipe Extraction**: Extract recipes directly from URLs using Gemini's url_context (no web scraping needed)
-- 📸 **Image Extraction**: Extract recipes from uploaded images using Gemini Vision
-- 🤖 **AI Recipe Generation**: Generate recipes from a list of ingredients using Gemini AI
-- 💬 **Chat Interface**: Interactive recipe-focused conversations with AI
-- 📝 **Instruction Groups**: Support for organized instruction groups (e.g., "הכנת הבצק", "הגשה")
-- 📌 **Notes Support**: Extract tips, notes, and recommendations from recipes
-- 🔒 **Security**: Rate limiting, CORS, security headers, and request validation
-- 📊 **Logging**: Comprehensive request logging with request IDs
-- 🐳 **Docker Support**: Ready for containerized deployment (Cloud Run compatible)
+- **Recipe Extraction**: Extract recipes from URLs using BrightData for HTML fetching + Gemini for structured extraction, with a JSON-LD fast path for supported sites
+- **Image Extraction**: Extract recipes from uploaded images using OCR (Tesseract) + Gemini structuring
+- **AI Recipe Generation**: Generate recipes from a list of ingredients or free-text prompts using Gemini AI
+- **Chat Interface**: Interactive recipe-focused conversations with AI
+- **Instruction Groups**: Support for organized instruction groups (e.g., "הכנת הבצק", "הגשה")
+- **Notes Support**: Extract tips, notes, and recommendations from recipes
+- **Security**: Rate limiting, CORS, security headers, and request validation
+- **Logging**: Comprehensive request logging with request IDs and performance tracking
+- **Docker Support**: Ready for containerized deployment on Google Cloud Run
 
 ## Prerequisites
 
 - Python 3.11 or higher
 - Google Gemini API key ([Get one here](https://makersuite.google.com/app/apikey))
+- BrightData API key (for web content fetching)
 
 ## Setup
 
@@ -46,6 +47,7 @@ cp env.example .env
 
 Edit `.env` and set:
 - `GEMINI_API_KEY`: Your Google Gemini API key
+- `BRIGHTDATA_API_KEY`: Your BrightData Web Unlocker API key
 - Adjust other settings as needed (see `env.example` for all options)
 
 ## Running the Server
@@ -63,7 +65,7 @@ The server will start on `http://localhost:8080`
 
 For production, use gunicorn with uvicorn workers:
 ```bash
-gunicorn app.main:app --workers 1 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8080
+gunicorn app.main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8080
 ```
 
 ### Docker
@@ -105,11 +107,6 @@ Once the server is running, interactive API documentation is available at:
   - Accepts: Form data with `ingredients` list
   - Returns: Generated recipe object
 
-#### Upload Image
-- **POST** `/recipes/upload-image`
-  - Accepts: Multipart form data with image file
-  - Returns: Image validation status and metadata
-
 ### Chat
 
 - **POST** `/chat`
@@ -122,14 +119,6 @@ Once the server is running, interactive API documentation is available at:
     }
     ```
   - Returns: Chat response with optional recipe
-    ```json
-    {
-      "response": "AI response text",
-      "model": "gemini-2.5-flash-lite",
-      "is_recipe": true,
-      "recipe": { ... }
-    }
-    ```
 
 ### Legacy Compatibility Endpoints
 
@@ -146,6 +135,7 @@ All configuration is done via environment variables (see `env.example`):
 
 ### Required
 - `GEMINI_API_KEY`: Google Gemini API key
+- `BRIGHTDATA_API_KEY`: BrightData Web Unlocker API key
 
 ### Optional
 - `PORT`: Server port (default: 8080)
@@ -156,6 +146,8 @@ All configuration is done via environment variables (see `env.example`):
 - `GEMINI_MODEL`: Gemini model to use (default: gemini-2.5-flash-lite)
 - `GEMINI_TEMPERATURE`: Model temperature (default: 0.3)
 - `GEMINI_MAX_TOKENS`: Max response tokens (default: 4096)
+- `GEMINI_MAX_CONTENT_CHARS`: Max characters of page content sent to Gemini (default: 25000)
+- `RATE_LIMIT_STORAGE_URI`: Rate limit storage backend (default: `memory://`, use `redis://host:port` for shared rate limiting across workers)
 
 ## Project Structure
 
@@ -163,31 +155,56 @@ All configuration is done via environment variables (see `env.example`):
 backend/
 ├── app/
 │   ├── api/
-│   │   ├── routes/          # API route handlers
-│   │   └── dependencies.py  # Dependency injection
-│   ├── core/                # Core utilities
-│   ├── middleware/          # Request middleware
-│   ├── models/              # Data models
-│   ├── services/            # Business logic services
-│   ├── utils/               # Utility functions
-│   ├── config.py            # Configuration
-│   └── main.py              # Application entry point
-├── tests/                   # Test files
-├── Dockerfile               # Docker configuration
-├── requirements.txt         # Python dependencies
-└── README.md               # This file
+│   │   ├── routes/              # API route handlers
+│   │   │   ├── chat.py          # Chat endpoint
+│   │   │   ├── health.py        # Health check endpoints
+│   │   │   ├── recipes.py       # Recipe extraction/generation endpoints
+│   │   │   ├── subscriptions.py # Subscription management
+│   │   │   └── webhooks.py      # Webhook handlers
+│   │   └── dependencies.py      # Dependency injection
+│   ├── core/                    # Core utilities (request ID)
+│   ├── middleware/               # Request middleware
+│   │   ├── logging.py           # Request/response logging
+│   │   ├── performance.py       # Performance tracking (slow request alerts)
+│   │   ├── rate_limit.py        # Rate limiting
+│   │   └── security.py          # Security headers, CORS
+│   ├── models/                  # Pydantic data models
+│   │   └── recipe.py            # Recipe model
+│   ├── services/                # Business logic services
+│   │   ├── scraper_service.py   # URL recipe extraction (BrightData + Gemini)
+│   │   ├── gemini_service.py    # Gemini API integration (image/text)
+│   │   ├── recipe_extractor.py  # High-level extraction orchestrator
+│   │   ├── food_detector.py     # Food image detection (MobileNetV2)
+│   │   └── subscriptions/       # Subscription management
+│   ├── utils/                   # Shared utility functions
+│   │   ├── gemini_helpers.py    # Schema cleaning & caching for Gemini API
+│   │   ├── recipe_normalization.py # Unified recipe data normalization
+│   │   ├── validators.py        # URL validation
+│   │   ├── exceptions.py        # Custom exception classes
+│   │   └── logging_config.py    # Logging setup
+│   ├── config.py                # Configuration (pydantic-settings)
+│   └── main.py                  # Application entry point
+├── tests/                       # Test files
+├── Dockerfile                   # Docker configuration
+├── cloudbuild.yaml              # Google Cloud Build config
+├── requirements.txt             # Python dependencies
+├── env.example                  # Environment variable template
+└── README.md                    # This file
 ```
 
 ## How It Works
 
 ### Recipe Extraction from URLs
 
-The backend uses Google's Gemini API with the `url_context` tool to directly fetch and extract recipes from URLs. This eliminates the need for traditional web scraping:
+The backend uses a multi-strategy approach for extracting recipes from URLs:
 
-1. **Direct URL Processing**: Gemini fetches the URL content automatically
-2. **Intelligent Extraction**: AI extracts recipe data while preserving exact text
-3. **Structured Output**: Returns JSON with ingredients, instructions, notes, and instruction groups
-4. **Hebrew Support**: Optimized prompts for Hebrew recipe extraction
+1. **JSON-LD Fast Path**: If the page contains structured JSON-LD recipe data, it's extracted directly without needing the LLM -- this is the fastest and cheapest path.
+2. **BrightData HTML Fetching**: For pages without JSON-LD, BrightData Web Unlocker fetches the page HTML (handles JavaScript rendering, anti-bot protections).
+3. **Content Extraction**: HTML is parsed with BeautifulSoup and Trafilatura to extract the main content.
+4. **Gemini Structuring**: The extracted text is sent to Gemini with a strict JSON schema to produce structured recipe data.
+5. **Social Media Fallback**: For Instagram/TikTok/Facebook, a dedicated extraction path handles these platforms.
+
+All paths produce normalized output through a shared `normalize_recipe_data()` function that handles edge cases, Hebrew unit repair, and schema conformance.
 
 ### Recipe Model
 
@@ -195,7 +212,8 @@ Recipes support:
 - **Ingredient Groups**: Organized ingredient lists (e.g., "לבסיס", "לקרם")
 - **Instruction Groups**: Organized instruction sections (e.g., "הכנת הבצק", "הגשה")
 - **Notes**: Tips, recommendations, and additional information
-- **Flat Lists**: Both grouped and flat lists for maximum compatibility
+- **Nutrition**: Calories, protein, fat, and carbs per serving
+- **Images**: Filtered and validated image URLs
 
 ## Development
 
@@ -210,7 +228,7 @@ pytest tests/
 The project uses:
 - FastAPI for the web framework
 - Pydantic for data validation
-- Google Genai SDK (new API) for Gemini integration
+- Google Genai SDK for Gemini integration
 - SlowAPI for rate limiting
 - Structured logging with request IDs
 
@@ -219,9 +237,10 @@ The project uses:
 ### Google Cloud Run
 
 The project is configured for Google Cloud Run deployment:
-- Dockerfile included
+- Dockerfile with pre-downloaded MobileNetV2 model
 - Health check endpoints configured
 - Environment variables via Cloud Run configuration
+- Minimum 1 instance to reduce cold starts
 
 Build and deploy:
 ```bash
@@ -235,10 +254,11 @@ The API uses structured error responses with:
 - Error messages
 - Request IDs for tracking
 - Detailed error information in development
+- Hard timeouts on URL extraction (120s) and Gemini API calls (90s) to prevent hung requests
 
 ## Rate Limiting
 
-Rate limiting is enabled by default (100 requests/hour per IP). Adjust via `RATE_LIMIT_PER_HOUR` environment variable.
+Rate limiting is enabled by default (100 requests/hour per IP). Adjust via `RATE_LIMIT_PER_HOUR` environment variable. For multi-worker deployments, set `RATE_LIMIT_STORAGE_URI` to a Redis URL for shared state.
 
 ## CORS
 

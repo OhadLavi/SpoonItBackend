@@ -37,9 +37,13 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash-lite"
     gemini_temperature: float = 0.3
     gemini_max_tokens: int = 4096
+    gemini_max_content_chars: int = 25000  # Max chars of page content sent to Gemini
+
+    # Rate Limiting Storage
+    rate_limit_storage_uri: str = "memory://"  # Use "redis://host:port" for shared rate limiting
 
     # Worker Settings
-    workers: int = 4  # Number of Gunicorn workers
+    workers: int = 2  # Number of Gunicorn workers (2 for 1 CPU Cloud Run instance)
     worker_timeout: int = 120  # Worker timeout in seconds
 
     model_config = SettingsConfigDict(

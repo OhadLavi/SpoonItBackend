@@ -9,7 +9,6 @@ from pydantic import BaseModel
 from app.api.dependencies import get_recipe_extractor
 from app.core.request_id import get_request_id
 from app.middleware.rate_limit import rate_limit_dependency
-from app.models.recipe import Recipe
 from app.services.recipe_extractor import RecipeExtractor
 from app.utils.exceptions import GeminiError, ValidationError
 
@@ -133,27 +132,7 @@ async def chat(
         
         full_prompt = "\n\n".join(prompt_parts)
         
-        # Try to extract/generate recipe from the message
-        # For now, we'll treat all messages as potential recipe requests
         try:
-            # Try to generate a recipe from the message
-            # We pass the full prompt as the "ingredients" list to the extractor for now, 
-            # as the extractor expects a list of strings. 
-            # Ideally, the extractor should have a dedicated method for chat-based generation.
-            # But for this implementation, we rely on the extractor's ability to handle the prompt.
-            # A better approach would be to have a dedicated chat method in GeminiService.
-            # However, to minimize refactoring risk, we'll use the existing flow but with the enhanced prompt.
-            
-            # NOTE: The current recipe_extractor.generate_from_ingredients might be too specific 
-            # (it wraps input in "Create a recipe with these ingredients...").
-            # We might need to bypass it or adjust it. 
-            # Let's check recipe_extractor.py again.
-            
-            # Actually, let's look at how we can use the history better.
-            # The recipe_extractor.generate_from_ingredients calls gemini_service.generate_recipe.
-            # Let's see if we can pass the full prompt there.
-            
-            # Use the new generate_from_text method which accepts the full prompt directly
             recipe = await recipe_extractor.generate_from_text(full_prompt)
             
             return ChatResponse(
