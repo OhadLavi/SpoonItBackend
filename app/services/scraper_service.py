@@ -14,7 +14,8 @@ from bs4 import BeautifulSoup
 from google import genai
 from google.genai import types
 from markdownify import markdownify
-from playwright.async_api import async_playwright, TimeoutError as PWTimeoutError
+import os
+from playwright.async_api import async_playwright, TimeoutError as PWTimeoutError, Browser, Playwright
 
 try:
     import trafilatura
@@ -180,6 +181,91 @@ def clean_text(s: str) -> str:
 # =========================================================
 # Headless social extraction
 # =========================================================
+
+MAX_CONCURRENT_PAGES = int(os.getenv("MAX_PLAYWRIGHT_PAGES", "8"))
+
+class PlaywrightBrowserManager:
+    _instance = None
+
+    def __init__(self):
+        self._playwright: Optional[Playwright] = None
+        self._browser: Optional[Browser] = None
+        self._lock = asyncio.Lock()
+        self._semaphore = asyncio.Semaphore(MAX_CONCURRENT_PAGES)
+
+    @classmethod
+    def get_instance(cls) -> "PlaywrightBrowserManager":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    async def get_browser(self) -> Browser:
+        async with self._lock:
+            if self._browser is None or not self._browser.is_connected():
+                # Cleanup existing if broken
+                await self._shutdown_internal()
+
+                try:
+                    self._playwright = await async_playwright().start()
+                    self._browser = await self._playwright.chromium.launch(
+                        headless=True,
+                        args=[
+                            "--no-sandbox",
+                            "--disable-dev-shm-usage",
+                            "--disable-gpu",
+                            "--disable-software-rasterizer",
+                            "--disable-extensions",
+                            "--disable-background-networking",
+                            "--disable-background-timer-throttling",
+                            "--disable-backgrounding-occluded-windows",
+                            "--disable-breakpad",
+                            "--disable-component-extensions-with-background-pages",
+                            "--disable-features=TranslateUI",
+                            "--disable-ipc-flooding-protection",
+                            "--disable-renderer-backgrounding",
+                            "--disable-sync",
+                            "--metrics-recording-only",
+                            "--mute-audio",
+                            "--no-first-run",
+                            "--no-default-browser-check",
+                            "--no-pings",
+                            "--disable-font-subpixel-positioning",
+                            "--disable-lcd-text",
+                            "--font-render-hinting=none",
+                        ],
+                    )
+                except Exception as e:
+                    await self._shutdown_internal()
+                    raise e
+            return self._browser
+
+    async def acquire_permit(self):
+        await self._semaphore.acquire()
+
+    def release_permit(self):
+        self._semaphore.release()
+
+    async def shutdown(self):
+        async with self._lock:
+            await self._shutdown_internal()
+
+    async def _shutdown_internal(self):
+        if self._browser:
+            try:
+                await self._browser.close()
+            except Exception:
+                pass
+            self._browser = None
+        if self._playwright:
+            try:
+                await self._playwright.stop()
+            except Exception:
+                pass
+            self._playwright = None
+
+def get_browser_manager() -> PlaywrightBrowserManager:
+    return PlaywrightBrowserManager.get_instance()
+
 @dataclass
 class SocialExtract:
     title: str
@@ -200,145 +286,111 @@ class SocialExtract:
 
 
 async def extract_social_text_headless(url: str, timeout_ms: int = 8000) -> SocialExtract:
+    browser_manager = get_browser_manager()
+    await browser_manager.acquire_permit()
+    context = None
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                    "--disable-software-rasterizer",
-                    "--disable-extensions",
-                    "--disable-background-networking",
-                    "--disable-background-timer-throttling",
-                    "--disable-backgrounding-occluded-windows",
-                    "--disable-breakpad",
-                    "--disable-component-extensions-with-background-pages",
-                    "--disable-features=TranslateUI",
-                    "--disable-ipc-flooding-protection",
-                    "--disable-renderer-backgrounding",
-                    "--disable-sync",
-                    "--metrics-recording-only",
-                    "--mute-audio",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "--no-pings",
-                    "--disable-font-subpixel-positioning",
-                    "--disable-lcd-text",
-                    "--font-render-hinting=none",
-                ],
+        browser = await browser_manager.get_browser()
+
+        context = await browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/123.0.0.0 Safari/537.36"
+            ),
+            locale="he-IL",
+            viewport={"width": 800, "height": 600},  # Smaller viewport
+            java_script_enabled=True,
+            ignore_https_errors=True,
+            # Disable fonts to prevent crashes
+            extra_http_headers={"Accept-Language": "he-IL,he;q=0.9"},
+        )
+
+        page = await context.new_page()
+        page.set_default_timeout(timeout_ms)
+
+        # Block images, fonts, media to save memory
+        async def route_handler(route):
+            if route.request.resource_type in ["image", "font", "media", "stylesheet"]:
+                await route.abort()
+            else:
+                await route.continue_()
+
+        await page.route("**/*", route_handler)
+
+        # Use asyncio timeout to prevent hanging
+        try:
+            await asyncio.wait_for(
+                page.goto(url, wait_until="domcontentloaded", timeout=5000),
+                timeout=6.0
             )
+        except (PWTimeoutError, asyncio.TimeoutError):
+            pass
 
-            context = await browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/123.0.0.0 Safari/537.36"
-                ),
-                locale="he-IL",
-                viewport={"width": 800, "height": 600},  # Smaller viewport
-                java_script_enabled=True,
-                ignore_https_errors=True,
-                # Disable fonts to prevent crashes
-                extra_http_headers={"Accept-Language": "he-IL,he;q=0.9"},
+        # Skip networkidle wait - too memory intensive, just wait a short time
+        try:
+            await asyncio.sleep(0.5)  # Brief wait instead of networkidle
+        except Exception:
+            pass
+
+        async def get_meta(prop: str = "", name: str = "") -> str:
+            try:
+                sel = f'meta[property="{prop}"]' if prop else f'meta[name="{name}"]'
+                loc = page.locator(sel)
+                count = await loc.count()
+                if count > 0:
+                    return (await loc.first.get_attribute("content") or "").strip()
+            except Exception:
+                pass
+            return ""
+
+        title = await get_meta(prop="og:title") or await page.title()
+
+        # description removed as per request
+        description = ""
+
+
+        # Get visible text (simplified to avoid crashes)
+        try:
+            visible_text = await asyncio.wait_for(
+                page.locator("body").inner_text(timeout=2000),
+                timeout=3.0
             )
+        except Exception:
+            visible_text = ""
 
-            page = await context.new_page()
-            page.set_default_timeout(timeout_ms)
-            
-            # Block images, fonts, media to save memory
-            async def route_handler(route):
-                if route.request.resource_type in ["image", "font", "media", "stylesheet"]:
-                    await route.abort()
-                else:
-                    await route.continue_()
-            
-            await page.route("**/*", route_handler)
+        # Get caption from meta tags first (more reliable)
+        caption = description or ""
 
-            # Use asyncio timeout to prevent hanging
+        # Try to get caption from page content (simplified)
+        if not caption:
             try:
-                await asyncio.wait_for(
-                    page.goto(url, wait_until="domcontentloaded", timeout=5000),
-                    timeout=6.0
-                )
-            except (PWTimeoutError, asyncio.TimeoutError):
-                pass
-
-            # Skip networkidle wait - too memory intensive, just wait a short time
-            try:
-                await asyncio.sleep(0.5)  # Brief wait instead of networkidle
+                domain = urlparse(url).netloc.lower()
+                if "instagram.com" in domain:
+                    # Try simple selectors
+                    try:
+                        loc = page.locator('article h1')
+                        count = await asyncio.wait_for(loc.count(), timeout=1.0)
+                        if count > 0:
+                            caption = (await asyncio.wait_for(loc.first.inner_text(timeout=1000), timeout=1.5) or "").strip()
+                    except Exception:
+                        pass
+                else:  # TikTok
+                    try:
+                        loc = page.locator('[data-e2e="video-desc"]')
+                        count = await asyncio.wait_for(loc.count(), timeout=1.0)
+                        if count > 0:
+                            caption = (await asyncio.wait_for(loc.first.inner_text(timeout=1000), timeout=1.5) or "").strip()
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
-            async def get_meta(prop: str = "", name: str = "") -> str:
-                try:
-                    sel = f'meta[property="{prop}"]' if prop else f'meta[name="{name}"]'
-                    loc = page.locator(sel)
-                    count = await loc.count()
-                    if count > 0:
-                        return (await loc.first.get_attribute("content") or "").strip()
-                except Exception:
-                    pass
-                return ""
-
-            title = await get_meta(prop="og:title") or await page.title()
-            
-            # description removed as per request
-            description = ""
-
-
-            # Get visible text (simplified to avoid crashes)
-            try:
-                visible_text = await asyncio.wait_for(
-                    page.locator("body").inner_text(timeout=2000),
-                    timeout=3.0
-                )
-            except Exception:
-                visible_text = ""
-
-            # Get caption from meta tags first (more reliable)
-            caption = description or ""
-            
-            # Try to get caption from page content (simplified)
-            if not caption:
-                try:
-                    domain = urlparse(url).netloc.lower()
-                    if "instagram.com" in domain:
-                        # Try simple selectors
-                        try:
-                            loc = page.locator('article h1')
-                            count = await asyncio.wait_for(loc.count(), timeout=1.0)
-                            if count > 0:
-                                caption = (await asyncio.wait_for(loc.first.inner_text(timeout=1000), timeout=1.5) or "").strip()
-                        except Exception:
-                            pass
-                    else:  # TikTok
-                        try:
-                            loc = page.locator('[data-e2e="video-desc"]')
-                            count = await asyncio.wait_for(loc.count(), timeout=1.0)
-                            if count > 0:
-                                caption = (await asyncio.wait_for(loc.first.inner_text(timeout=1000), timeout=1.5) or "").strip()
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-
-            # Close browser resources with error handling
-            try:
-                await context.close()
-            except Exception:
-                pass
-            try:
-                await browser.close()
-            except Exception:
-                pass
-
-            return SocialExtract(
-                title=title or "",
-                caption=caption or "",
-                visible_text=visible_text or "",
-            )
+        return SocialExtract(
+            title=title or "",
+            caption=caption or "",
+            visible_text=visible_text or "",
+        )
 
     except Exception as e:
         # If browser crashes, return minimal data and let fallback handle it
@@ -348,6 +400,13 @@ async def extract_social_text_headless(url: str, timeout_ms: int = 8000) -> Soci
             caption="",
             visible_text="",
         )
+    finally:
+        if context:
+            try:
+                await context.close()
+            except Exception:
+                pass
+        browser_manager.release_permit()
 
 
 
